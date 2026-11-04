@@ -1,0 +1,16 @@
+[package]
+name = "ferrule-lang-html"
+description = "HTML language support (later Vue/Svelte embedding): grammars, queries and in-process features."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrule-syntax.workspace = true
+
+[lints]
+workspace = true

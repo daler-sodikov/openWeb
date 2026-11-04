@@ -1,0 +1,20 @@
+[package]
+name = "ferrule-indexer"
+description = "Incremental project indexing (files, symbols) with an on-disk cache."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrule-project.workspace = true
+ferrule-vfs.workspace = true
+ferrule-lang-js.workspace = true
+ferrule-lang-css.workspace = true
+ferrule-lang-html.workspace = true
+
+[lints]
+workspace = true

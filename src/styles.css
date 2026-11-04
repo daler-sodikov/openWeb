@@ -1,0 +1,75 @@
+/* Ferrule original theme tokens. Dark is the default; light follows the OS. */
+:root {
+  color-scheme: dark light;
+  --fr-bg: #16181d;
+  --fr-surface: #1e2128;
+  --fr-text: #d9dde6;
+  --fr-text-muted: #8a91a0;
+  --fr-accent: #d08a3a;
+  --fr-danger: #e0645c;
+  --fr-font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --fr-bg: #f6f5f2;
+    --fr-surface: #ffffff;
+    --fr-text: #1f2329;
+    --fr-text-muted: #5d6470;
+    --fr-accent: #9a5a12;
+    --fr-danger: #b3261e;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--fr-bg);
+  color: var(--fr-text);
+  font-family: var(--fr-font-ui);
+  font-size: 13px;
+}
+
+.shell-main {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.shell-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.shell-name {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--fr-accent);
+}
+
+.shell-version,
+.shell-status {
+  color: var(--fr-text-muted);
+}
+
+.shell-fatal {
+  margin: 24px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--fr-danger);
+  background: var(--fr-surface);
+  white-space: pre-wrap;
+}

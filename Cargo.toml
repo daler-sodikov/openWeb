@@ -1,0 +1,67 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "src-tauri"]
+default-members = ["crates/*", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+repository = "https://github.com/ferrule-ide/ferrule"
+authors = ["Ferrule contributors"]
+publish = false
+
+[workspace.dependencies]
+# internal crates
+ferrule-buffer = { path = "crates/buffer" }
+ferrule-vfs = { path = "crates/vfs" }
+ferrule-settings = { path = "crates/settings" }
+ferrule-project = { path = "crates/project" }
+ferrule-syntax = { path = "crates/syntax" }
+ferrule-lang-js = { path = "crates/lang-js" }
+ferrule-lang-css = { path = "crates/lang-css" }
+ferrule-lang-html = { path = "crates/lang-html" }
+ferrule-indexer = { path = "crates/indexer" }
+ferrule-search = { path = "crates/search" }
+ferrule-lsp-client = { path = "crates/lsp-client" }
+ferrule-dap-client = { path = "crates/dap-client" }
+ferrule-git = { path = "crates/git" }
+ferrule-terminal = { path = "crates/terminal" }
+ferrule-run-debug = { path = "crates/run-debug" }
+ferrule-plugin-host = { path = "crates/plugin-host" }
+ferrule-ipc = { path = "crates/ipc" }
+ferrule-core = { path = "crates/core" }
+
+# external crates (versions chosen in M0; see THIRD_PARTY_LICENSES.md)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tauri = "2.12"
+tauri-build = "2.7"
+# Pre-release crates: pinned with `=` as required by tauri-specta during its RC phase.
+specta = { version = "=2.0.0-rc.26", features = ["derive"] }
+specta-typescript = "=0.0.13"
+tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
+tempfile = "3"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "deny"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

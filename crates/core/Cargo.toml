@@ -1,0 +1,32 @@
+[package]
+name = "ferrule-core"
+description = "Application core: sessions, services and the wiring between all domain crates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrule-ipc.workspace = true
+ferrule-buffer.workspace = true
+ferrule-vfs.workspace = true
+ferrule-settings.workspace = true
+ferrule-project.workspace = true
+ferrule-syntax.workspace = true
+ferrule-lang-js.workspace = true
+ferrule-lang-css.workspace = true
+ferrule-lang-html.workspace = true
+ferrule-indexer.workspace = true
+ferrule-search.workspace = true
+ferrule-lsp-client.workspace = true
+ferrule-dap-client.workspace = true
+ferrule-git.workspace = true
+ferrule-terminal.workspace = true
+ferrule-run-debug.workspace = true
+ferrule-plugin-host.workspace = true
+
+[lints]
+workspace = true

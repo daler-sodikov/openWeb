@@ -1,0 +1,16 @@
+[package]
+name = "ferrule-lang-js"
+description = "JavaScript/TypeScript/JSX/TSX language support: grammars, queries and oxc-based in-process features."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrule-syntax.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+# Rust
+/target/
+
+# JS
+/node_modules/
+/dist/
+
+# Generated, never committed (see docs/ARCHITECTURE.md, section 3.2)
+/src/ipc/bindings.ts
+/src-tauri/gen/
+
+# Test output
+/test-results/
+/playwright-report/
+
+# OS / editor noise
+.DS_Store
+*.log

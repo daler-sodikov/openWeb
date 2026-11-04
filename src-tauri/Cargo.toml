@@ -1,0 +1,44 @@
+[package]
+name = "ferrule-app"
+description = "Ferrule desktop shell: Tauri window setup and the typed IPC command layer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+default-run = "ferrule"
+
+[lib]
+name = "ferrule_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "ferrule"
+path = "src/main.rs"
+
+[[bin]]
+name = "export-bindings"
+path = "src/bin/export_bindings.rs"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+ferrule-core.workspace = true
+ferrule-ipc.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+specta.workspace = true
+specta-typescript.workspace = true
+tauri.workspace = true
+tauri-specta.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

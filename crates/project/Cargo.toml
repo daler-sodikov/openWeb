@@ -1,0 +1,18 @@
+[package]
+name = "ferrule-project"
+description = "Project model: roots, ignore rules, package.json/tsconfig discovery, workspaces, open documents, recent files."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrule-vfs.workspace = true
+ferrule-buffer.workspace = true
+ferrule-settings.workspace = true
+
+[lints]
+workspace = true

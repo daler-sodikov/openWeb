@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Ferrule app icon. Original artwork, Apache-2.0 with the project. -->
+  <defs>
+    <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#9a5a12"/>
+      <stop offset="0.45" stop-color="#e8a85a"/>
+      <stop offset="1" stop-color="#8a4f10"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="200" fill="#16181d"/>
+  <!-- the ferrule: a metal band seen from the side -->
+  <path d="M272 360 h480 v304 h-480 z" fill="url(#band)"/>
+  <ellipse cx="512" cy="360" rx="240" ry="56" fill="#f2c38a"/>
+  <ellipse cx="512" cy="664" rx="240" ry="56" fill="#8a4f10"/>
+  <path d="M272 452 h480 M272 572 h480" stroke="#16181d" stroke-opacity="0.35" stroke-width="18"/>
+  <!-- code slash -->
+  <path d="M600 248 L424 776" stroke="#d9dde6" stroke-width="64" stroke-linecap="round"/>
+</svg>

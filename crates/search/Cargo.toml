@@ -1,0 +1,17 @@
+[package]
+name = "ferrule-search"
+description = "Fuzzy file/symbol/action matching, regex find/replace in files and Search Everywhere aggregation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrule-indexer.workspace = true
+ferrule-vfs.workspace = true
+
+[lints]
+workspace = true

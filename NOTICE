@@ -1,0 +1,14 @@
+Ferrule
+Copyright 2026 The Ferrule contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Ferrule is not affiliated with, endorsed by, or sponsored by JetBrains s.r.o.
+"WebStorm", "IntelliJ" and "JetBrains" are trademarks of JetBrains s.r.o. and
+are used in project documentation only to describe compatibility of workflow
+and keymap.
+
+This product includes third-party software. Their licenses and any required
+notices are listed in THIRD_PARTY_LICENSES.md. No third-party source code is
+copied into this repository; all third-party components are consumed as
+unmodified dependencies through crates.io and the npm registry.

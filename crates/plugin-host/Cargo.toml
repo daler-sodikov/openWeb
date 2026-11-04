@@ -1,0 +1,16 @@
+[package]
+name = "ferrule-plugin-host"
+description = "WASM component-model plugin host (wasmtime) for plugins built against wit/."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrule-settings.workspace = true
+
+[lints]
+workspace = true

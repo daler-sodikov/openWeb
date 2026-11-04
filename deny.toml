@@ -1,0 +1,58 @@
+# cargo-deny configuration. Run `cargo deny check` before every commit.
+# Policy: permissive licenses only. Every exception below needs a reason.
+
+[graph]
+all-features = false
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+  # Both are transitive, compile-time-only proc-macro crates we cannot replace
+  # without leaving Tauri v2 / specta. Re-check when upgrading those.
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error: build-time only, via gtk3-rs glib-macros used by Tauri on Linux" },
+  { id = "RUSTSEC-2024-0436", reason = "paste: build-time only proc macro, via specta (typed IPC)" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "Zlib",
+  "Unicode-3.0",
+  "CC0-1.0",
+]
+
+# MPL-2.0 is file-level copyleft, not permissive. These crates are pulled in
+# by Tauri itself (HTML parsing in tauri-utils, `dirs`), are used unmodified,
+# and their source is available on crates.io, which satisfies MPL-2.0 for
+# binary distribution. Listed per crate so nothing else slips in. Recorded in
+# THIRD_PARTY_LICENSES.md.
+exceptions = [
+  { allow = ["MPL-2.0"], crate = "cssparser" },
+  { allow = ["MPL-2.0"], crate = "cssparser-macros" },
+  { allow = ["MPL-2.0"], crate = "dtoa-short" },
+  { allow = ["MPL-2.0"], crate = "selectors" },
+  { allow = ["MPL-2.0"], crate = "option-ext" },
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
