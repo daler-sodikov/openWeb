@@ -228,6 +228,10 @@ Update this section at the end of every milestone.
 - [x] M2b: split editors, breadcrumbs, folding, brackets, EditorConfig,
       more languages, perf harness (2026-11-04; see docs/ROADMAP.md M2b and
       perf/RESULTS.md: four budgets missed on Xvfb)
-- [ ] M3: LSP client + TypeScript intelligence
+- [x] M3a: LSP client, diagnostics, hover, go to definition
+      (2026-11-05; checks pass locally on Linux with the real
+      typescript-language-server; see docs/ROADMAP.md M3a)
+- [ ] M3b: completion, signature help, usages, rename, code actions,
+      formatting, oxc fast path
 - [ ] M4: terminal, Git basics
 - [ ] M5: run/debug, test runner

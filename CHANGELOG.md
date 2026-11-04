@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M3a: language server, diagnostics, hover, navigation)
+
+- TypeScript/JavaScript intelligence through `typescript-language-server`,
+  one per project, started when the first JS/TS file opens. Found in the
+  project's `node_modules/.bin`, the user setting `typescript.serverPath`
+  (`settings.json` in the app config directory), or `PATH`; a missing server
+  or Node.js is shown in the status bar and the editor keeps working.
+- `lsp-client`: JSON-RPC over stdio with request ids and cancellation
+  (`$/cancelRequest`), initialize/shutdown, UTF-16 positions, restart with
+  backoff after a crash, stderr to the log, debounced incremental
+  `didChange` driven by the Rust buffer.
+- Diagnostics as squiggles (error, warning, info, hint) with the message on
+  hover; Problems tool window (Alt+6, macOS Cmd+6) grouped by file; error
+  and warning counts in the status bar.
+- Quick Documentation (Ctrl+Q, macOS F1) and documentation on mouse hover,
+  rendered from Markdown and sanitized in Rust, with highlighted code.
+- Go to Declaration (Ctrl/Cmd+B, Ctrl/Cmd+Click), Go to Type Declaration
+  (Ctrl/Cmd+Shift+B) and Go to Implementation (Ctrl/Cmd+Alt+B), with a
+  chooser for several targets.
+- Server status in the status bar (starting, indexing, ready, restarting,
+  error, not found) with details in the tooltip (server, TypeScript
+  version, tsconfig files, workspace packages); "Restart TypeScript
+  Server" action.
+- Detection of `tsconfig`/`jsconfig` files and npm, Yarn, pnpm and Bun
+  workspace packages.
+
+### Fixed (M3a)
+
+- Windows build: `tree-sitter-scss` passed a GCC-only flag to MSVC; the
+  crate is vendored with the upstream fix (`third_party/tree-sitter-scss`).
+
 ### Added (M2b: editor polish)
 
 - Split editors: "Split Right" opens the current file in a second group;

@@ -448,7 +448,7 @@ version, offset, kind)` (`kind`: `definition`, `typeDefinition`,
 `implementation`) → `NavTarget[]` (`path`, `line`, `column`, `preview`);
 `doc_diagnostics(docId)` → `DocDiagnostics`; `problems()` →
 `FileProblems[]`; `language_servers()` → `ServerStatus[]`;
-`restart_language_server()`. Events: `server-status` (`ServerStatus`:
+`restart_language_server()`. Events: `server-status-changed` (`ServerStatus`:
 name, state, message, detail) and `problems-changed` (`FileProblems`).
 Targets outside the project root are returned but cannot be opened yet.
 

@@ -255,34 +255,34 @@ Before M3a: the M2b Windows CI job failed (`tree-sitter-scss` passes a GCC
 flag to MSVC); fixed by vendoring the crate with the upstream build-script
 fix (`third_party/tree-sitter-scss`).
 
-### M3a: LSP client, diagnostics, hover, definition
+### M3a: LSP client, diagnostics, hover, definition (done)
 
 Plan:
 
-- [ ] `lsp-client`: Content-Length framing over any async stream, JSON-RPC
+- [x] `lsp-client`: Content-Length framing over any async stream, JSON-RPC
       requests with ids, `$/cancelRequest` driven by a `CancellationToken`,
       server→client requests answered, initialize/initialized/shutdown/exit,
       capability negotiation (UTF-16 positions), stderr to `tracing`,
       supervisor that restarts a crashed server with backoff, debounced
       incremental `didChange`, executable discovery
-- [ ] `fake-lsp-server` (test-only binary in `lsp-client`): scripted server
+- [x] `fake-lsp-server` (test-only binary in `lsp-client`): scripted server
       that rebuilds the text from incremental changes, honours cancellation,
       publishes diagnostics and can crash on request
-- [ ] `buffer`: every applied edit also yields an LSP-shaped change (line +
+- [x] `buffer`: every applied edit also yields an LSP-shaped change (line +
       UTF-16 column, in application order)
-- [ ] `project`: tsconfig/jsconfig files and npm/pnpm/yarn workspace packages
-- [ ] `lang-js`: the TypeScript server definition (program, args, language
+- [x] `project`: tsconfig/jsconfig files and npm/pnpm/yarn workspace packages
+- [x] `lang-js`: the TypeScript server definition (program, args, language
       ids per file type)
-- [ ] `settings`: user settings file with `typescript.serverPath`
-- [ ] `core`: one TypeScript server per project, started on the first JS/TS
+- [x] `settings`: user settings file with `typescript.serverPath`
+- [x] `core`: one TypeScript server per project, started on the first JS/TS
       document, document sync from the Rust buffer, diagnostics store, hover
       (Markdown rendered and sanitized in Rust, code highlighted by
       tree-sitter), definition/type definition/implementation, status events
-- [ ] Frontend: squiggles with hover messages, Problems tool window, Quick
+- [x] Frontend: squiggles with hover messages, Problems tool window, Quick
       Documentation popup and mouse hover, Go to Definition (Ctrl+B,
       Ctrl+Click), Type Definition, Implementation, chooser popup, status
       bar server state and problem counts
-- [ ] CI installs Node, `typescript-language-server` and `typescript` so the
+- [x] CI installs Node, `typescript-language-server` and `typescript` so the
       real-server tests run on all three OSes
 
 **Done when:**
@@ -332,6 +332,21 @@ Plan:
    print a reason and skip when it is not installed; Playwright `ui` tests
    on `fixtures/react-ts` for 4, 5 and 6 with the real server and for 1
    (server missing); all checks pass with zero warnings.
+
+Status: points 1–8 verified on 2026-11-05 on Linux, with
+typescript-language-server 6.0.3 and TypeScript 6.0.3 (Bun global install),
+Node 24. The real-server Rust and Playwright tests ran against that server;
+CI installs the same versions. Not yet confirmed on macOS/Windows CI (needs a
+push).
+
+Known gaps found in M3a (tracked here):
+
+- [ ] Opening navigation targets outside the project (e.g. `lib.dom.d.ts`)
+- [ ] Links in hover documentation are shown but do not open the browser
+- [ ] `fixtures/react-ts` has no `node_modules`, so React imports show
+      "Cannot find module" errors until `bun install` is run in it
+- [ ] Diagnostics of files that are not open are not requested
+      (pull diagnostics / project-wide check)
 
 ### M3b: completion, refactoring, code actions (after M3a)
 
