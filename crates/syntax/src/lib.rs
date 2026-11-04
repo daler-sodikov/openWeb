@@ -1,5 +1,28 @@
-//! Shared tree-sitter machinery: incremental parsing, highlighting, folding, bracket pairs, language registry.
+//! Shared tree-sitter machinery: language definitions, a registry keyed by
+//! file extension, incremental parsing straight from the rope, and
+//! highlighting as flat token spans.
 //!
-//! Empty in M0: the crate exists so the workspace layout and dependency
-//! graph from `docs/ARCHITECTURE.md` are in place. Its scope and milestone
-//! are listed in `docs/ROADMAP.md`.
+//! When several patterns capture the same node, the language's
+//! [`Precedence`] decides which wins; inner nodes always override outer ones.
+//! Captures that map to no token class (e.g. `@variable`) reset the color of
+//! their node to plain text.
+
+mod highlight;
+mod registry;
+mod tree;
+
+pub use highlight::{HighlightSpan, TokenClass, render_spans};
+pub use registry::{HighlightLanguage, LanguageDef, LanguageRegistry, Precedence, SyntaxError};
+pub use tree::SyntaxTree;
+
+use std::sync::Arc;
+
+/// Highlights a whole text with `def` and renders the spans with
+/// [`render_spans`]. Used by the golden tests of the `lang-*` crates.
+pub fn render_highlights(def: LanguageDef, text: &str) -> Result<String, SyntaxError> {
+    let language = Arc::new(HighlightLanguage::new(def)?);
+    let mut tree = SyntaxTree::new(language)?;
+    let rope = ferrule_buffer::Rope::from_str(text);
+    let spans = tree.highlight(&rope, 0..rope.len_bytes());
+    Ok(render_spans(&rope, &spans))
+}

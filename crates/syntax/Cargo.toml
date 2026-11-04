@@ -11,6 +11,12 @@ publish.workspace = true
 
 [dependencies]
 ferrule-buffer.workspace = true
+streaming-iterator.workspace = true
+thiserror.workspace = true
+tree-sitter.workspace = true
+
+[dev-dependencies]
+tree-sitter-json.workspace = true
 
 [lints]
 workspace = true
