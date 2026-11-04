@@ -14,6 +14,8 @@ pub fn css() -> LanguageDef {
         language: tree_sitter_css::LANGUAGE.into(),
         highlight_queries: vec![tree_sitter_css::HIGHLIGHTS_QUERY],
         precedence: Precedence::FirstWins,
+        tags_queries: Vec::new(),
+        markup_indent: false,
     }
 }
 

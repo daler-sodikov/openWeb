@@ -201,6 +201,8 @@ mod tests {
                 language: tree_sitter_json::LANGUAGE.into(),
                 highlight_queries: vec![tree_sitter_json::HIGHLIGHTS_QUERY],
                 precedence: Precedence::FirstWins,
+                tags_queries: Vec::new(),
+                markup_indent: false,
             })
             .unwrap(),
         )

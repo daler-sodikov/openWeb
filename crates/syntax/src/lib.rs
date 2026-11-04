@@ -9,10 +9,12 @@
 
 mod highlight;
 mod registry;
+mod symbols;
 mod tree;
 
 pub use highlight::{HighlightSpan, TokenClass, render_spans};
 pub use registry::{HighlightLanguage, LanguageDef, LanguageRegistry, Precedence, SyntaxError};
+pub use symbols::SymbolDef;
 pub use tree::SyntaxTree;
 
 use std::sync::Arc;
