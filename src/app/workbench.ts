@@ -1,7 +1,9 @@
-// Main window layout: toolbar, project tree, editor tabs, status bar.
+// Main window layout: toolbar, project tree, editor groups (split editors),
+// status bar.
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { EDITOR_ACTIONS, EditorTab, type EditorTabHost } from "../editor/editor-tab";
+import { DocModel, type DocHost } from "../editor/doc-model";
+import { EDITOR_ACTIONS, EditorPane, type PaneHost } from "../editor/editor-pane";
 import { DoubleTapDetector } from "../editor/gesture";
 import {
   commands,
@@ -33,12 +35,26 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-export class Workbench implements EditorTabHost {
-  private readonly tabs: EditorTab[] = [];
-  private active: EditorTab | null = null;
+/** At most this many editor groups side by side. */
+const MAX_GROUPS = 2;
+
+/** A column of the editor area with its own tabs. */
+interface EditorGroup {
+  element: HTMLElement;
+  tabBar: HTMLElement;
+  editors: HTMLElement;
+  panes: EditorPane[];
+  active: EditorPane | null;
+}
+
+export class Workbench implements PaneHost, DocHost {
+  private readonly groups: EditorGroup[] = [];
+  private focusedGroup: EditorGroup;
+  /** Open documents by path; panes in any group share them. */
+  private readonly docs = new Map<string, DocModel>();
+  private readonly opening = new Map<string, Promise<DocModel | null>>();
   private readonly tree: TreeView;
-  private readonly tabBar = el("div", "tabs", "tabs");
-  private readonly editors = el("div", "editors");
+  private readonly groupsEl = el("div", "editor-groups", "editor-groups");
   private readonly welcome = el("div", "welcome", "welcome");
   private readonly projectName = el("span", "toolbar-project", "project-name");
   private readonly statusPath = el("span", "status-path", "status-path");
@@ -47,7 +63,6 @@ export class Workbench implements EditorTabHost {
   private readonly statusLanguage = el("span", "status-language", "status-language");
   private readonly statusState = el("span", "status-state", "status-state");
   private readonly statusIndex = el("span", "status-index", "status-index");
-  private readonly opening = new Map<string, Promise<void>>();
   private readonly mac: boolean;
   private readonly doubleShift = new DoubleTapDetector("Shift");
   private popup: Popup | null = null;
@@ -86,10 +101,10 @@ export class Workbench implements EditorTabHost {
       },
     });
 
-    this.tabBar.setAttribute("role", "tablist");
+    this.focusedGroup = this.createGroup();
     this.renderWelcome();
     const main = el("section", "main");
-    main.append(this.tabBar, this.editors, this.welcome);
+    main.append(this.groupsEl, this.welcome);
 
     const body = el("div", "body");
     body.append(sidebar, main);
@@ -156,7 +171,11 @@ export class Workbench implements EditorTabHost {
 
   /** Runs an action from a shortcut or Search Everywhere. */
   runAction(action: KeyAction): void {
-    const tab = this.active;
+    const pane = this.active;
+    if (EDITOR_ACTIONS.has(action)) {
+      pane?.runAction(action);
+      return;
+    }
     switch (action) {
       case "searchEverywhere":
         this.openSearch("all");
@@ -180,13 +199,13 @@ export class Workbench implements EditorTabHost {
         }
         return;
       case "gotoLine":
-        if (tab) {
-          const state = tab.view.state;
+        if (pane) {
+          const state = pane.view.state;
           const line = state.doc.lineAt(state.selection.main.head);
           const current = `${String(line.number)}:${String(state.selection.main.head - line.from + 1)}`;
           this.showPopup(
             new GotoLine(current, (l, c) => {
-              tab.reveal(l, c);
+              pane.reveal(l, c);
             }),
           );
         }
@@ -200,29 +219,10 @@ export class Workbench implements EditorTabHost {
       case "openFolder":
         void this.pickFolder();
         return;
-      case "closeTab":
-        if (tab) this.closeTab(tab);
+      case "splitRight":
+        this.splitRight();
         return;
-      case "save":
-        void tab?.save();
-        return;
-      case "undo":
-        void tab?.undo();
-        return;
-      case "redo":
-        void tab?.redo();
-        return;
-      case "addCaretAbove":
-        void tab?.addCaret("up");
-        return;
-      case "addCaretBelow":
-        void tab?.addCaret("down");
-        return;
-      case "selectNextOccurrence":
-        void tab?.selectNextOccurrence();
-        return;
-      case "selectAllOccurrences":
-        void tab?.selectAllOccurrences();
+      default:
         return;
     }
   }
@@ -273,31 +273,35 @@ export class Workbench implements EditorTabHost {
     return text.includes("\n") ? "" : text;
   }
 
+  private get active(): EditorPane | null {
+    return this.focusedGroup.active;
+  }
+
   /** Opens a file and, if given, moves the caret to a zero-based line and column. */
   openLocation(path: string, line?: number, column?: number): void {
     void (async () => {
       await this.openFile(path);
-      const tab = this.tabs.find((t) => t.path === path);
-      if (tab && line !== undefined) tab.reveal(line, column ?? 0);
+      const pane = this.focusedGroup.panes.find((p) => p.path === path);
+      if (pane && line !== undefined) pane.reveal(line, column ?? 0);
     })();
   }
 
   async flushAll(): Promise<void> {
-    await Promise.all(this.tabs.map((t) => t.flush()));
+    await Promise.all([...this.docs.values()].map((d) => d.flush()));
   }
 
   async applyReplace(result: ReplaceResult): Promise<string[]> {
     const failures: string[] = [];
-    for (const doc of result.openDocuments) {
-      const tab = this.tabs.find((t) => t.docId === doc.docId);
-      if (!tab) {
-        failures.push(`document ${String(doc.docId)}`);
+    for (const replace of result.openDocuments) {
+      const doc = [...this.docs.values()].find((d) => d.docId === replace.docId);
+      if (!doc) {
+        failures.push(`document ${String(replace.docId)}`);
         continue;
       }
       try {
-        await tab.applyReplace(doc.version, doc.edits);
+        await doc.applyReplace(replace.version, replace.edits);
       } catch (error: unknown) {
-        failures.push(`${tab.name} (${errorMessage(error)})`);
+        failures.push(`${doc.name} (${errorMessage(error)})`);
       }
     }
     this.updateChrome();
@@ -313,12 +317,12 @@ export class Workbench implements EditorTabHost {
       removed,
     );
     for (const change of batch.changes) {
-      const tab = this.tabs.find((t) => t.path === change.path);
-      if (!tab) continue;
+      const doc = this.docs.get(change.path);
+      if (!doc) continue;
       if (change.kind === "removed") {
-        this.notify(`${tab.name} was deleted on disk; saving recreates it.`);
+        this.notify(`${doc.name} was deleted on disk; saving recreates it.`);
       } else {
-        void tab.onDiskChange();
+        void doc.onDiskChange();
       }
     }
   }
@@ -342,7 +346,7 @@ export class Workbench implements EditorTabHost {
   async openProject(path: string): Promise<void> {
     try {
       const project = unwrap(await commands.openProject(path));
-      for (const tab of [...this.tabs]) this.removeTab(tab);
+      this.closeEverything();
       this.projectName.textContent = project.name;
       this.projectName.title = project.root;
       document.title = `${this.info.name} — ${project.name}`;
@@ -355,24 +359,42 @@ export class Workbench implements EditorTabHost {
     }
   }
 
-  async openFile(path: string): Promise<void> {
-    const existing = this.tabs.find((t) => t.path === path);
+  /** Opens a file in `group` (default: the focused one). */
+  async openFile(path: string, group: EditorGroup = this.focusedGroup): Promise<void> {
+    const existing = group.panes.find((p) => p.path === path);
     if (existing) {
-      this.activate(existing);
+      this.activate(group, existing);
       return;
     }
+    const doc = await this.documentFor(path);
+    if (!doc) return;
+    // The group may have opened it meanwhile.
+    const again = group.panes.find((p) => p.path === path);
+    if (again) {
+      this.activate(group, again);
+      return;
+    }
+    const pane = new EditorPane(doc, this.keymap, this);
+    group.panes.push(pane);
+    group.editors.append(pane.container);
+    this.activate(group, pane);
+  }
+
+  private documentFor(path: string): Promise<DocModel | null> {
+    const open = this.docs.get(path);
+    if (open) return Promise.resolve(open);
     const pending = this.opening.get(path);
     if (pending) return pending;
     const task = (async () => {
       try {
-        const doc = unwrap(await commands.openDocument(path));
-        const tab = new EditorTab(doc, this.keymap, this);
-        this.tabs.push(tab);
-        this.editors.append(tab.container);
-        this.activate(tab);
-        this.notify(doc.restored ? `Restored unsaved changes in ${tab.name}` : "");
+        const opened = unwrap(await commands.openDocument(path));
+        const doc = new DocModel(opened, this);
+        this.docs.set(path, doc);
+        this.notify(opened.restored ? `Restored unsaved changes in ${doc.name}` : "");
+        return doc;
       } catch (error: unknown) {
         this.notify(`Cannot open ${path}: ${errorMessage(error)}`);
+        return null;
       } finally {
         this.opening.delete(path);
       }
@@ -381,105 +403,194 @@ export class Workbench implements EditorTabHost {
     return task;
   }
 
-  // EditorTabHost
+  /** Opens the current file in the other group (creating it if needed). */
+  private splitRight(): void {
+    const pane = this.active;
+    if (!pane) return;
+    const target =
+      this.groups.find((g) => g !== this.focusedGroup) ??
+      (this.groups.length < MAX_GROUPS ? this.createGroup() : this.focusedGroup);
+    const { head } = pane.view.state.selection.main;
+    void (async () => {
+      await this.openFile(pane.path, target);
+      target.active?.revealOffset(head);
+    })();
+  }
+
+  private createGroup(): EditorGroup {
+    const element = el("div", "editor-group", "editor-group");
+    const tabBar = el("div", "tabs", "tabs");
+    tabBar.setAttribute("role", "tablist");
+    const editors = el("div", "editors");
+    element.append(tabBar, editors);
+    const group: EditorGroup = { element, tabBar, editors, panes: [], active: null };
+    element.addEventListener("mousedown", () => {
+      if (this.focusedGroup !== group) {
+        this.focusedGroup = group;
+        this.updateChrome();
+      }
+    });
+    this.groups.push(group);
+    this.groupsEl.append(element);
+    return group;
+  }
+
+  private groupOf(pane: EditorPane): EditorGroup | undefined {
+    return this.groups.find((g) => g.panes.includes(pane));
+  }
+
+  /** Closes every pane and document (another project was opened). */
+  private closeEverything(): void {
+    for (const group of this.groups) {
+      for (const pane of group.panes) pane.destroy();
+      group.element.remove();
+    }
+    this.groups.length = 0;
+    for (const doc of this.docs.values()) doc.destroy();
+    this.docs.clear();
+    this.focusedGroup = this.createGroup();
+    this.updateChrome();
+  }
+
+  // PaneHost and DocHost
+
+  onFocus(pane: EditorPane): void {
+    const group = this.groupOf(pane);
+    if (!group) return;
+    if (this.focusedGroup !== group || group.active !== pane) {
+      this.focusedGroup = group;
+      group.active = pane;
+      this.updateChrome();
+    }
+  }
+
+  onCursor(pane: EditorPane): void {
+    if (pane === this.active) this.updatePosition();
+  }
 
   onStatus(): void {
     this.updateChrome();
   }
 
-  onCursor(tab: EditorTab): void {
-    if (tab === this.active) this.updatePosition();
+  onError(doc: DocModel, message: string): void {
+    this.notify(`${doc.name}: ${message}`);
   }
 
-  onError(tab: EditorTab, message: string): void {
-    this.notify(`${tab.name}: ${message}`);
-  }
-
-  closeTab(tab: EditorTab): void {
-    void (async () => {
-      // Let queued edits reach Rust before closing (they are kept in the recovery file).
-      await tab.idle();
-      try {
-        unwrap(await commands.closeDocument(tab.docId));
-      } catch (error: unknown) {
-        this.notify(errorMessage(error));
-      }
-      this.removeTab(tab);
-    })();
-  }
-
-  private removeTab(tab: EditorTab): void {
-    const index = this.tabs.indexOf(tab);
-    if (index < 0) return;
-    this.tabs.splice(index, 1);
-    tab.destroy();
-    if (this.active === tab) {
-      this.active = null;
-      const next = this.tabs[Math.min(index, this.tabs.length - 1)];
-      if (next) this.activate(next);
+  closePane(pane: EditorPane): void {
+    const group = this.groupOf(pane);
+    if (!group) return;
+    const index = group.panes.indexOf(pane);
+    group.panes.splice(index, 1);
+    const doc = pane.doc;
+    pane.destroy();
+    if (group.active === pane) {
+      group.active = null;
+      const next = group.panes[Math.min(index, group.panes.length - 1)];
+      if (next) this.activate(group, next);
+    }
+    if (group.panes.length === 0 && this.groups.length > 1) {
+      group.element.remove();
+      this.groups.splice(this.groups.indexOf(group), 1);
+      if (this.focusedGroup === group && this.groups[0]) this.focusedGroup = this.groups[0];
+      this.focusedGroup.active?.view.focus();
     }
     this.updateChrome();
+    if (doc.panes.size === 0) {
+      this.docs.delete(doc.path);
+      void (async () => {
+        // Let queued edits reach Rust first (unsaved text stays recoverable).
+        await doc.idle();
+        doc.destroy();
+        try {
+          unwrap(await commands.closeDocument(doc.docId));
+        } catch (error: unknown) {
+          this.notify(errorMessage(error));
+        }
+      })();
+    }
   }
 
-  private activate(tab: EditorTab): void {
-    this.active = tab;
-    for (const t of this.tabs) t.container.hidden = t !== tab;
+  private activate(group: EditorGroup, pane: EditorPane): void {
+    group.active = pane;
+    this.focusedGroup = group;
+    for (const p of group.panes) p.container.hidden = p !== pane;
     this.updateChrome();
-    tab.view.requestMeasure();
-    tab.view.focus();
+    pane.view.requestMeasure();
+    pane.view.focus();
   }
 
   private updateChrome(): void {
-    const items = this.tabs.map((tab) => {
-      const item = el("div", "tab", "tab");
-      item.setAttribute("role", "tab");
-      item.setAttribute("aria-selected", String(tab === this.active));
-      item.dataset.path = tab.path;
-      item.title = tab.path;
-      if (tab === this.active) item.classList.add("active");
-      if (tab.dirty) item.classList.add("dirty");
-      const label = el("span", "tab-label", "tab-label");
-      label.textContent = tab.name;
-      const marker = el("span", "tab-dirty", "tab-dirty");
-      marker.textContent = tab.dirty ? "●" : "";
-      marker.setAttribute("aria-label", tab.dirty ? "modified" : "");
-      const close = el("button", "tab-close", "tab-close");
-      close.type = "button";
-      close.textContent = "×";
-      close.setAttribute("aria-label", `Close ${tab.name}`);
-      close.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this.closeTab(tab);
+    for (const group of this.groups) {
+      group.element.classList.toggle(
+        "focused",
+        group === this.focusedGroup && this.groups.length > 1,
+      );
+      const items: HTMLElement[] = group.panes.map((pane) => {
+        const doc = pane.doc;
+        const item = el("div", "tab", "tab");
+        item.setAttribute("role", "tab");
+        item.setAttribute("aria-selected", String(pane === group.active));
+        item.dataset.path = pane.path;
+        item.title = pane.path;
+        if (pane === group.active) item.classList.add("active");
+        if (doc.dirty) item.classList.add("dirty");
+        const label = el("span", "tab-label", "tab-label");
+        label.textContent = pane.name;
+        const marker = el("span", "tab-dirty", "tab-dirty");
+        marker.textContent = doc.dirty ? "●" : "";
+        marker.setAttribute("aria-label", doc.dirty ? "modified" : "");
+        const close = el("button", "tab-close", "tab-close");
+        close.type = "button";
+        close.textContent = "×";
+        close.setAttribute("aria-label", `Close ${pane.name}`);
+        close.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.closePane(pane);
+        });
+        item.addEventListener("mousedown", (event) => {
+          if (event.button === 1) {
+            event.preventDefault();
+            this.closePane(pane);
+          }
+        });
+        item.addEventListener("click", () => {
+          this.activate(group, pane);
+        });
+        item.append(label, marker, close);
+        return item;
       });
-      item.addEventListener("mousedown", (event) => {
-        if (event.button === 1) {
-          event.preventDefault();
-          this.closeTab(tab);
-        }
-      });
-      item.addEventListener("click", () => {
-        this.activate(tab);
-      });
-      item.append(label, marker, close);
-      return item;
-    });
-    this.tabBar.replaceChildren(...items);
+      if (group.panes.length > 0 && this.groups.length < MAX_GROUPS) {
+        const split = el("button", "tab-split", "split-right");
+        split.type = "button";
+        split.textContent = "⫿";
+        split.title = "Split Right";
+        split.setAttribute("aria-label", "Split Right");
+        split.addEventListener("click", () => {
+          if (group.active) this.activate(group, group.active);
+          this.splitRight();
+        });
+        items.push(split);
+      }
+      group.tabBar.replaceChildren(...items);
+    }
 
-    const tab = this.active;
-    this.welcome.hidden = tab !== null;
-    this.statusPath.textContent = tab?.path ?? "";
-    this.statusLanguage.textContent = tab ? (tab.language ?? "Plain text") : "";
-    this.statusState.textContent = tab ? (tab.dirty ? "Modified" : "Saved") : "";
+    const pane = this.active;
+    const anyPane = this.groups.some((g) => g.panes.length > 0);
+    this.welcome.hidden = anyPane;
+    this.groupsEl.hidden = !anyPane;
+    this.statusPath.textContent = pane?.path ?? "";
+    this.statusLanguage.textContent = pane ? (pane.doc.language ?? "Plain text") : "";
+    this.statusState.textContent = pane ? (pane.doc.dirty ? "Modified" : "Saved") : "";
     this.updatePosition();
   }
 
   private updatePosition(): void {
-    const tab = this.active;
-    if (!tab) {
+    const pane = this.active;
+    if (!pane) {
       this.statusPosition.textContent = "";
       return;
     }
-    const state = tab.view.state;
+    const state = pane.view.state;
     const head = state.selection.main.head;
     const line = state.doc.lineAt(head);
     const carets = state.selection.ranges.length;

@@ -30,8 +30,13 @@ async function main(root: HTMLElement): Promise<void> {
   // `?project=<path>` is used by the UI tests (the browser has no folder
   // dialog); the desktop app passes the command-line folder instead.
   const fromUrl = new URLSearchParams(window.location.search).get("project");
-  const initial = fromUrl ?? unwrap(await commands.initialProject());
-  if (initial) await workbench.openProject(initial);
+  const initial = fromUrl
+    ? { folder: fromUrl, file: null }
+    : unwrap(await commands.initialProject());
+  if (initial) {
+    await workbench.openProject(initial.folder);
+    if (initial.file) await workbench.openFile(initial.file);
+  }
 }
 
 const root = document.getElementById("app");
