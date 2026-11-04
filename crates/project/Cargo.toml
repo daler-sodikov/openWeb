@@ -13,6 +13,10 @@ publish.workspace = true
 ferrule-vfs.workspace = true
 ferrule-buffer.workspace = true
 ferrule-settings.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
