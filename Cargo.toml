@@ -76,6 +76,10 @@ tree-sitter-md = "0.5"
 tree-sitter-svelte-ng = "1"
 globset = "0.4"
 x11rb = { version = "0.14", features = ["xtest"] }
+# M3
+lsp-types = "0.97"
+url = "2"
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [workspace.lints.rust]
 missing_docs = "warn"
