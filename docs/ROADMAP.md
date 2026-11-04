@@ -93,28 +93,87 @@ Moved out of M1 (each tracked under M2 below):
   benchmark in `perf/`; non-UTF-8 files and files over 20 MB (refused with
   an error in M1).
 
-## M2: Navigation and search
+## M2: Search and navigation (done)
 
-Carried over from M1:
+Plan (details in ARCHITECTURE.md 3.4, 4.4, 4.5):
+
+- [x] `indexer`: project walk honouring `.gitignore` (plus `node_modules`
+      always excluded), file list, TS/JS symbols from the grammars' tags
+      queries, on-disk cache keyed by mtime + size, incremental updates
+- [x] `search`: IntelliJ-style fuzzy matcher (camel humps, path segments),
+      Search Everywhere providers (files, symbols, actions), text search
+      (plain/regex, case, whole word) over files and unsaved buffers,
+      replace with preview
+- [x] `vfs`: file watcher (`notify`), debounced, ignoring excluded folders
+- [x] Typed backend → frontend events (tauri-specta) and an event stream in
+      the headless test backend
+- [x] `buffer`: language-aware Enter indentation in Rust, indent-unit
+      detection; Enter grouped with typing in undo; "modified" compares
+      text with the saved text
+- [x] Frontend: Search Everywhere (double Shift), Go to File / Symbol /
+      Line, Recent Files, Find/Replace in Files popups (virtualized lists),
+      reload/keep bar for files changed on disk
+- [x] Windows: confirm the M1 CI fix (Common Controls manifest) on GitHub
+      Actions
+
+**Done when:**
+
+1. Double Shift opens Search Everywhere. Typing `cnt` lists
+   `src/components/Counter.tsx` and the symbol `Counter`; Enter opens the
+   file at the symbol. Tabs All / Files / Symbols / Actions; actions run.
+2. Go to File (Ctrl+Shift+N, macOS Cmd+Shift+O), Go to Symbol
+   (Ctrl+Alt+Shift+N, macOS Cmd+Alt+O), Go to Line (Ctrl+G, macOS Cmd+L)
+   and Recent Files (Ctrl+E, macOS Cmd+E) open their popups and navigate.
+3. The index skips `.gitignore`d paths and `node_modules`, is reused from
+   the on-disk cache on reopen (unchanged files are not re-parsed, asserted
+   by a Rust test), and follows files changed on disk.
+4. Find in Files (Ctrl+Shift+F, macOS Cmd+Shift+F): plain or regex, case
+   sensitive, whole word; results show the line with the match; Enter or
+   click opens the file at the match; unsaved buffer text is searched, not
+   the file on disk.
+5. Replace in Files (Ctrl+Shift+R, macOS Cmd+Shift+R): preview shows old →
+   new per match; Replace All edits open documents through the buffer
+   (undoable) and other files with atomic saves; an invalid regex shows an
+   error instead of results.
+6. Files changed outside the editor: the tree shows created/deleted files;
+   an open file without unsaved changes reloads; an open file with unsaved
+   changes shows a bar with **Reload** and **Keep my changes**.
+7. Enter is computed in Rust: keeps the line's indentation, indents after
+   `{ ( [` and opening markup tags, splits `{|}` onto three lines; Tab
+   inserts the file's detected indent unit.
+8. Enter and the surrounding typing undo as one step.
+9. Undoing back to the saved text clears the modified marker (and redoing
+   sets it again).
+10. Tests: Rust unit/integration tests for the matcher, indexer and cache,
+    text search/replace, watcher-driven updates, indentation, undo grouping
+    and the modified state; Playwright `ui` tests for 1, 2, 4, 5, 6, 7, 8
+    and 9 on `fixtures/react-ts`; all checks pass with zero warnings.
+
+Status: points 1–10 verified on 2026-11-04 (Linux; Playwright `ui` in
+Chromium plus a manual check in the real app). The Windows CI fix from M1
+was confirmed on GitHub Actions (test binaries now start); the next Windows
+failure (CRLF checkouts breaking golden tests) is fixed by `.gitattributes`
+and is confirmed only once pushed.
+
+Follow-ups found in M2:
+
+- [ ] Search Everywhere: stream results per provider over a channel once the
+      test bridge supports channels (now request/response).
+- [ ] Files changed while the index is being built are only picked up on
+      the next change or reopen.
+- [ ] Select Next Occurrence is case-sensitive plain matching (no whole-word
+      mode yet).
+
+## M2b: Editor polish (before M3)
+
+Moved here from M1/M2 so M2 stays reviewable; each item keeps its scope:
 
 - [ ] Split editors
-- [ ] Bracket matching; language-aware auto-indent in Rust (replace CodeMirror's indentation copy on Enter)
+- [ ] Breadcrumbs, folding, bracket matching
 - [ ] EditorConfig
-- [ ] File watching (`FileTreeChanged`, reload unmodified documents changed on disk)
 - [ ] `.gitignore`-aware tree (greyed entries)
-- [ ] `perf/` typing-latency and startup benchmarks
+- [ ] `perf/` typing-latency, startup and search-latency benchmarks
 - [ ] Non-UTF-8 encodings; read-only paging for files over 20 MB
-
-- [ ] Undo grouping: Enter currently starts its own undo step (it is not a "typing" event); decide whether to group it with typing like IntelliJ
-- [ ] Windows: confirm the CI fix for test binaries (Common Controls manifest) on GitHub Actions
-
-New in M2:
-
-- [ ] `indexer`: file and symbol index with on-disk cache
-- [ ] `search`: fuzzy matcher, Search Everywhere providers and streaming
-- [ ] Go to File / Symbol / Line, Recent Files
-- [ ] Find/Replace in Files with regex and preview
-- [ ] Breadcrumbs, folding
 - [ ] Highlighting for SCSS/LESS/YAML/Markdown/Vue/Svelte
 
 ## M3: TypeScript intelligence

@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M2: search and navigation)
+
+- Search Everywhere (double Shift) with All / Files / Symbols / Actions tabs;
+  Go to File, Go to Symbol and Find Action open it on their tab.
+- Go to Line, Recent Files (persisted per project).
+- Find in Files and Replace in Files: plain or regex, match case, whole
+  word, replacement preview with `$1` expansion; unsaved buffers are
+  searched; Replace All edits open documents through the normal (undoable)
+  edit path and rewrites other files atomically, keeping line endings.
+- `ferrule-indexer`: `.gitignore`-aware project index (always skipping
+  `.git` and `node_modules`), TS/JS symbols from the grammars' tags
+  queries, on-disk cache keyed by mtime and size, incremental updates.
+- `ferrule-search`: IntelliJ-style fuzzy matcher and text search/replace.
+- File watching (`notify`): the tree follows created/deleted files,
+  unmodified tabs reload, modified tabs offer Reload / Keep my changes.
+- Typed backend events (`fs-changed`, `index-status`); the headless test
+  backend serves them through a long-poll endpoint.
+- Enter is computed in Rust with language-aware indentation (brackets,
+  markup tags, `{|}` splitting); Tab inserts the file's detected indent unit.
+
+### Changed (M2)
+
+- Enter and the surrounding typing undo as one step.
+- The modified marker compares the text with the last saved text, so
+  undoing back to it clears the marker.
+- IPC protocol version 3. `deny.toml` allows ISC (for `inotify`).
+- Breadcrumbs, folding, split editors and other editor polish moved to the
+  new M2b milestone (see `docs/ROADMAP.md`).
+
+### Fixed (M2)
+
+- Windows CI: golden tests failed because Git checked files out with CRLF;
+  `.gitattributes` now enforces LF for text files on every OS.
+
 ### Added (M1: editor core)
 
 - Project view: Open Folder (native dialog) or `ferrule <folder>`; lazy,

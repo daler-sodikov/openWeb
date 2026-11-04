@@ -222,7 +222,9 @@ Update this section at the end of every milestone.
       open follow-ups in docs/ROADMAP.md)
 - [x] M1: window, project tree, tabs, rope buffer, highlighting
       (2026-11-04; checks pass locally on Linux; see docs/ROADMAP.md M1)
-- [ ] M2: search (files, symbols, text), Search Everywhere
+- [x] M2: search (files, symbols, text), Search Everywhere
+      (2026-11-04; checks pass locally on Linux; see docs/ROADMAP.md M2;
+      M2b editor polish comes before M3)
 - [ ] M3: LSP client + TypeScript intelligence
 - [ ] M4: terminal, Git basics
 - [ ] M5: run/debug, test runner
