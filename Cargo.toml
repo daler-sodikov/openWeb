@@ -8,7 +8,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 license = "Apache-2.0"
-repository = "https://github.com/ferrule-ide/ferrule"
+repository = "https://github.com/daler-sodikov/openWeb"
 authors = ["Ferrule contributors"]
 publish = false
 

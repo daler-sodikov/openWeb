@@ -29,7 +29,7 @@ chat) and when someone represents the project in public.
 ## Reporting and enforcement
 
 Report incidents privately to the maintainers at
-**[maintainer contact: to be set before the first public release]**. Reports
+**dalersodikov101@gmail.com**. Reports
 are handled confidentially. Maintainers may remove content, warn, or
 temporarily or permanently ban anyone who violates this code, in proportion to
 the harm caused.
