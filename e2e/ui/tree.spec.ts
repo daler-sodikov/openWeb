@@ -5,15 +5,19 @@ import { expect, openApp, test, treeRow } from "./harness";
 
 test("shows the project tree and expands folders lazily", async ({ page, project }) => {
   await openApp(page, project);
-  await expect(page.getByTestId("tree-row")).toHaveText([
-    "public",
-    "src",
-    ".gitignore",
-    "index.html",
-    "package.json",
-    "README.md",
-    "tsconfig.json",
-  ]);
+  // node_modules is there once the fixture's packages are installed.
+  await expect(page.locator('[data-testid="tree-row"]:not([data-path="node_modules"])')).toHaveText(
+    [
+      "public",
+      "src",
+      ".gitignore",
+      "bun.lock",
+      "index.html",
+      "package.json",
+      "README.md",
+      "tsconfig.json",
+    ],
+  );
   await expect(treeRow(page, "src/App.tsx")).toHaveCount(0);
 
   await treeRow(page, "src").click();

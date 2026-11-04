@@ -116,7 +116,7 @@ test("EditorConfig drives indentation and save", async ({ page, project }) => {
 
 test("ignored entries are greyed in the tree", async ({ page, project }) => {
   fs.mkdirSync(path.join(project, "dist"));
-  fs.mkdirSync(path.join(project, "node_modules"));
+  fs.mkdirSync(path.join(project, "node_modules"), { recursive: true });
   await openApp(page, project);
   await expect(treeRow(page, "dist")).toHaveAttribute("data-ignored", "true");
   await expect(treeRow(page, "node_modules")).toHaveAttribute("data-ignored", "true");

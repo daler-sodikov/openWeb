@@ -41,6 +41,9 @@ jobs:
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install the fixture's dependencies (React types for UI tests)
+        run: bun install --frozen-lockfile --cwd fixtures/react-ts
+
       # Real-server tests (crates/core/tests/lsp_real.rs, e2e/ui/lsp.spec.ts)
       # need Node and typescript-language-server; they fail instead of
       # skipping when FERRULE_REQUIRE_TS_SERVER is set.
