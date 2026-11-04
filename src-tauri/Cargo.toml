@@ -22,6 +22,15 @@ path = "src/main.rs"
 name = "export-bindings"
 path = "src/bin/export_bindings.rs"
 
+# Headless backend for Playwright UI tests (docs/ARCHITECTURE.md, section 7).
+[[bin]]
+name = "ferrule-headless"
+path = "src/bin/headless.rs"
+required-features = ["headless"]
+
+[features]
+headless = ["tauri/test", "dep:tiny_http", "dep:serde_json"]
+
 [build-dependencies]
 tauri-build.workspace = true
 
@@ -30,6 +39,9 @@ ferrule-core.workspace = true
 ferrule-ipc.workspace = true
 anyhow.workspace = true
 serde.workspace = true
+serde_json = { workspace = true, optional = true }
+tiny_http = { workspace = true, optional = true }
+tauri-plugin-dialog.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true
 tauri.workspace = true

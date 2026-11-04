@@ -2,7 +2,8 @@
 # Policy: permissive licenses only. Every exception below needs a reason.
 
 [graph]
-all-features = false
+# Include test-only features (e.g. `headless`) in license and advisory checks.
+all-features = true
 targets = [
   "x86_64-unknown-linux-gnu",
   "aarch64-apple-darwin",
