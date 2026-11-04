@@ -11,3 +11,11 @@ export const appBinary = path.join(
   "debug",
   process.platform === "win32" ? "ferrule.exe" : "ferrule",
 );
+
+/** Vite dev server used by the `ui` project. */
+export const FRONTEND_PORT = 1430;
+export const FRONTEND_URL = `http://127.0.0.1:${String(FRONTEND_PORT)}`;
+
+/** Headless Rust backend used by the `ui` project. */
+export const BACKEND_PORT = 1431;
+export const BACKEND_URL = `http://127.0.0.1:${String(BACKEND_PORT)}`;
