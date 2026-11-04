@@ -2,11 +2,13 @@
 //! recovery files. Functions here are synchronous; async callers run them on
 //! `spawn_blocking` (see `docs/ARCHITECTURE.md`, section 6).
 //!
-//! M1 scope: UTF-8 text (with or without BOM). Other encodings and file
-//! watching arrive in M2 (`docs/ROADMAP.md`).
+//! Text files are UTF-8 (with or without BOM); other encodings are M2b
+//! (`docs/ROADMAP.md`).
 
 mod recovery;
 mod text_file;
+mod watcher;
 
-pub use recovery::{RecoveryEntry, RecoveryStore};
+pub use recovery::{RecoveryEntry, RecoveryStore, path_hash};
 pub use text_file::{MAX_FILE_SIZE, TextFile, VfsError, decode, encode, read_text, write_atomic};
+pub use watcher::Watcher;

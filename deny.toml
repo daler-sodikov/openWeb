@@ -30,6 +30,8 @@ allow = [
   "MIT",
   "BSD-2-Clause",
   "BSD-3-Clause",
+  # ISC is MIT-equivalent; used by notify/inotify (file watching).
+  "ISC",
   "Zlib",
   "Unicode-3.0",
   "CC0-1.0",

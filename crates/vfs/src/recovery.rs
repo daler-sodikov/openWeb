@@ -92,6 +92,11 @@ impl RecoveryStore {
     }
 }
 
+/// Stable 16-hex-digit hash of a path, for per-project cache file names.
+pub fn path_hash(path: &Path) -> String {
+    format!("{:016x}", fnv1a64(path.to_string_lossy().as_bytes()))
+}
+
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
