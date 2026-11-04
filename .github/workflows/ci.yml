@@ -41,6 +41,19 @@ jobs:
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
+      # Real-server tests (crates/core/tests/lsp_real.rs, e2e/ui/lsp.spec.ts)
+      # need Node and typescript-language-server; they fail instead of
+      # skipping when FERRULE_REQUIRE_TS_SERVER is set.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install the TypeScript language server
+        shell: bash
+        run: |
+          bun add -g typescript-language-server@6.0.3 typescript@6.0.3
+          bun pm bin -g >> "$GITHUB_PATH"
+
       - name: rustfmt
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
@@ -53,6 +66,8 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace
+        env:
+          FERRULE_REQUIRE_TS_SERVER: "1"
 
       - name: ESLint
         run: bun run lint
