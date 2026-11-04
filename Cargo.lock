@@ -918,8 +918,8 @@ dependencies = [
 name = "ferrule-search"
 version = "0.1.0"
 dependencies = [
- "ferrule-indexer",
- "ferrule-vfs",
+ "regex",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -1,5 +1,11 @@
-//! Fuzzy file/symbol/action matching, regex find/replace in files and Search Everywhere aggregation.
-//!
-//! Empty in M0: the crate exists so the workspace layout and dependency
-//! graph from `docs/ARCHITECTURE.md` are in place. Its scope and milestone
-//! are listed in `docs/ROADMAP.md`.
+//! Fuzzy matching (Search Everywhere, Go to File/Symbol) and text search and
+//! replace (Find/Replace in Files). Pure functions: callers provide the
+//! candidates and texts, so unsaved buffers are searched like files.
+
+mod fuzzy;
+mod text;
+
+pub use fuzzy::{FuzzyMatch, fuzzy_match, match_path};
+pub use text::{
+    Replacement, SearchError, TextMatch, TextQuery, find_matches, replace_all, replacement_for,
+};
