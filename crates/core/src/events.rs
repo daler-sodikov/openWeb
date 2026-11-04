@@ -1,6 +1,6 @@
 //! Events the session pushes to the frontend.
 
-use ferrule_ipc::{FsChangeBatch, IndexState};
+use ferrule_ipc::{FileProblems, FsChangeBatch, IndexState, ServerStatus};
 
 /// An event for the frontend.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +9,10 @@ pub enum SessionEvent {
     FsChanged(FsChangeBatch),
     /// Index progress.
     IndexStatus(IndexState),
+    /// A language server's state changed.
+    ServerStatus(ServerStatus),
+    /// The problems of one file changed.
+    ProblemsChanged(FileProblems),
 }
 
 /// Where session events go (Tauri events in the app, a queue in tests).

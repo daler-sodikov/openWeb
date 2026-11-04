@@ -17,6 +17,7 @@ use ferrule_buffer::{
     detect_indent_unit,
 };
 use ferrule_ipc::{self as ipc, DocId, IpcError, IpcErrorKind};
+use ferrule_lsp_client::lsp_types::Uri;
 use ferrule_project::{EntryKind, Project};
 use ferrule_settings::{EditorConfig, EndOfLine, resolve_editorconfig};
 use ferrule_syntax::{DEFAULT_AUTO_CLOSE, LanguageRegistry, SyntaxError, SyntaxTree};
@@ -24,6 +25,7 @@ use ferrule_vfs::RecoveryStore;
 use tokio_util::sync::CancellationToken;
 
 use crate::events::{EventSink, SessionEvent};
+use crate::lsp::{LanguageService, SyncKey};
 use crate::project_runtime::{ProjectRuntime, index_project};
 
 use crate::convert::{
@@ -57,6 +59,8 @@ pub(crate) struct DocState {
     tab_width: u32,
     auto_close: Vec<String>,
     editorconfig: EditorConfig,
+    /// The language server run that has this document open, if any.
+    pub lsp_key: Option<SyncKey>,
 }
 
 impl DocState {
@@ -84,6 +88,10 @@ pub(crate) struct DocHandle {
     pub id: DocId,
     pub path: PathBuf,
     pub rel_path: String,
+    /// `file:` URI for the language server.
+    pub uri: Option<Uri>,
+    /// LSP language id if the project's language server handles the file.
+    pub lsp_language: Option<&'static str>,
     language: Option<String>,
     state: Mutex<DocState>,
     autosave: Mutex<Option<CancellationToken>>,
@@ -142,6 +150,30 @@ pub(crate) struct State {
     next_id: u32,
 }
 
+/// Where a session keeps its files.
+#[derive(Debug, Clone)]
+pub struct SessionConfig {
+    /// Recovery files, index caches and project data.
+    pub data_dir: PathBuf,
+    /// The user settings file (`settings.json`).
+    pub settings_file: PathBuf,
+    /// Delay between the last edit and writing the recovery file.
+    pub autosave_delay: Duration,
+}
+
+impl SessionConfig {
+    /// Defaults: `settings.json` inside `data_dir`, the default autosave
+    /// delay.
+    pub fn new(data_dir: impl Into<PathBuf>) -> Self {
+        let data_dir = data_dir.into();
+        Self {
+            settings_file: data_dir.join("settings.json"),
+            data_dir,
+            autosave_delay: DEFAULT_AUTOSAVE_DELAY,
+        }
+    }
+}
+
 /// The editing session. Cheap to share as `Arc<Session>`.
 pub struct Session {
     pub(crate) state: Mutex<State>,
@@ -150,6 +182,7 @@ pub struct Session {
     autosave_delay: Duration,
     started: Instant,
     data_dir: PathBuf,
+    settings_file: PathBuf,
     pub(crate) sink: Arc<dyn EventSink>,
     /// Incremented by every Find in Files request; older requests stop.
     pub(crate) find_counter: Arc<AtomicU64>,
@@ -208,7 +241,22 @@ impl Session {
         sink: Arc<dyn EventSink>,
         autosave_delay: Duration,
     ) -> Result<Arc<Self>, SessionError> {
-        let data_dir = data_dir.into();
+        let mut config = SessionConfig::new(data_dir);
+        config.autosave_delay = autosave_delay;
+        Self::with_config(config, sink)
+    }
+
+    /// A session with explicit locations (the app passes its config
+    /// directory for `settings.json`).
+    pub fn with_config(
+        config: SessionConfig,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<Arc<Self>, SessionError> {
+        let SessionConfig {
+            data_dir,
+            settings_file,
+            autosave_delay,
+        } = config;
         Ok(Arc::new(Self {
             state: Mutex::new(State::default()),
             recovery: RecoveryStore::new(data_dir.join("recovery")),
@@ -216,6 +264,7 @@ impl Session {
             autosave_delay,
             started: Instant::now(),
             data_dir,
+            settings_file,
             sink,
             find_counter: Arc::new(AtomicU64::new(0)),
         }))
@@ -236,7 +285,26 @@ impl Session {
         Ok(self.runtime()?.project.clone())
     }
 
-    fn doc(&self, id: DocId) -> Result<Arc<DocHandle>, IpcError> {
+    /// Every open document.
+    pub(crate) fn open_docs(&self) -> Vec<Arc<DocHandle>> {
+        lock(&self.state)
+            .map(|s| s.docs.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Whether `service` belongs to the current project.
+    pub(crate) fn is_current_service(&self, service: &Arc<LanguageService>) -> bool {
+        self.runtime()
+            .is_ok_and(|runtime| Arc::ptr_eq(&runtime.lsp, service))
+    }
+
+    /// The project's language service if it handles `doc`.
+    fn lsp_for(&self, doc: &DocHandle) -> Option<Arc<LanguageService>> {
+        doc.lsp_language?;
+        self.runtime().ok().map(|runtime| runtime.lsp.clone())
+    }
+
+    pub(crate) fn doc(&self, id: DocId) -> Result<Arc<DocHandle>, IpcError> {
         lock(&self.state)?.docs.get(&id).cloned().ok_or_else(|| {
             IpcError::new(
                 IpcErrorKind::NotFound,
@@ -252,9 +320,18 @@ impl Session {
         path: String,
     ) -> Result<ipc::ProjectInfo, IpcError> {
         let data_dir = self.data_dir.clone();
+        let sink = self.sink.clone();
+        let settings_file = self.settings_file.clone();
+        let session = Arc::downgrade(self);
         let runtime = blocking(move || {
             let project = Project::open(Path::new(&path)).map_err(project_error)?;
-            Ok(Arc::new(ProjectRuntime::new(project, &data_dir)))
+            Ok(Arc::new(ProjectRuntime::new(
+                project,
+                &data_dir,
+                sink,
+                settings_file,
+                session,
+            )))
         })
         .await?;
         let (previous_docs, previous_runtime) = {
@@ -268,6 +345,8 @@ impl Session {
         };
         if let Some(old) = previous_runtime {
             old.cancel.cancel();
+            // Shut the old project's server down in the background.
+            tokio::spawn(old.lsp.stop());
         }
         self.flush_closed(previous_docs).await;
         let project = runtime.project.clone();
@@ -397,6 +476,7 @@ impl Session {
                     auto_close,
                     editorconfig,
                     indent_rules,
+                    lsp_key: None,
                 },
                 name,
             ))
@@ -419,6 +499,8 @@ impl Session {
             let id = DocId(s.next_id);
             let handle = Arc::new(DocHandle {
                 id,
+                uri: ferrule_lsp_client::path_to_uri(&abs),
+                lsp_language: runtime.lsp.language_id(&abs),
                 path: abs.clone(),
                 rel_path: path,
                 language,
@@ -429,6 +511,18 @@ impl Session {
             s.by_path.insert(abs, id);
             handle
         };
+        if handle.lsp_language.is_some() {
+            // Start the server (if needed) and open the document on it in the
+            // background; the editor never waits for it.
+            let service = runtime.lsp.clone();
+            let doc = handle.clone();
+            tokio::task::spawn_blocking(move || {
+                service.ensure_started();
+                if let Ok(mut state) = doc.lock() {
+                    service.sync(&doc, &mut state, &[]);
+                }
+            });
+        }
         handle.opened()
     }
 
@@ -447,6 +541,7 @@ impl Session {
         let handle = self.doc(doc_id)?;
         let now = self.now_ms();
         let h = handle.clone();
+        let lsp = self.lsp_for(&handle);
         let status = blocking(move || {
             let txs: Vec<Transaction> = transactions
                 .iter()
@@ -464,6 +559,9 @@ impl Session {
                 .map_err(buffer_error)?;
             if let Some(syntax) = &mut state.syntax {
                 syntax.edit(&outcome.byte_edits);
+            }
+            if let Some(lsp) = &lsp {
+                lsp.sync(&h, &mut state, &outcome.lsp_changes);
             }
             Ok(state.status())
         })
@@ -498,6 +596,7 @@ impl Session {
     ) -> Result<Option<ipc::RemoteUpdate>, IpcError> {
         let handle = self.doc(doc_id)?;
         let h = handle.clone();
+        let lsp = self.lsp_for(&handle);
         let update = blocking(move || {
             let mut state = h.lock()?;
             let outcome = if undo {
@@ -511,6 +610,9 @@ impl Session {
             };
             if let Some(syntax) = &mut state.syntax {
                 syntax.edit(&outcome.byte_edits);
+            }
+            if let Some(lsp) = &lsp {
+                lsp.sync(&h, &mut state, &outcome.lsp_changes);
             }
             Ok(Some(ipc::RemoteUpdate {
                 updates: outcome
@@ -637,6 +739,7 @@ impl Session {
         let handle = self.doc(doc_id)?;
         let now = self.now_ms();
         let h = handle.clone();
+        let lsp = self.lsp_for(&handle);
         let update = blocking(move || {
             let mut state = h.lock()?;
             let before = selection_from_ipc(&selection);
@@ -653,6 +756,9 @@ impl Session {
             let outcome = state.doc.apply(version, &[tx], now).map_err(buffer_error)?;
             if let Some(syntax) = &mut state.syntax {
                 syntax.edit(&outcome.byte_edits);
+            }
+            if let Some(lsp) = &lsp {
+                lsp.sync(&h, &mut state, &outcome.lsp_changes);
             }
             Ok(ipc::RemoteUpdate {
                 updates: vec![edits.iter().map(edit_to_ipc).collect()],
@@ -677,6 +783,7 @@ impl Session {
         handle.cancel_autosave();
         let recovery = self.recovery.clone();
         let now = self.now_ms();
+        let lsp = self.lsp_for(&handle);
         blocking(move || {
             let file = ferrule_vfs::read_text(&handle.path).map_err(vfs_error)?;
             let mut state = handle.lock()?;
@@ -698,6 +805,9 @@ impl Session {
                 let outcome = state.doc.apply(version, &[tx], now).map_err(buffer_error)?;
                 if let Some(syntax) = &mut state.syntax {
                     syntax.edit(&outcome.byte_edits);
+                }
+                if let Some(lsp) = &lsp {
+                    lsp.sync(&handle, &mut state, &outcome.lsp_changes);
                 }
                 updates.push(vec![edit_to_ipc(&edit)]);
             }
@@ -736,6 +846,7 @@ impl Session {
         handle.cancel_autosave();
         let recovery = self.recovery.clone();
         let now = self.now_ms();
+        let lsp = self.lsp_for(&handle);
         blocking(move || {
             let mut guard = handle.lock()?;
             let state = &mut *guard;
@@ -755,6 +866,9 @@ impl Session {
                     .map_err(buffer_error)?;
                 if let Some(syntax) = &mut state.syntax {
                     syntax.edit(&outcome.byte_edits);
+                }
+                if let Some(lsp) = &lsp {
+                    lsp.sync(&handle, state, &outcome.lsp_changes);
                 }
                 updates.push(edits.iter().map(edit_to_ipc).collect());
             }
@@ -778,6 +892,9 @@ impl Session {
             ferrule_vfs::write_atomic(&handle.path, &bytes).map_err(|e| io_error(&e))?;
             state.mark_saved();
             recovery.remove(&handle.path).map_err(|e| io_error(&e))?;
+            if let Some(lsp) = &lsp {
+                lsp.saved(&handle, state);
+            }
             tracing::info!(path = ?handle.path, "saved");
             Ok(ipc::SaveResult {
                 updates,
@@ -869,6 +986,15 @@ impl Session {
             s.by_path.remove(&handle.path);
             handle
         };
+        if let Some(lsp) = self.lsp_for(&handle) {
+            let doc = handle.clone();
+            blocking(move || {
+                let mut state = doc.lock()?;
+                lsp.closed(&doc, &mut state);
+                Ok(())
+            })
+            .await?;
+        }
         self.flush_closed(vec![handle]).await;
         Ok(())
     }

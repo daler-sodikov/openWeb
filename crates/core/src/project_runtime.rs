@@ -3,6 +3,9 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock, Weak};
+
+use crate::lsp::LanguageService;
+use crate::session::Session;
 use std::time::Duration;
 
 use ferrule_indexer::Index;
@@ -37,6 +40,8 @@ pub(crate) struct ProjectRuntime {
     cache_file: PathBuf,
     project_file: PathBuf,
     pub recent: Mutex<Vec<String>>,
+    /// The project's TypeScript language server.
+    pub lsp: Arc<LanguageService>,
 }
 
 impl Drop for ProjectRuntime {
@@ -47,7 +52,13 @@ impl Drop for ProjectRuntime {
 }
 
 impl ProjectRuntime {
-    pub fn new(project: Project, data_dir: &Path) -> Self {
+    pub fn new(
+        project: Project,
+        data_dir: &Path,
+        sink: Arc<dyn EventSink>,
+        settings_file: PathBuf,
+        session: Weak<Session>,
+    ) -> Self {
         let hash = ferrule_vfs::path_hash(project.root());
         let project_file = data_dir.join("projects").join(format!("{hash}.json"));
         let recent = std::fs::read(&project_file)
@@ -55,8 +66,17 @@ impl ProjectRuntime {
             .and_then(|b| serde_json::from_slice::<ProjectFile>(&b).ok())
             .map(|f| f.recent)
             .unwrap_or_default();
+        let project = Arc::new(project);
+        let lsp = Arc::new(LanguageService::new(
+            ferrule_lang_js::typescript_server(),
+            project.clone(),
+            sink,
+            settings_file,
+            session,
+        ));
         Self {
-            project: Arc::new(project),
+            project,
+            lsp,
             index: RwLock::new(None),
             watcher: Mutex::new(None),
             cancel: CancellationToken::new(),
@@ -238,6 +258,9 @@ fn on_fs_change(
             }
         }
         runtime.save_cache(index);
+        let watched: Vec<(PathBuf, bool)> =
+            relevant.iter().map(|p| (p.clone(), p.exists())).collect();
+        runtime.lsp.files_changed(&watched);
     }
     sink.emit(SessionEvent::FsChanged(FsChangeBatch { changes }));
     sink.emit(SessionEvent::IndexStatus(runtime.index_state()));

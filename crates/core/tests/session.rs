@@ -272,6 +272,7 @@ async fn opening_twice_returns_the_same_document() {
 
 #[test]
 fn keymap_has_every_action() {
-    // Every action except Open Folder and Split Right (no default keys in the IntelliJ keymap).
-    assert_eq!(ferrule_core::keymap().len(), 21);
+    // Every action except Open Folder, Split Right and Restart TypeScript Server
+    // (no default keys in the IntelliJ keymap).
+    assert_eq!(ferrule_core::keymap().len(), 26);
 }

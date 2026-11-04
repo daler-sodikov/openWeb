@@ -10,7 +10,7 @@ use specta::Type;
 
 /// Version of the IPC protocol. Bump on any breaking change to a command,
 /// event or DTO so that a mismatched frontend refuses to run.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Operating system the backend runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -326,6 +326,12 @@ pub enum KeyAction {
     FoldCollapseAll,
     FoldExpandAll,
     GotoMatchingBrace,
+    QuickDocumentation,
+    GotoDeclaration,
+    GotoTypeDeclaration,
+    GotoImplementation,
+    ToggleProblems,
+    RestartTypeScriptServer,
 }
 
 /// Modifier used in double-tap gestures.
@@ -619,6 +625,164 @@ pub struct StartupTarget {
     pub folder: String,
     /// File to open, relative to the folder (`/` separators).
     pub file: Option<String>,
+}
+
+/// Lifecycle state of a language server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ServerStateKind {
+    /// Not started yet (no file of its languages opened).
+    NotStarted,
+    /// Spawning and initializing.
+    Starting,
+    /// Running and reporting progress (loading the project).
+    Indexing,
+    /// Running and idle.
+    Ready,
+    /// Died; restarting with backoff.
+    Restarting,
+    /// Gave up after repeated failures, or refused to run.
+    Error,
+    /// The server (or Node.js) is not installed or not found.
+    NotFound,
+    /// Stopped (project closed).
+    Stopped,
+}
+
+/// Status of a language server, for the status bar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStatus {
+    /// Server name ("TypeScript").
+    pub name: String,
+    /// State.
+    pub state: ServerStateKind,
+    /// Short status-bar text.
+    pub message: String,
+    /// Longer text for the tooltip: what was found where, or how to fix it.
+    pub detail: String,
+}
+
+/// Severity of a problem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum Severity {
+    /// An error.
+    Error,
+    /// A warning.
+    Warning,
+    /// Information.
+    Information,
+    /// A hint.
+    Hint,
+}
+
+/// A problem reported by a language server, with a display location
+/// (zero-based line, UTF-16 column).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Problem {
+    /// Severity.
+    pub severity: Severity,
+    /// Message.
+    pub message: String,
+    /// Reporting tool (`ts`, `eslint`).
+    pub source: Option<String>,
+    /// Code (`2304`).
+    pub code: Option<String>,
+    /// Start line.
+    pub line: u32,
+    /// Start column.
+    pub column: u32,
+    /// End line.
+    pub end_line: u32,
+    /// End column.
+    pub end_column: u32,
+}
+
+/// All problems of one file (empty when the file has none left).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FileProblems {
+    /// Project-relative path.
+    pub path: String,
+    /// Problems in server order.
+    pub problems: Vec<Problem>,
+}
+
+/// A diagnostic of an open document as a UTF-16 range of a version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticSpan {
+    /// Start offset.
+    pub from: u32,
+    /// End offset.
+    pub to: u32,
+    /// Severity.
+    pub severity: Severity,
+    /// Message.
+    pub message: String,
+    /// Reporting tool.
+    pub source: Option<String>,
+    /// Code.
+    pub code: Option<String>,
+    /// Unused code (shown faded).
+    pub unnecessary: bool,
+    /// Deprecated symbol (shown struck through).
+    pub deprecated: bool,
+}
+
+/// Diagnostics of an open document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DocDiagnostics {
+    /// Version the offsets refer to.
+    pub version: u32,
+    /// Sorted by start offset.
+    pub items: Vec<DiagnosticSpan>,
+}
+
+/// Hover / Quick Documentation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HoverResult {
+    /// Version the range refers to.
+    pub version: u32,
+    /// Start of the hovered symbol.
+    pub from: u32,
+    /// End of the hovered symbol.
+    pub to: u32,
+    /// The documentation as sanitized HTML rendered from Markdown in Rust
+    /// (no scripts, no raw HTML, only http/https/mailto links).
+    pub html: String,
+}
+
+/// What to navigate to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum NavKind {
+    /// Go to Declaration (definition).
+    Definition,
+    /// Go to Type Declaration.
+    TypeDefinition,
+    /// Go to Implementation.
+    Implementation,
+}
+
+/// A navigation target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NavTarget {
+    /// Project-relative path, or an absolute path when outside the project.
+    pub path: String,
+    /// Whether the target is inside the project (only those can be opened).
+    pub in_project: bool,
+    /// Zero-based line.
+    pub line: u32,
+    /// Zero-based UTF-16 column.
+    pub column: u32,
+    /// The target line's text, trimmed.
+    pub preview: String,
 }
 
 #[cfg(test)]

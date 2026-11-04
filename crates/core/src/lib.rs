@@ -5,12 +5,15 @@
 
 mod convert;
 mod events;
+mod hover_html;
+mod intel;
+mod lsp;
 mod project_runtime;
 mod search;
 mod session;
 
 pub use events::{EventSink, NoEvents, SessionEvent};
-pub use session::{DEFAULT_AUTOSAVE_DELAY, Session, SessionError};
+pub use session::{DEFAULT_AUTOSAVE_DELAY, Session, SessionConfig, SessionError};
 
 use ferrule_ipc::{
     AppInfo, FrontendReadyReport, IpcError, IpcErrorKind, PROTOCOL_VERSION, Platform,

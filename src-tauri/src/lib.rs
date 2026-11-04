@@ -12,14 +12,17 @@ use std::time::Duration;
 
 mod events;
 
-pub use events::{FsChanged, IndexStatus, TauriSink, encode as encode_event};
+pub use events::{
+    FsChanged, IndexStatus, ProblemsChanged, ServerStatusChanged, TauriSink, encode as encode_event,
+};
 
-use ferrule_core::Session;
+use ferrule_core::{Session, SessionConfig};
 use ferrule_ipc::{
-    AppInfo, CaretDirection, CaretInfo, ChangeTransaction, DirEntry, DocId, DocStatus,
-    DocumentReload, EditorSelection, FindResults, FoldRanges, FrontendReadyReport, Highlights,
-    IpcError, KeyBinding, OpenedDocument, PROTOCOL_VERSION, ProjectInfo, RemoteUpdate,
-    ReplaceResult, SaveResult, SearchResults, SearchTab, StartupTarget, TextSearch,
+    AppInfo, CaretDirection, CaretInfo, ChangeTransaction, DirEntry, DocDiagnostics, DocId,
+    DocStatus, DocumentReload, EditorSelection, FileProblems, FindResults, FoldRanges,
+    FrontendReadyReport, Highlights, HoverResult, IpcError, KeyBinding, NavKind, NavTarget,
+    OpenedDocument, PROTOCOL_VERSION, ProjectInfo, RemoteUpdate, ReplaceResult, SaveResult,
+    SearchResults, SearchTab, ServerStatus, StartupTarget, TextSearch,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -325,6 +328,62 @@ async fn replace_in_files(
     session.replace_in_files(search, replacement).await
 }
 
+/// Hover / Quick Documentation at a UTF-16 offset.
+#[tauri::command]
+#[specta::specta]
+async fn hover(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    offset: u32,
+) -> Result<Option<HoverResult>, IpcError> {
+    session.hover(doc_id, version, offset).await
+}
+
+/// Go to Declaration / Type Declaration / Implementation.
+#[tauri::command]
+#[specta::specta]
+async fn goto_definition(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    offset: u32,
+    kind: NavKind,
+) -> Result<Vec<NavTarget>, IpcError> {
+    session.goto_definition(doc_id, version, offset, kind).await
+}
+
+/// Diagnostics of an open document (UTF-16 offsets of its current text).
+#[tauri::command]
+#[specta::specta]
+async fn doc_diagnostics(
+    session: SessionState<'_>,
+    doc_id: DocId,
+) -> Result<DocDiagnostics, IpcError> {
+    session.doc_diagnostics(doc_id).await
+}
+
+/// Problems of every file.
+#[tauri::command]
+#[specta::specta]
+async fn problems(session: SessionState<'_>) -> Result<Vec<FileProblems>, IpcError> {
+    session.problems().await
+}
+
+/// Status of the project's language servers.
+#[tauri::command]
+#[specta::specta]
+async fn language_servers(session: SessionState<'_>) -> Result<Vec<ServerStatus>, IpcError> {
+    session.language_servers().await
+}
+
+/// Restarts the TypeScript language server.
+#[tauri::command]
+#[specta::specta]
+async fn restart_language_server(session: SessionState<'_>) -> Result<(), IpcError> {
+    session.restart_language_server().await
+}
+
 /// Builds the tauri-specta registry of every IPC command and constant.
 ///
 /// The same builder serves the runtime invoke handler and the TypeScript
@@ -357,8 +416,19 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             recent_files,
             find_in_files,
             replace_in_files,
+            hover,
+            goto_definition,
+            doc_diagnostics,
+            problems,
+            language_servers,
+            restart_language_server,
         ])
-        .events(tauri_specta::collect_events![FsChanged, IndexStatus])
+        .events(tauri_specta::collect_events![
+            FsChanged,
+            IndexStatus,
+            ServerStatusChanged,
+            ProblemsChanged
+        ])
         .constant("PROTOCOL_VERSION", PROTOCOL_VERSION)
 }
 
@@ -418,9 +488,12 @@ pub fn run() -> anyhow::Result<()> {
     .setup(move |app| {
         specta_builder::<tauri::Wry>().mount_events(app);
         let data_dir = app.path().app_data_dir()?;
-        tracing::info!(?data_dir, "data directory");
+        let settings_file = app.path().app_config_dir()?.join("settings.json");
+        tracing::info!(?data_dir, ?settings_file, "data directory and settings");
         let sink = Arc::new(TauriSink(app.handle().clone()));
-        app.manage(Session::new(data_dir, sink)?);
+        let mut config = SessionConfig::new(data_dir);
+        config.settings_file = settings_file;
+        app.manage(Session::with_config(config, sink)?);
         if smoke_enabled {
             tracing::info!("smoke mode enabled");
             let handle = app.handle().clone();

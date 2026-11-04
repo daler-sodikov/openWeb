@@ -148,6 +148,12 @@ pub(crate) fn action_to_ipc(action: ferrule_settings::Action) -> ipc::KeyAction 
         A::FoldCollapseAll => K::FoldCollapseAll,
         A::FoldExpandAll => K::FoldExpandAll,
         A::GotoMatchingBrace => K::GotoMatchingBrace,
+        A::QuickDocumentation => K::QuickDocumentation,
+        A::GotoDeclaration => K::GotoDeclaration,
+        A::GotoTypeDeclaration => K::GotoTypeDeclaration,
+        A::GotoImplementation => K::GotoImplementation,
+        A::ToggleProblems => K::ToggleProblems,
+        A::RestartTypeScriptServer => K::RestartTypeScriptServer,
     }
 }
 

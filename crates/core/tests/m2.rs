@@ -406,7 +406,7 @@ async fn watcher_updates_index_and_emits_events() {
         .iter()
         .filter_map(|e| match e {
             SessionEvent::FsChanged(batch) => Some(batch.changes.clone()),
-            SessionEvent::IndexStatus(_) => None,
+            _ => None,
         })
         .flatten()
         .collect();

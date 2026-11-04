@@ -60,6 +60,18 @@ pub enum Action {
     FoldExpandAll,
     /// Move the caret to the matching bracket.
     GotoMatchingBrace,
+    /// Quick Documentation for the symbol at the caret.
+    QuickDocumentation,
+    /// Go to the declaration of the symbol at the caret.
+    GotoDeclaration,
+    /// Go to the declaration of the type of the symbol at the caret.
+    GotoTypeDeclaration,
+    /// Go to implementations of the symbol at the caret.
+    GotoImplementation,
+    /// Show or hide the Problems tool window.
+    ToggleProblems,
+    /// Restart the TypeScript language server (no default key).
+    RestartTypeScriptServer,
 }
 
 /// Modifier used in double-tap gestures.
@@ -128,11 +140,17 @@ pub fn action_name(action: Action) -> &'static str {
         Action::FoldCollapseAll => "Collapse All",
         Action::FoldExpandAll => "Expand All",
         Action::GotoMatchingBrace => "Move Caret to Matching Brace",
+        Action::QuickDocumentation => "Quick Documentation",
+        Action::GotoDeclaration => "Go to Declaration",
+        Action::GotoTypeDeclaration => "Go to Type Declaration",
+        Action::GotoImplementation => "Go to Implementation",
+        Action::ToggleProblems => "Problems",
+        Action::RestartTypeScriptServer => "Restart TypeScript Server",
     }
 }
 
 /// Every action, in display order.
-pub const ALL_ACTIONS: [Action; 23] = [
+pub const ALL_ACTIONS: [Action; 29] = [
     Action::GotoFile,
     Action::GotoSymbol,
     Action::GotoLine,
@@ -156,6 +174,12 @@ pub const ALL_ACTIONS: [Action; 23] = [
     Action::FoldCollapseAll,
     Action::FoldExpandAll,
     Action::GotoMatchingBrace,
+    Action::QuickDocumentation,
+    Action::GotoDeclaration,
+    Action::GotoTypeDeclaration,
+    Action::GotoImplementation,
+    Action::ToggleProblems,
+    Action::RestartTypeScriptServer,
 ];
 
 /// IntelliJ-style default bindings (from the publicly documented default
@@ -213,6 +237,17 @@ pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
         bind(
             A::GotoMatchingBrace,
             Chord(if mac { "Mod-Ctrl-m" } else { "Mod-Shift-m" }),
+        ),
+        bind(
+            A::QuickDocumentation,
+            Chord(if mac { "F1" } else { "Ctrl-q" }),
+        ),
+        bind(A::GotoDeclaration, Chord("Mod-b")),
+        bind(A::GotoTypeDeclaration, Chord("Mod-Shift-b")),
+        bind(A::GotoImplementation, Chord("Mod-Alt-b")),
+        bind(
+            A::ToggleProblems,
+            Chord(if mac { "Mod-6" } else { "Alt-6" }),
         ),
     ]
 }
