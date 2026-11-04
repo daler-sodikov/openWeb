@@ -66,6 +66,36 @@ export class TreeView {
     this.refresh();
   }
 
+  /**
+   * Re-lists the parent directories of changed paths (only those already
+   * loaded) and forgets removed directories.
+   */
+  async refreshPaths(paths: readonly string[], removed: readonly string[]): Promise<void> {
+    for (const path of removed) {
+      for (const key of [...this.children.keys()]) {
+        if (key === path || key.startsWith(`${path}/`)) this.children.delete(key);
+      }
+      for (const key of [...this.expanded]) {
+        if (key === path || key.startsWith(`${path}/`)) this.expanded.delete(key);
+      }
+    }
+    const parents = new Set(
+      paths.map((p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "")),
+    );
+    for (const dir of parents) {
+      if (dir !== "" && !this.children.has(dir)) continue;
+      try {
+        const entries = await this.host.listDir(dir);
+        if (dir === "") this.root = entries;
+        else this.children.set(dir, entries);
+      } catch {
+        // The directory itself was removed; its parent's listing handles it.
+        this.children.delete(dir);
+      }
+    }
+    this.refresh();
+  }
+
   private refresh(): void {
     this.rows = flattenTree(this.root, this.children, this.expanded);
     this.spacer.style.height = `${String(this.rows.length * TREE_ROW_HEIGHT)}px`;

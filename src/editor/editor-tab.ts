@@ -14,6 +14,7 @@ import {
   type KeyBinding as CmKeyBinding,
   keymap,
   lineNumbers,
+  runScopeHandlers,
 } from "@codemirror/view";
 
 import {
@@ -41,7 +42,18 @@ import { buildDecorations, highlightField, setHighlights } from "./highlight";
 /** Highlight this many UTF-16 units beyond the visible range. */
 const HIGHLIGHT_MARGIN = 4000;
 const HIGHLIGHT_DEBOUNCE_MS = 40;
-const INDENT = "  ";
+
+/** Actions handled by the focused editor; all others are global. */
+export const EDITOR_ACTIONS: ReadonlySet<KeyAction> = new Set<KeyAction>([
+  "save",
+  "undo",
+  "redo",
+  "addCaretAbove",
+  "addCaretBelow",
+  "selectNextOccurrence",
+  "selectAllOccurrences",
+  "closeTab",
+]);
 
 export interface EditorTabHost {
   onStatus(tab: EditorTab, status: DocStatus): void;
@@ -60,6 +72,7 @@ export class EditorTab {
   readonly docId: DocId;
   readonly path: string;
   readonly language: string | null;
+  readonly indentUnit: string;
   readonly container: HTMLElement;
   readonly view: EditorView;
   dirty: boolean;
@@ -68,6 +81,9 @@ export class EditorTab {
   private highlightTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly gesture = new DoubleModifierGesture();
   private destroyed = false;
+  private externalBar: HTMLElement | null = null;
+  /** Keys pressed while an Enter is waiting for Rust; replayed afterwards. */
+  private deferredKeys: KeyboardEvent[] | null = null;
 
   constructor(
     doc: OpenedDocument,
@@ -77,6 +93,7 @@ export class EditorTab {
     this.docId = doc.docId;
     this.path = doc.path;
     this.language = doc.language;
+    this.indentUnit = doc.indentUnit;
     this.dirty = doc.dirty;
     this.container = document.createElement("div");
     this.container.className = "editor-host";
@@ -131,6 +148,161 @@ export class EditorTab {
     return this.selectionCommand(commands.selectAllOccurrences);
   }
 
+  /**
+   * Enter: newline and indentation computed in Rust. Keys typed before the
+   * result arrives are deferred and replayed afterwards, so they land after
+   * the new line, in the order they were typed.
+   */
+  newLine(): Promise<void> {
+    this.deferredKeys ??= [];
+    return this.enqueue(async () => {
+      try {
+        await this.pushAll();
+        const state = this.view.state;
+        const update = unwrap(
+          await commands.newLine(
+            this.docId,
+            getSyncedVersion(state),
+            toIpcSelection(state.selection),
+          ),
+        );
+        this.applyBackendEdits(update.updates);
+        this.applySelection(update.selection);
+        this.setStatus(update.status);
+      } finally {
+        this.replayDeferredKeys();
+      }
+    });
+  }
+
+  private pendingDeferral(): KeyboardEvent[] | null {
+    return this.deferredKeys;
+  }
+
+  private replayDeferredKeys(): void {
+    const keys = this.deferredKeys ?? [];
+    this.deferredKeys = null;
+    for (const [index, event] of keys.entries()) {
+      // A replayed Enter may have started a new round trip (TypeScript cannot
+      // see that the calls below change the field, hence the helper).
+      const again = this.pendingDeferral();
+      if (again !== null) {
+        again.push(...keys.slice(index));
+        return;
+      }
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
+        this.view.dispatch(this.view.state.replaceSelection(event.key), {
+          userEvent: "input.type",
+          scrollIntoView: true,
+        });
+      } else {
+        runScopeHandlers(this.view, event, "editor");
+      }
+    }
+  }
+
+  /** Sends all pending local edits to Rust. */
+  flush(): Promise<void> {
+    return this.enqueue(() => this.pushAll());
+  }
+
+  /** Replaces the buffer with the file on disk (one undoable step). */
+  reload(): Promise<void> {
+    this.hideExternalChange();
+    return this.enqueue(async () => {
+      await this.pushAll();
+      const result = unwrap(
+        await commands.reloadDocument(this.docId, getSyncedVersion(this.view.state)),
+      );
+      this.applyBackendEdits(result.updates);
+      this.setStatus(result.status);
+    });
+  }
+
+  /**
+   * Called when the file changed on disk: reloads an unmodified buffer, and
+   * asks before replacing a modified one (unless only our own save changed
+   * the file).
+   */
+  onDiskChange(): Promise<void> {
+    return this.enqueue(async () => {
+      await this.pushAll();
+      if (!this.dirty) {
+        const result = unwrap(
+          await commands.reloadDocument(this.docId, getSyncedVersion(this.view.state)),
+        );
+        this.applyBackendEdits(result.updates);
+        this.setStatus(result.status);
+        return;
+      }
+      if (unwrap(await commands.diskChanged(this.docId))) this.showExternalChange();
+    });
+  }
+
+  /**
+   * Applies Replace in Files edits as a local change (so they are pushed to
+   * Rust and undone like typing). Fails if the document moved on meanwhile.
+   */
+  applyReplace(version: number, edits: TextEdit[]): Promise<void> {
+    return this.enqueue(async () => {
+      await this.pushAll();
+      if (getSyncedVersion(this.view.state) !== version) {
+        throw new Error(`${this.name} changed while replacing; run Replace again`);
+      }
+      this.view.dispatch({
+        changes: edits.map((e) => ({ from: e.from, to: e.to, insert: e.insert })),
+        userEvent: "input.replace",
+      });
+      await this.pushAll();
+    });
+  }
+
+  /** Moves the caret to a zero-based line and UTF-16 column and focuses. */
+  reveal(line: number, column: number): void {
+    const doc = this.view.state.doc;
+    const target = doc.line(Math.min(Math.max(line + 1, 1), doc.lines));
+    const pos = Math.min(target.from + Math.max(column, 0), target.to);
+    this.view.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: "center" }),
+      userEvent: "select",
+    });
+    this.view.focus();
+  }
+
+  private showExternalChange(): void {
+    if (this.externalBar) return;
+    const bar = document.createElement("div");
+    bar.className = "editor-bar";
+    bar.dataset.testid = "external-change";
+    bar.setAttribute("role", "alert");
+    const text = document.createElement("span");
+    text.textContent = "The file changed on disk, and this editor has unsaved changes.";
+    const reload = document.createElement("button");
+    reload.type = "button";
+    reload.textContent = "Reload";
+    reload.dataset.testid = "reload-from-disk";
+    reload.addEventListener("click", () => {
+      void this.reload();
+    });
+    const keep = document.createElement("button");
+    keep.type = "button";
+    keep.textContent = "Keep my changes";
+    keep.dataset.testid = "keep-changes";
+    keep.addEventListener("click", () => {
+      this.hideExternalChange();
+      this.view.focus();
+    });
+    bar.append(text, reload, keep);
+    this.container.prepend(bar);
+    this.externalBar = bar;
+  }
+
+  private hideExternalChange(): void {
+    this.externalBar?.remove();
+    this.externalBar = null;
+  }
+
   private createState(text: string, version: number): EditorState {
     return EditorState.create({ doc: text, extensions: this.extensions(version) });
   }
@@ -146,7 +318,9 @@ export class EditorTab {
       Prec.highest(this.gestureHandlers()),
       keymap.of([
         ...this.actionKeys(),
-        { key: "Tab", run: insertIndent },
+        { key: "Enter", run: () => this.runCommand(() => this.newLine()) },
+        { key: "Shift-Enter", run: () => this.runCommand(() => this.newLine()) },
+        { key: "Tab", run: insertIndent(this.indentUnit) },
         { key: "Escape", run: simplifySelection },
         ...standardKeymap,
       ]),
@@ -159,6 +333,11 @@ export class EditorTab {
         if (update.selectionSet || update.docChanged) this.host.onCursor(this);
       }),
     ];
+  }
+
+  private runCommand(run: () => Promise<void>): boolean {
+    void run();
+    return true;
   }
 
   private runAction(action: KeyAction): void {
@@ -179,7 +358,7 @@ export class EditorTab {
 
   private actionKeys(): CmKeyBinding[] {
     return this.bindings.flatMap((binding): CmKeyBinding[] =>
-      binding.stroke.type === "chord"
+      binding.stroke.type === "chord" && EDITOR_ACTIONS.has(binding.action)
         ? [
             {
               key: binding.stroke.keys,
@@ -223,6 +402,14 @@ export class EditorTab {
         return true;
       },
       keydown: (event) => {
+        // While an Enter is in flight, hold every key back (see newLine).
+        if (this.deferredKeys !== null && !event.isComposing) {
+          if (!["Shift", "Control", "Alt", "Meta"].includes(event.key)) {
+            this.deferredKeys.push(event);
+          }
+          event.preventDefault();
+          return true;
+        }
         const armed = this.gesture.keydown(event.key, event.timeStamp);
         const match = gestures.find((g) => g.modifier === armed && g.key === event.key);
         if (!match) return false;
@@ -372,12 +559,15 @@ export class EditorTab {
   }
 }
 
-const insertIndent: Command = (view) => {
-  view.dispatch(
-    view.state.update(view.state.replaceSelection(INDENT), {
-      scrollIntoView: true,
-      userEvent: "input.type",
-    }),
-  );
-  return true;
-};
+/** Tab inserts the document's indentation unit at every caret. */
+function insertIndent(unit: string): Command {
+  return (view) => {
+    view.dispatch(
+      view.state.update(view.state.replaceSelection(unit), {
+        scrollIntoView: true,
+        userEvent: "input.type",
+      }),
+    );
+    return true;
+  };
+}
