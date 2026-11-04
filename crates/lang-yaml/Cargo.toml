@@ -1,0 +1,20 @@
+[package]
+name = "ferrule-lang-yaml"
+description = "YAML language support: grammar and highlight query."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrule-syntax.workspace = true
+tree-sitter-yaml.workspace = true
+
+[dev-dependencies]
+ferrule-buffer.workspace = true
+
+[lints]
+workspace = true

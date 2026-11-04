@@ -1,0 +1,16 @@
+# CI config
+name: build
+on:
+  push:
+    branches: [main, "release/*"]
+defaults: &defaults
+  retries: 3
+  enabled: true
+  timeout: 2.5
+jobs:
+  test:
+    <<: *defaults
+    steps:
+      - run: bun test
+      - name: 'Lint'
+        run: null

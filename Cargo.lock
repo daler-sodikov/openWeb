@@ -926,6 +926,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrule-lang-markdown"
+version = "0.1.0"
+dependencies = [
+ "ferrule-buffer",
+ "ferrule-lang-css",
+ "ferrule-lang-html",
+ "ferrule-lang-js",
+ "ferrule-lang-yaml",
+ "ferrule-syntax",
+ "tree-sitter-md",
+]
+
+[[package]]
+name = "ferrule-lang-yaml"
+version = "0.1.0"
+dependencies = [
+ "ferrule-buffer",
+ "ferrule-syntax",
+ "tree-sitter-yaml",
+]
+
+[[package]]
 name = "ferrule-lsp-client"
 version = "0.1.0"
 
@@ -4317,6 +4339,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-md"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ed661bfe3c264961425f77cd89ad2998bf5d629e71ce8bab1e5d7e940d6246e"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-scss"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4341,6 +4373,16 @@ name = "tree-sitter-typescript"
 version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-yaml"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53c223db85f05e34794f065454843b0668ebc15d240ada63e2b5939f43ce7c97"
 dependencies = [
  "cc",
  "tree-sitter-language",

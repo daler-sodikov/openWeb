@@ -22,6 +22,8 @@ ferrule-syntax = { path = "crates/syntax" }
 ferrule-lang-js = { path = "crates/lang-js" }
 ferrule-lang-css = { path = "crates/lang-css" }
 ferrule-lang-html = { path = "crates/lang-html" }
+ferrule-lang-yaml = { path = "crates/lang-yaml" }
+ferrule-lang-markdown = { path = "crates/lang-markdown" }
 ferrule-indexer = { path = "crates/indexer" }
 ferrule-search = { path = "crates/search" }
 ferrule-lsp-client = { path = "crates/lsp-client" }
