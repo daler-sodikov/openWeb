@@ -16,3 +16,6 @@
 # OS / editor noise
 .DS_Store
 *.log
+
+# Local IDE state (OpenIDEA)
+/.openidea/
