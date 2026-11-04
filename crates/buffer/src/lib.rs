@@ -1,5 +1,23 @@
-//! Rope-based text buffer: edits, versions, selections, multi-cursor, undo/redo and offset conversions. Pure, no IO.
+//! Rope-based text buffer: edits, versions, selections, multi-cursor, undo/redo
+//! and offset conversions. Pure, no IO.
 //!
-//! Empty in M0: the crate exists so the workspace layout and dependency
-//! graph from `docs/ARCHITECTURE.md` are in place. Its scope and milestone
-//! are listed in `docs/ROADMAP.md`.
+//! Positions in the public API are **UTF-16 code-unit offsets** (the unit used
+//! by CodeMirror, JS strings and LSP), see `docs/ARCHITECTURE.md`, 3.3. Text
+//! inside a [`Document`] always uses `\n` line endings; callers normalize with
+//! [`normalize_line_endings`] when loading and restore the original ending with
+//! [`LineEnding::apply`] when saving.
+
+mod document;
+mod history;
+mod multicursor;
+mod selection;
+mod text;
+
+pub use document::{
+    ApplyOutcome, BufferError, ByteEdit, Document, Edit, EditKind, Point, Transaction,
+};
+pub use history::UndoOutcome;
+pub use multicursor::CaretDirection;
+pub use ropey::Rope;
+pub use selection::{SelRange, Selection};
+pub use text::{LineEnding, normalize_line_endings};
