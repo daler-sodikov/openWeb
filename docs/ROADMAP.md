@@ -342,9 +342,11 @@ push).
 Known gaps found in M3a (tracked here):
 
 - [ ] Opening navigation targets outside the project (e.g. `lib.dom.d.ts`)
+      (M3b, point 8)
 - [ ] Links in hover documentation are shown but do not open the browser
 - [ ] `fixtures/react-ts` has no `node_modules`, so React imports show
-      "Cannot find module" errors until `bun install` is run in it
+      "Cannot find module" errors until `bun install` is run in it (M3b,
+      point 10)
 - [ ] Diagnostics of files that are not open are not requested
       (pull diagnostics / project-wide check)
 
@@ -373,15 +375,27 @@ Known gaps found in M3a (tracked here):
    server's document formatting as one undo step (Prettier is a follow-up).
 7. **oxc fast path.** Unused imports are greyed out, and imports can be
    sorted instantly in-process with `oxc`, without waiting for the server.
-8. **Tests.** Mock-server tests for completion, cancellation, rename and
-   workspace edits; golden tests for refactor edits; real-server integration
-   tests; Playwright `ui` tests for 1–7; all checks pass with zero warnings.
+8. **Read-only library files.** Definitions and usages in files outside
+   the project (`lib.dom.d.ts`) or inside `node_modules` open in a read-only
+   editor (lock marker in the tab; typing does nothing; hover and navigation
+   work there too).
+9. **Typing latency.** Timing spans on the typing path (key → local echo
+   frame → Rust buffer → highlights → frame) in the view and in Rust,
+   collected by `ferrule-perf`. A baseline before M3b and a run with
+   completion, signature help and diagnostics active are recorded in
+   `perf/RESULTS.md`; M3b must not make the median worse.
+10. **Fixture.** `fixtures/react-ts` has `@types/react` and
+    `@types/react-dom` as devDependencies with a committed `bun.lock`;
+    JSX type-checks without errors; CI installs them.
+11. **Tests.** Mock-server tests for completion, cancellation, rename and
+    workspace edits; golden tests for refactor edits (snippet expansion,
+    workspace edits, import sorting); real-server integration tests;
+    Playwright `ui` tests for 1–8; all checks pass with zero warnings.
 
 ### Later in the TypeScript track
 
 - [ ] Extract variable/function/component
 - [ ] ESLint and Prettier integration; Emmet
-- [ ] Opening definitions outside the project (e.g. `lib.dom.d.ts`) read-only
 
 ## M4: Terminal and Git
 

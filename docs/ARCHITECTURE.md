@@ -461,6 +461,75 @@ Files changed on disk (4.5) are forwarded as
 `workspace/didChangeWatchedFiles`, so the server notices new, deleted and
 externally edited files and `tsconfig.json` changes.
 
+### 4.8 Editing features from the language server (M3b)
+
+**One way to change text.** Every edit computed from the server
+(completion, rename, code actions, formatting) is turned in Rust into
+UTF-16 `TextEdit`s for one document version. For an **open** document the
+view applies them as one local transaction (one undo step) after checking
+that its synced version is still that version, exactly like Replace in
+Files (M2); the transaction then reaches Rust through the normal queue.
+**Closed** files are rewritten by Rust atomically, keeping line endings and
+BOM; a file whose content changed since the preview was computed is
+skipped and reported, never overwritten. Resource operations (create,
+rename, delete files) are reported as unsupported.
+
+**Completion.** `completion(doc, version, offset, trigger)` asks the server
+and keeps the raw items in a per-document session in Rust. The view gets a
+session id, the replace range and the first page of items, ranked in Rust
+with the `search` fuzzy matcher (then `sortText`, then `preselect`). While
+the popup is open, each keystroke calls `filter_completion(session,
+prefix)`: ranking runs in Rust without asking the server again (unless the
+list was incomplete). The selected item's details come lazily from
+`completionItem/resolve`. Accepting calls `accept_completion(session,
+item, version)`: Rust resolves the item if needed, then returns the main
+edit (from the item's range start to the caret), `additionalTextEdits`
+(auto-imports) and, for snippets, the text without placeholders plus the
+tab stops. Keys pressed meanwhile are deferred and replayed, like Enter.
+A newer completion request cancels the older one in the server.
+
+**Signature help, usages.** `signature_help` returns the active signature
+with parameter ranges in its label (rendered by the view, documentation as
+sanitized HTML). `find_usages` returns `textDocument/references` grouped by
+file with line previews for a results tool window.
+
+**Rename.** `prepare_rename` (if the server supports it) gives the range
+and placeholder; `rename_preview(name)` stores the server's
+`WorkspaceEdit` and returns the files and occurrence counts;
+`apply_rename(preview)` returns the edits for open documents and rewrites
+closed files as above.
+
+**Code actions.** `code_actions(range)` sends the diagnostics overlapping
+the range as context and keeps the actions in Rust. An action with an
+`edit` is applied directly. An action with a `command` is executed with
+`workspace/executeCommand`; typescript-language-server answers by sending
+`workspace/applyEdit` back. `lsp-client` hands such server requests to the
+client hooks; `core` captures the edit while its own command runs, answers
+`applied: true`, and applies the captured edit through the pipeline above
+once the command returns (an `applyEdit` that arrives at any other time is
+refused). Organize Imports asks for `source.organizeImports`.
+
+**Formatting** uses `textDocument/formatting` with the indent unit and tab
+width of the document (EditorConfig).
+
+**Read-only files.** Navigation and usage targets outside the project or
+inside `node_modules` open as read-only documents (`open_external(path)`
+for absolute paths): highlighted, synced to the server so hover and
+navigation work in them, but edits are refused in Rust and blocked in the
+view. They are never autosaved or saved.
+
+**oxc fast path.** `lang-js` parses JS/TS with `oxc` (in process) after
+edits settle and reports unused imports, shown faded like the server's
+"unnecessary" hints but without waiting for it. "Sort Imports" reorders
+the leading import declarations by module specifier in-process.
+
+**Typing-path spans.** With `FERRULE_TYPING_TRACE=<file>` the view records,
+per keystroke, the time from the key event to the local-echo frame, to the
+Rust buffer confirming the edit and to the frame showing fresh highlights
+(User Timing marks), and Rust records how long `apply_changes` and
+`highlights` take. Both append to the file; `ferrule-perf` reports their
+medians next to the external key-to-glyph latency.
+
 ## 5. Editor view layer: CodeMirror 6 as a view only
 
 **Decision: CodeMirror 6 (MIT) is the input and rendering engine. Rust is
