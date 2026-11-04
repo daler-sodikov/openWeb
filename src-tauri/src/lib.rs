@@ -16,10 +16,10 @@ pub use events::{FsChanged, IndexStatus, TauriSink, encode as encode_event};
 
 use ferrule_core::Session;
 use ferrule_ipc::{
-    AppInfo, CaretDirection, ChangeTransaction, DirEntry, DocId, DocStatus, DocumentReload,
-    EditorSelection, FindResults, FrontendReadyReport, Highlights, IpcError, KeyBinding,
-    OpenedDocument, PROTOCOL_VERSION, ProjectInfo, RemoteUpdate, ReplaceResult, SearchResults,
-    SearchTab, TextSearch,
+    AppInfo, CaretDirection, CaretInfo, ChangeTransaction, DirEntry, DocId, DocStatus,
+    DocumentReload, EditorSelection, FindResults, FoldRanges, FrontendReadyReport, Highlights,
+    IpcError, KeyBinding, OpenedDocument, PROTOCOL_VERSION, ProjectInfo, RemoteUpdate,
+    ReplaceResult, SaveResult, SearchResults, SearchTab, StartupTarget, TextSearch,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -64,9 +64,9 @@ impl SmokeMode {
     }
 }
 
-/// Folder passed on the command line, if any.
+/// Folder (and optional file) passed on the command line, if any.
 #[derive(Debug, Clone, Default)]
-pub struct InitialProject(pub Option<String>);
+pub struct InitialProject(pub Option<StartupTarget>);
 
 type SessionState<'a> = State<'a, Arc<Session>>;
 
@@ -93,10 +93,12 @@ async fn report_frontend_ready(
     result
 }
 
-/// Folder passed on the command line (`ferrule <path>`), if any.
+/// Folder and file passed on the command line (`ferrule <folder> [file]`).
 #[tauri::command]
 #[specta::specta]
-async fn initial_project(initial: State<'_, InitialProject>) -> Result<Option<String>, IpcError> {
+async fn initial_project(
+    initial: State<'_, InitialProject>,
+) -> Result<Option<StartupTarget>, IpcError> {
     Ok(initial.0.clone())
 }
 
@@ -225,7 +227,7 @@ async fn highlights(
 /// Saves a document.
 #[tauri::command]
 #[specta::specta]
-async fn save_document(session: SessionState<'_>, doc_id: DocId) -> Result<DocStatus, IpcError> {
+async fn save_document(session: SessionState<'_>, doc_id: DocId) -> Result<SaveResult, IpcError> {
     session.save_document(doc_id).await
 }
 
@@ -264,6 +266,24 @@ async fn reload_document(
 #[specta::specta]
 async fn disk_changed(session: SessionState<'_>, doc_id: DocId) -> Result<bool, IpcError> {
     session.disk_changed(doc_id).await
+}
+
+/// Breadcrumbs and the bracket pair at a UTF-16 offset.
+#[tauri::command]
+#[specta::specta]
+async fn caret_info(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    offset: u32,
+) -> Result<CaretInfo, IpcError> {
+    session.caret_info(doc_id, offset).await
+}
+
+/// Folding ranges of a document.
+#[tauri::command]
+#[specta::specta]
+async fn folds(session: SessionState<'_>, doc_id: DocId) -> Result<FoldRanges, IpcError> {
+    session.folds(doc_id).await
 }
 
 /// Search Everywhere.
@@ -331,6 +351,8 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             new_line,
             reload_document,
             disk_changed,
+            caret_info,
+            folds,
             search_everywhere,
             recent_files,
             find_in_files,
@@ -375,12 +397,16 @@ pub fn init_tracing() {
 pub fn run() -> anyhow::Result<()> {
     init_tracing();
     let smoke_enabled = std::env::var(SMOKE_ENV).is_ok_and(|value| value == "1");
-    let initial = InitialProject(std::env::args_os().nth(1).map(|arg| {
-        let path = PathBuf::from(arg);
-        std::path::absolute(&path)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned()
+    let mut args = std::env::args_os().skip(1);
+    let initial = InitialProject(args.next().map(|folder| {
+        let path = PathBuf::from(folder);
+        StartupTarget {
+            folder: std::path::absolute(&path)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned(),
+            file: args.next().map(|f| f.to_string_lossy().replace('\\', "/")),
+        }
     }));
 
     configure(

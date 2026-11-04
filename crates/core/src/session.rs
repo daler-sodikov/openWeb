@@ -18,7 +18,8 @@ use ferrule_buffer::{
 };
 use ferrule_ipc::{self as ipc, DocId, IpcError, IpcErrorKind};
 use ferrule_project::{EntryKind, Project};
-use ferrule_syntax::{LanguageRegistry, SyntaxError, SyntaxTree};
+use ferrule_settings::{EditorConfig, EndOfLine, resolve_editorconfig};
+use ferrule_syntax::{DEFAULT_AUTO_CLOSE, LanguageRegistry, SyntaxError, SyntaxTree};
 use ferrule_vfs::RecoveryStore;
 use tokio_util::sync::CancellationToken;
 
@@ -53,6 +54,9 @@ pub(crate) struct DocState {
     restored: bool,
     indent_unit: String,
     indent_rules: IndentRules,
+    tab_width: u32,
+    auto_close: Vec<String>,
+    editorconfig: EditorConfig,
 }
 
 impl DocState {
@@ -101,6 +105,8 @@ impl DocHandle {
             dirty: state.dirty(),
             restored: state.restored,
             indent_unit: state.indent_unit.clone(),
+            tab_width: state.tab_width,
+            auto_close: state.auto_close.clone(),
         })
     }
 
@@ -178,6 +184,8 @@ fn languages() -> Result<LanguageRegistry, SyntaxError> {
         .into_iter()
         .chain(ferrule_lang_css::languages())
         .chain(ferrule_lang_html::languages())
+        .chain(ferrule_lang_yaml::languages())
+        .chain(ferrule_lang_markdown::languages())
     {
         registry.register(def)?;
     }
@@ -313,6 +321,7 @@ impl Session {
                     EntryKind::Directory => ipc::EntryKind::Directory,
                     EntryKind::File => ipc::EntryKind::File,
                 },
+                ignored: e.ignored,
             })
             .collect())
     }
@@ -335,7 +344,9 @@ impl Session {
         let (state, language) = blocking(move || {
             let file = ferrule_vfs::read_text(&abs_for_load).map_err(vfs_error)?;
             let saved_text = Rope::from_str(&file.text);
-            let indent_unit = detect_indent_unit(&file.text);
+            let editorconfig = resolve_editorconfig(&abs_for_load);
+            let indent_unit = editorconfig.indent_unit(&detect_indent_unit(&file.text));
+            let tab_width = editorconfig.display_tab_width();
             let mut doc = Document::new(&file.text);
             let mut restored = false;
             if let Some(entry) = recovery.load(&abs_for_load) {
@@ -355,13 +366,21 @@ impl Session {
             }
             let language = registry.for_path(&abs_for_load);
             let name = language.as_ref().map(|l| l.name().to_owned());
+            let auto_close: Vec<String> = language
+                .as_ref()
+                .map_or(DEFAULT_AUTO_CLOSE, |l| l.auto_close())
+                .iter()
+                .map(|p| (*p).to_owned())
+                .collect();
             let indent_rules = IndentRules {
                 markup_tags: language.as_ref().is_some_and(|l| l.markup_indent()),
             };
             let syntax = match language {
-                Some(lang) => Some(SyntaxTree::new(lang).map_err(|e| {
-                    IpcError::new(IpcErrorKind::Internal, e.to_string())
-                })?),
+                Some(lang) => Some(
+                    SyntaxTree::new(lang)
+                        .map_err(|e| IpcError::new(IpcErrorKind::Internal, e.to_string()))?
+                        .with_registry(registry.clone()),
+                ),
                 None => None,
             };
             Ok((
@@ -374,6 +393,9 @@ impl Session {
                     saved_text,
                     restored,
                     indent_unit,
+                    tab_width,
+                    auto_close,
+                    editorconfig,
                     indent_rules,
                 },
                 name,
@@ -709,18 +731,126 @@ impl Session {
 
     /// Saves a document atomically with its original line endings and BOM,
     /// and deletes its recovery file.
-    pub async fn save_document(&self, doc_id: DocId) -> Result<ipc::DocStatus, IpcError> {
+    pub async fn save_document(&self, doc_id: DocId) -> Result<ipc::SaveResult, IpcError> {
         let handle = self.doc(doc_id)?;
         handle.cancel_autosave();
         let recovery = self.recovery.clone();
+        let now = self.now_ms();
         blocking(move || {
-            let mut state = handle.lock()?;
+            let mut guard = handle.lock()?;
+            let state = &mut *guard;
+            // EditorConfig: whitespace and final newline as one undoable step.
+            let edits = save_edits(&state.doc, &state.editorconfig);
+            let mut updates = Vec::new();
+            if !edits.is_empty() {
+                let tx = Transaction {
+                    edits: edits.clone(),
+                    kind: EditKind::Other,
+                    selection_before: Selection::cursor(0),
+                    selection_after: Selection::cursor(0),
+                };
+                let outcome = state
+                    .doc
+                    .apply(state.doc.version(), &[tx], now)
+                    .map_err(buffer_error)?;
+                if let Some(syntax) = &mut state.syntax {
+                    syntax.edit(&outcome.byte_edits);
+                }
+                updates.push(edits.iter().map(edit_to_ipc).collect());
+            }
+            match state.editorconfig.end_of_line {
+                Some(EndOfLine::Lf) => state.line_ending = LineEnding::Lf,
+                Some(EndOfLine::CrLf) => state.line_ending = LineEnding::CrLf,
+                Some(EndOfLine::Cr) => tracing::warn!(
+                    "end_of_line = cr is not supported; keeping the file's line endings"
+                ),
+                None => {}
+            }
+            match state.editorconfig.charset.as_deref() {
+                Some("utf-8") => state.bom = false,
+                Some("utf-8-bom") => state.bom = true,
+                Some(other) => {
+                    tracing::warn!(charset = other, "only UTF-8 is supported; saving as UTF-8")
+                }
+                None => {}
+            }
             let bytes = ferrule_vfs::encode(&state.doc.text(), state.line_ending, state.bom);
             ferrule_vfs::write_atomic(&handle.path, &bytes).map_err(|e| io_error(&e))?;
             state.mark_saved();
             recovery.remove(&handle.path).map_err(|e| io_error(&e))?;
             tracing::info!(path = ?handle.path, "saved");
-            Ok(state.status())
+            Ok(ipc::SaveResult {
+                updates,
+                status: state.status(),
+            })
+        })
+        .await
+    }
+
+    /// Breadcrumbs and the bracket pair at a UTF-16 offset.
+    pub async fn caret_info(&self, doc_id: DocId, offset: u32) -> Result<ipc::CaretInfo, IpcError> {
+        let handle = self.doc(doc_id)?;
+        blocking(move || {
+            let mut guard = handle.lock()?;
+            let state = &mut *guard;
+            let doc = &state.doc;
+            let version = doc.version();
+            let byte = doc.utf16_to_byte_clamped(to_usize(offset));
+            let Some(syntax) = &mut state.syntax else {
+                return Ok(ipc::CaretInfo {
+                    version,
+                    breadcrumbs: Vec::new(),
+                    brackets: None,
+                });
+            };
+            let breadcrumbs = syntax
+                .breadcrumbs(doc.rope(), byte)
+                .into_iter()
+                .map(|c| ipc::Crumb {
+                    label: c.label,
+                    kind: c.kind,
+                    offset: to_u32(doc.byte_to_utf16(c.start)),
+                })
+                .collect();
+            let brackets = syntax
+                .bracket_pair(doc.rope(), byte)
+                .map(|p| ipc::BracketMatch {
+                    open_from: to_u32(doc.byte_to_utf16(p.open.start)),
+                    open_to: to_u32(doc.byte_to_utf16(p.open.end)),
+                    close_from: to_u32(doc.byte_to_utf16(p.close.start)),
+                    close_to: to_u32(doc.byte_to_utf16(p.close.end)),
+                });
+            Ok(ipc::CaretInfo {
+                version,
+                breadcrumbs,
+                brackets,
+            })
+        })
+        .await
+    }
+
+    /// Folding ranges of the current version.
+    pub async fn folds(&self, doc_id: DocId) -> Result<ipc::FoldRanges, IpcError> {
+        let handle = self.doc(doc_id)?;
+        blocking(move || {
+            let mut guard = handle.lock()?;
+            let state = &mut *guard;
+            let doc = &state.doc;
+            let ranges = match &mut state.syntax {
+                Some(syntax) => syntax
+                    .folds(doc.rope())
+                    .into_iter()
+                    .map(|f| ipc::FoldSpan {
+                        from: to_u32(doc.byte_to_utf16(f.start)),
+                        to: to_u32(doc.byte_to_utf16(f.end)),
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+            Ok(ipc::FoldRanges {
+                version: doc.version(),
+                ranges,
+            })
         })
         .await
     }
@@ -800,4 +930,42 @@ fn minimal_edit(doc: &Document, old: &str, new: &str) -> Option<Edit> {
     let from = doc.byte_to_utf16(prefix);
     let to = doc.byte_to_utf16(old.len() - suffix);
     Some(Edit::new(from, to, &new[prefix..new.len() - suffix]))
+}
+
+/// Edits applied on save by EditorConfig: `trim_trailing_whitespace` and
+/// `insert_final_newline` (sorted, UTF-16, relative to the current text).
+fn save_edits(doc: &Document, config: &EditorConfig) -> Vec<Edit> {
+    let text = doc.text();
+    let mut edits = Vec::new();
+    if config.trim_trailing_whitespace == Some(true) {
+        let mut line_start = 0;
+        for line in text.split_inclusive('\n') {
+            let body = line.strip_suffix('\n').unwrap_or(line);
+            let trimmed = body.trim_end_matches([' ', '\t']);
+            if trimmed.len() < body.len() {
+                let from = doc.byte_to_utf16(line_start + trimmed.len());
+                let to = doc.byte_to_utf16(line_start + body.len());
+                edits.push(Edit::new(from, to, ""));
+            }
+            line_start += line.len();
+        }
+    }
+    match config.insert_final_newline {
+        Some(true) if !text.is_empty() && !text.ends_with('\n') => {
+            let end = doc.len_utf16();
+            // Merge with a trim edit at the very end, keeping edits disjoint.
+            match edits.last_mut() {
+                Some(last) if last.to == end => last.insert.push('\n'),
+                _ => edits.push(Edit::new(end, end, "\n")),
+            }
+        }
+        Some(false) if text.ends_with('\n') => {
+            let kept = text.trim_end_matches('\n').len();
+            let from = doc.byte_to_utf16(kept);
+            edits.retain(|e| e.from < from);
+            edits.push(Edit::new(from, doc.len_utf16(), ""));
+        }
+        _ => {}
+    }
+    edits
 }

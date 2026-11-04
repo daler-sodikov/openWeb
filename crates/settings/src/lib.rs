@@ -45,6 +45,18 @@ pub enum Action {
     ReplaceInFiles,
     /// Open Folder (no default key).
     OpenFolder,
+    /// Open the current file in a split to the right (no default key).
+    SplitRight,
+    /// Fold the region at the caret.
+    FoldCollapse,
+    /// Unfold the region at the caret.
+    FoldExpand,
+    /// Fold everything.
+    FoldCollapseAll,
+    /// Unfold everything.
+    FoldExpandAll,
+    /// Move the caret to the matching bracket.
+    GotoMatchingBrace,
 }
 
 /// Modifier used in double-tap gestures.
@@ -107,11 +119,17 @@ pub fn action_name(action: Action) -> &'static str {
         Action::FindInFiles => "Find in Files",
         Action::ReplaceInFiles => "Replace in Files",
         Action::OpenFolder => "Open Folder",
+        Action::SplitRight => "Split Right",
+        Action::FoldCollapse => "Collapse",
+        Action::FoldExpand => "Expand",
+        Action::FoldCollapseAll => "Collapse All",
+        Action::FoldExpandAll => "Expand All",
+        Action::GotoMatchingBrace => "Move Caret to Matching Brace",
     }
 }
 
 /// Every action, in display order.
-pub const ALL_ACTIONS: [Action; 17] = [
+pub const ALL_ACTIONS: [Action; 23] = [
     Action::GotoFile,
     Action::GotoSymbol,
     Action::GotoLine,
@@ -129,6 +147,12 @@ pub const ALL_ACTIONS: [Action; 17] = [
     Action::AddCaretBelow,
     Action::SelectNextOccurrence,
     Action::SelectAllOccurrences,
+    Action::SplitRight,
+    Action::FoldCollapse,
+    Action::FoldExpand,
+    Action::FoldCollapseAll,
+    Action::FoldExpandAll,
+    Action::GotoMatchingBrace,
 ];
 
 /// IntelliJ-style default bindings (from the publicly documented default
@@ -179,6 +203,14 @@ pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
         bind(A::RecentFiles, Chord("Mod-e")),
         bind(A::FindInFiles, Chord("Mod-Shift-f")),
         bind(A::ReplaceInFiles, Chord("Mod-Shift-r")),
+        bind(A::FoldCollapse, Chord("Mod--")),
+        bind(A::FoldExpand, Chord("Mod-=")),
+        bind(A::FoldCollapseAll, Chord("Mod-Shift--")),
+        bind(A::FoldExpandAll, Chord("Mod-Shift-=")),
+        bind(
+            A::GotoMatchingBrace,
+            Chord(if mac { "Mod-Ctrl-m" } else { "Mod-Shift-m" }),
+        ),
     ]
 }
 

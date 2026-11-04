@@ -142,6 +142,12 @@ pub(crate) fn action_to_ipc(action: ferrule_settings::Action) -> ipc::KeyAction 
         A::FindInFiles => K::FindInFiles,
         A::ReplaceInFiles => K::ReplaceInFiles,
         A::OpenFolder => K::OpenFolder,
+        A::SplitRight => K::SplitRight,
+        A::FoldCollapse => K::FoldCollapse,
+        A::FoldExpand => K::FoldExpand,
+        A::FoldCollapseAll => K::FoldCollapseAll,
+        A::FoldExpandAll => K::FoldExpandAll,
+        A::GotoMatchingBrace => K::GotoMatchingBrace,
     }
 }
 

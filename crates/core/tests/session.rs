@@ -142,7 +142,7 @@ async fn edit_highlight_undo_redo_save() {
     assert!(session.redo(doc.doc_id, 3).await.unwrap().is_none());
 
     let saved = session.save_document(doc.doc_id).await.unwrap();
-    assert!(!saved.dirty);
+    assert!(!saved.status.dirty);
     let on_disk = fs::read_to_string(dir.path().join("demo/src/app.ts")).unwrap();
     assert_eq!(on_disk, "export const a = 1;\n");
 }
@@ -236,9 +236,9 @@ async fn closing_a_modified_tab_keeps_its_text() {
     let dir = project_dir();
     let session = session(dir.path()).await;
     let doc = session.open_document("README.md".into()).await.unwrap();
-    assert_eq!(doc.language, None, "Markdown highlighting is M2");
+    assert_eq!(doc.language.as_deref(), Some("Markdown"));
     let hl = session.highlights(doc.doc_id, 0, 10).await.unwrap();
-    assert!(hl.spans.is_empty());
+    assert!(!hl.spans.is_empty(), "the heading is highlighted");
     session
         .apply_changes(doc.doc_id, 0, vec![typing(7, "More.\n")])
         .await
@@ -272,6 +272,6 @@ async fn opening_twice_returns_the_same_document() {
 
 #[test]
 fn keymap_has_every_action() {
-    // Every action except Open Folder (no default key in the IntelliJ keymap).
-    assert_eq!(ferrule_core::keymap().len(), 16);
+    // Every action except Open Folder and Split Right (no default keys in the IntelliJ keymap).
+    assert_eq!(ferrule_core::keymap().len(), 21);
 }

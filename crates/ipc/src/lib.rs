@@ -10,7 +10,7 @@ use specta::Type;
 
 /// Version of the IPC protocol. Bump on any breaking change to a command,
 /// event or DTO so that a mismatched frontend refuses to run.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Operating system the backend runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -128,6 +128,8 @@ pub struct DirEntry {
     pub path: String,
     /// Directory or file.
     pub kind: EntryKind,
+    /// Excluded by `.gitignore` (or inside `node_modules`); shown greyed.
+    pub ignored: bool,
 }
 
 /// A document opened in the editor.
@@ -148,8 +150,12 @@ pub struct OpenedDocument {
     pub dirty: bool,
     /// Whether unsaved text was restored from a recovery file.
     pub restored: bool,
-    /// Detected indentation unit (a tab or spaces), inserted by Tab.
+    /// Indentation unit (a tab or spaces), from EditorConfig or detected.
     pub indent_unit: String,
+    /// Display width of a tab character.
+    pub tab_width: u32,
+    /// Pairs closed automatically when typing the opener (`"()"`, `"''"`).
+    pub auto_close: Vec<String>,
 }
 
 /// Replace the UTF-16 range `from..to` with `insert`.
@@ -314,6 +320,12 @@ pub enum KeyAction {
     FindInFiles,
     ReplaceInFiles,
     OpenFolder,
+    SplitRight,
+    FoldCollapse,
+    FoldExpand,
+    FoldCollapseAll,
+    FoldExpandAll,
+    GotoMatchingBrace,
 }
 
 /// Modifier used in double-tap gestures.
@@ -528,6 +540,85 @@ pub struct IndexState {
     pub files: u32,
     /// Indexed symbols.
     pub symbols: u32,
+}
+
+/// One breadcrumb.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Crumb {
+    /// Display label.
+    pub label: String,
+    /// Syntax node kind.
+    pub kind: String,
+    /// Where the node starts (UTF-16).
+    pub offset: u32,
+}
+
+/// A matched bracket pair (UTF-16 ranges).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BracketMatch {
+    /// Opening bracket start.
+    pub open_from: u32,
+    /// Opening bracket end.
+    pub open_to: u32,
+    /// Closing bracket start.
+    pub close_from: u32,
+    /// Closing bracket end.
+    pub close_to: u32,
+}
+
+/// Structural information at the caret.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CaretInfo {
+    /// Version the information belongs to.
+    pub version: u32,
+    /// Breadcrumbs, outermost first.
+    pub breadcrumbs: Vec<Crumb>,
+    /// Bracket pair touching the caret.
+    pub brackets: Option<BracketMatch>,
+}
+
+/// A foldable range; the text between `from` and `to` is hidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FoldSpan {
+    /// Start (UTF-16).
+    pub from: u32,
+    /// End (UTF-16).
+    pub to: u32,
+}
+
+/// Folding ranges of a document version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FoldRanges {
+    /// Version the ranges belong to.
+    pub version: u32,
+    /// Ranges sorted by start, at most one per starting line.
+    pub ranges: Vec<FoldSpan>,
+}
+
+/// Result of saving: edits applied on save (EditorConfig trimming and final
+/// newline, one undoable step) and the status afterwards.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveResult {
+    /// Edits (one list per version step); empty if nothing changed.
+    pub updates: Vec<Vec<TextEdit>>,
+    /// Status after saving.
+    pub status: DocStatus,
+}
+
+/// What to open at startup (`ferrule <folder> [file]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupTarget {
+    /// Absolute folder path.
+    pub folder: String,
+    /// File to open, relative to the folder (`/` separators).
+    pub file: Option<String>,
 }
 
 #[cfg(test)]

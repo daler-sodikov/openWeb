@@ -838,6 +838,8 @@ dependencies = [
  "ferrule-lang-css",
  "ferrule-lang-html",
  "ferrule-lang-js",
+ "ferrule-lang-markdown",
+ "ferrule-lang-yaml",
  "ferrule-lsp-client",
  "ferrule-plugin-host",
  "ferrule-project",
