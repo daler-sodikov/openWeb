@@ -180,4 +180,5 @@ export const keys = {
   recentFiles: "ControlOrMeta+e",
   findInFiles: "ControlOrMeta+Shift+F",
   replaceInFiles: "ControlOrMeta+Shift+R",
+  matchingBrace: isMac ? "Meta+Control+m" : "Control+Shift+M",
 };
