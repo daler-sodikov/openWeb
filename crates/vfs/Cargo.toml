@@ -11,6 +11,11 @@ publish.workspace = true
 
 [dependencies]
 ferrule-buffer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true
