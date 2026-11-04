@@ -247,14 +247,126 @@ read-only paging for files over 20 MB.
 
 ## M3: TypeScript intelligence
 
-- [ ] `lsp-client`: JSON-RPC, lifecycle, cancellation, fake-server tests
-- [ ] vtsls integration; server definitions in `languages/typescript/`
-- [ ] Completion, parameter hints, quick docs
-- [ ] Go to definition/type/implementation, find usages
-- [ ] Rename, extract variable/function/component, organize imports, auto-import
-- [ ] Diagnostics and Alt+Enter quick fixes; `oxc` in-process features
+M3 runs in two parts: M3a (client, diagnostics, hover, navigation) and M3b
+(completion, signature help, usages, rename, code actions, formatting, oxc
+fast path). Design: [ARCHITECTURE.md, 4.7](ARCHITECTURE.md#47-language-servers-m3).
+
+Before M3a: the M2b Windows CI job failed (`tree-sitter-scss` passes a GCC
+flag to MSVC); fixed by vendoring the crate with the upstream build-script
+fix (`third_party/tree-sitter-scss`).
+
+### M3a: LSP client, diagnostics, hover, definition
+
+Plan:
+
+- [ ] `lsp-client`: Content-Length framing over any async stream, JSON-RPC
+      requests with ids, `$/cancelRequest` driven by a `CancellationToken`,
+      server→client requests answered, initialize/initialized/shutdown/exit,
+      capability negotiation (UTF-16 positions), stderr to `tracing`,
+      supervisor that restarts a crashed server with backoff, debounced
+      incremental `didChange`, executable discovery
+- [ ] `fake-lsp-server` (test-only binary in `lsp-client`): scripted server
+      that rebuilds the text from incremental changes, honours cancellation,
+      publishes diagnostics and can crash on request
+- [ ] `buffer`: every applied edit also yields an LSP-shaped change (line +
+      UTF-16 column, in application order)
+- [ ] `project`: tsconfig/jsconfig files and npm/pnpm/yarn workspace packages
+- [ ] `lang-js`: the TypeScript server definition (program, args, language
+      ids per file type)
+- [ ] `settings`: user settings file with `typescript.serverPath`
+- [ ] `core`: one TypeScript server per project, started on the first JS/TS
+      document, document sync from the Rust buffer, diagnostics store, hover
+      (Markdown rendered and sanitized in Rust, code highlighted by
+      tree-sitter), definition/type definition/implementation, status events
+- [ ] Frontend: squiggles with hover messages, Problems tool window, Quick
+      Documentation popup and mouse hover, Go to Definition (Ctrl+B,
+      Ctrl+Click), Type Definition, Implementation, chooser popup, status
+      bar server state and problem counts
+- [ ] CI installs Node, `typescript-language-server` and `typescript` so the
+      real-server tests run on all three OSes
+
+**Done when:**
+
+1. **Discovery.** The server is found in this order: the project's
+   `node_modules/.bin/typescript-language-server`, the user setting
+   `typescript.serverPath` in `settings.json` (app config directory), then
+   `PATH`. A server that is a Node script additionally needs `node` on
+   `PATH`. If the server or Node is missing, the status bar says so and how
+   to fix it, and the editor stays fully usable: nothing blocks or crashes.
+2. **Lifecycle.** Opening the first `.ts/.tsx/.js/.jsx/.mts/.cts/.mjs/.cjs`
+   file starts one server for the project; the status bar shows
+   _starting → indexing (while the server reports progress) → ready_. If the
+   server process dies, it is restarted with backoff (0.5 s, 1 s, 2 s, …,
+   at most 5 attempts in a row) and every open document is sent again;
+   after that the state is _error_ and the action "Restart TypeScript
+   Server" starts it again. Opening another project or quitting shuts the
+   server down.
+3. **Sync.** The server sees exactly the Rust buffer: `didOpen` on open,
+   debounced incremental `didChange` (also for undo/redo, Enter, reload,
+   save edits and Replace in Files), `didSave`, `didClose`. Requests flush
+   pending changes first. A test proves that the text a server rebuilds from
+   our changes equals the buffer after edits with emoji and CJK text.
+4. **Diagnostics.** Errors, warnings, info and hints from the server show as
+   squiggles (four styles); hovering a squiggle shows the message. The
+   Problems tool window (Alt+6, macOS Cmd+6, or a click on the status bar
+   counts) lists problems grouped by file with counts; clicking one opens
+   the file at the location. The status bar shows error and warning counts.
+5. **Quick Documentation.** Ctrl+Q (macOS F1) at the caret, or resting the
+   mouse on a symbol, shows the hover as rendered Markdown with highlighted
+   code; raw HTML and non-http(s) links in the server's Markdown are not
+   rendered. A newer hover cancels the older one in the server.
+6. **Navigation.** Go to Definition (Ctrl+B / Cmd+B and Ctrl/Cmd+Click), Go
+   to Type Definition (Ctrl+Shift+B / Cmd+Shift+B) and Go to Implementation
+   (Ctrl+Alt+B / Cmd+Alt+B) open the target file at the target position;
+   several targets show a chooser popup; none shows a message.
+7. **Workspace.** The project's `tsconfig.json`/`jsconfig.json` files and
+   npm/yarn (`package.json` `workspaces`) or pnpm (`pnpm-workspace.yaml`)
+   packages are detected and shown in the server status tooltip; the
+   server's workspace folders are the project root plus the workspace
+   packages.
+8. **Tests.** `lsp-client` unit tests (framing, ids, cancellation, server
+   requests, debounce) and tests with `fake-lsp-server` (incremental sync
+   with emoji/CJK, crash and restart, shutdown); position conversion tests;
+   core integration tests against the real `typescript-language-server`
+   (diagnostics, hover, cross-file definition, edits with emoji/CJK) that
+   print a reason and skip when it is not installed; Playwright `ui` tests
+   on `fixtures/react-ts` for 4, 5 and 6 with the real server and for 1
+   (server missing); all checks pass with zero warnings.
+
+### M3b: completion, refactoring, code actions (after M3a)
+
+**Done when:**
+
+1. **Completion.** Typing a trigger character (`.`, `"`, `'`, `/`, `@`, `<`)
+   or Ctrl+Space opens a virtualized popup; items are fuzzy-filtered and
+   ranked in Rust while typing; details and docs load lazily
+   (`completionItem/resolve`) for the selected item; accepting inserts
+   snippets with tab stops and applies `additionalTextEdits` (auto-import)
+   as one undoable step; a newer completion request cancels the older one.
+2. **Parameter hints.** Ctrl+P (macOS Cmd+P) and typing `(` or `,` show the
+   signature with the active parameter highlighted.
+3. **Find Usages.** Alt+F7 (macOS Option+F7) lists references grouped by
+   file in a results panel; clicking one opens the location.
+4. **Rename.** Shift+F6 renames project-wide after a preview (files and
+   occurrence counts); each open document changes as one undo step; closed
+   files are rewritten atomically; a file that changed on disk meanwhile is
+   not overwritten.
+5. **Code actions.** Alt+Enter shows quick fixes and refactorings at the
+   caret; Organize Imports (Ctrl+Alt+O, macOS Ctrl+Option+O) and "Add
+   missing import" work.
+6. **Formatting.** Reformat Code (Ctrl+Alt+L, macOS Cmd+Option+L) uses the
+   server's document formatting as one undo step (Prettier is a follow-up).
+7. **oxc fast path.** Unused imports are greyed out, and imports can be
+   sorted instantly in-process with `oxc`, without waiting for the server.
+8. **Tests.** Mock-server tests for completion, cancellation, rename and
+   workspace edits; golden tests for refactor edits; real-server integration
+   tests; Playwright `ui` tests for 1–7; all checks pass with zero warnings.
+
+### Later in the TypeScript track
+
+- [ ] Extract variable/function/component
 - [ ] ESLint and Prettier integration; Emmet
-- [ ] tsconfig / package.json / workspace awareness
+- [ ] Opening definitions outside the project (e.g. `lib.dom.d.ts`) read-only
 
 ## M4: Terminal and Git
 

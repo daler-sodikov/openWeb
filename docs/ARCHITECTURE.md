@@ -25,7 +25,7 @@ updated before each milestone (see "Milestone roadmap" below and
 │                         search, lang-*, lsp-client, git, terminal, ...   │
 └─────────────────────────────────────┬────────────────────────────────────┘
                                       │ stdio (JSON-RPC)
-                     external processes: vtsls / typescript-language-server,
+                     external processes: typescript-language-server,
                      css/html/json servers, eslint, tailwind, DAP adapters,
                      Node, shells (PTY)
 ```
@@ -62,26 +62,26 @@ ferrule-app (src-tauri) ──► core ──► ipc
    └──► project, vfs
 ```
 
-| Crate         | Owns                                                                                                                                                                                         | Internal deps                       |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `buffer`      | Rope text storage, edits and change sets, versions, selections and multi-cursor commands, undo/redo history, line index, UTF-8/UTF-16/line-col conversions. Pure, no IO.                     | none                                |
-| `vfs`         | File system access, file ids, path interning, watching, encoding and line-ending detection, atomic save, crash-recovery files (autosave of dirty buffers).                                   | `buffer`                            |
-| `settings`    | Layered settings (defaults, user, project, `.editorconfig`), keymap presets (IntelliJ-style), schema and validation.                                                                         | none                                |
-| `project`     | Project model: roots, ignore rules, `package.json`/`tsconfig.json` discovery, npm/pnpm/yarn workspaces, open-document registry, recent files.                                                | `vfs`, `buffer`, `settings`         |
-| `syntax`      | Shared tree-sitter machinery: incremental parsing, highlight captures to token spans, folding ranges, bracket pairs, language registry.                                                      | `buffer`                            |
-| `lang-js`     | JS/TS/JSX/TSX and JSON grammars and queries, `oxc` integration (parse, semantics, import resolution, unused imports, quick fixes).                                                           | `syntax`                            |
-| `lang-css`    | CSS/SCSS/LESS grammars, queries and in-process features.                                                                                                                                     | `syntax`                            |
-| `lang-html`   | HTML (later Vue/Svelte embedding) grammars, queries and in-process features.                                                                                                                 | `syntax`                            |
-| `indexer`     | Incremental project indexing: file list, symbols, on-disk cache, invalidation on file change.                                                                                                | `project`, `vfs`, `lang-*`          |
-| `search`      | Fuzzy matching (camel humps, path segments) and regex text search/replace. Pure functions over caller-provided text, so unsaved buffers are searched like files.                             | none                                |
-| `lsp-client`  | Generic LSP client: process lifecycle, JSON-RPC framing, requests with cancellation, notifications, debounced `didChange`, capability negotiation. Knows nothing about specific servers.     | none                                |
-| `dap-client`  | Generic Debug Adapter Protocol client mirroring `lsp-client`, plus a Chrome DevTools Protocol client for browser/Node debugging.                                                             | none                                |
-| `git`         | Status, diff, blame, log, branches, commit, conflicts. Read paths via `gix`; write paths may shell out to the `git` binary.                                                                  | `vfs`                               |
-| `terminal`    | PTY processes, VT parsing, terminal grid state and incremental updates for the view.                                                                                                         | none                                |
-| `run-debug`   | Run configurations (Node, npm scripts, Jest, Vitest, Playwright), process supervision, test-result parsing, debug sessions.                                                                  | `dap-client`, `project`, `settings` |
-| `plugin-host` | `wasmtime` component-model host for plugins built against `wit/`.                                                                                                                            | `settings`                          |
-| `ipc`         | Serializable DTOs shared with the frontend (`specta::Type` derives), error type, protocol version. No logic.                                                                                 | none                                |
-| `core`        | `Session`: owns open projects and documents, starts language servers, routes events, holds cancellation tokens, maps domain types to `ipc` DTOs. The only crate that knows about all others. | all of the above                    |
+| Crate         | Owns                                                                                                                                                                                                                    | Internal deps                       |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `buffer`      | Rope text storage, edits and change sets, versions, selections and multi-cursor commands, undo/redo history, line index, UTF-8/UTF-16/line-col conversions. Pure, no IO.                                                | none                                |
+| `vfs`         | File system access, file ids, path interning, watching, encoding and line-ending detection, atomic save, crash-recovery files (autosave of dirty buffers).                                                              | `buffer`                            |
+| `settings`    | Layered settings (defaults, user `settings.json`, project, `.editorconfig`), keymap presets (IntelliJ-style), schema and validation.                                                                                    | none                                |
+| `project`     | Project model: roots, ignore rules, `package.json`/`tsconfig.json` discovery, npm/pnpm/yarn workspaces, open-document registry, recent files.                                                                           | `vfs`, `buffer`, `settings`         |
+| `syntax`      | Shared tree-sitter machinery: incremental parsing, highlight captures to token spans, folding ranges, bracket pairs, language registry.                                                                                 | `buffer`                            |
+| `lang-js`     | JS/TS/JSX/TSX and JSON grammars and queries, the TypeScript language server definition, `oxc` integration (parse, semantics, import resolution, unused imports, quick fixes).                                           | `syntax`                            |
+| `lang-css`    | CSS/SCSS/LESS grammars, queries and in-process features.                                                                                                                                                                | `syntax`                            |
+| `lang-html`   | HTML (later Vue/Svelte embedding) grammars, queries and in-process features.                                                                                                                                            | `syntax`                            |
+| `indexer`     | Incremental project indexing: file list, symbols, on-disk cache, invalidation on file change.                                                                                                                           | `project`, `vfs`, `lang-*`          |
+| `search`      | Fuzzy matching (camel humps, path segments) and regex text search/replace. Pure functions over caller-provided text, so unsaved buffers are searched like files.                                                        | none                                |
+| `lsp-client`  | Generic LSP client: process lifecycle and restart, JSON-RPC framing, requests with cancellation, notifications, debounced `didChange`, capability negotiation, executable lookup. Knows nothing about specific servers. | none                                |
+| `dap-client`  | Generic Debug Adapter Protocol client mirroring `lsp-client`, plus a Chrome DevTools Protocol client for browser/Node debugging.                                                                                        | none                                |
+| `git`         | Status, diff, blame, log, branches, commit, conflicts. Read paths via `gix`; write paths may shell out to the `git` binary.                                                                                             | `vfs`                               |
+| `terminal`    | PTY processes, VT parsing, terminal grid state and incremental updates for the view.                                                                                                                                    | none                                |
+| `run-debug`   | Run configurations (Node, npm scripts, Jest, Vitest, Playwright), process supervision, test-result parsing, debug sessions.                                                                                             | `dap-client`, `project`, `settings` |
+| `plugin-host` | `wasmtime` component-model host for plugins built against `wit/`.                                                                                                                                                       | `settings`                          |
+| `ipc`         | Serializable DTOs shared with the frontend (`specta::Type` derives), error type, protocol version. No logic.                                                                                                            | none                                |
+| `core`        | `Session`: owns open projects and documents, starts language servers, routes events, holds cancellation tokens, maps domain types to `ipc` DTOs. The only crate that knows about all others.                            | all of the above                    |
 
 Rules that follow from the graph:
 
@@ -243,10 +243,10 @@ is a **replica** that follows the authority model of `@codemirror/collab`
 
 ### 4.3 Completions from the TypeScript language server
 
-1. When the first JS/TS document opens, `core` starts the configured server
-   (`vtsls` by default, `typescript-language-server` as alternative; defined
-   in `languages/typescript/`) through `lsp-client`, sends `initialize`
-   with the project root, then `didOpen`.
+Planned for M3b; the server, sync and cancellation machinery are those of
+4.7.
+
+1. The TypeScript server runs as described in 4.7 (`typescript-language-server`).
 2. The view calls `completions(docId, version, offset)` on a trigger
    character or explicit Ctrl+Space.
 3. `core` flushes any pending debounced `didChange` for the document so the
@@ -329,6 +329,137 @@ emits `index-status`. Searches before it finishes report `indexing: true`.
 - **Auto-closing brackets** are view input behaviour (CodeMirror's
   `closeBrackets`) configured per language from Rust (`autoClose` pairs),
   so typing never waits for IPC.
+
+### 4.7 Language servers (M3)
+
+**Server choice.** `typescript-language-server` (Apache-2.0, an external
+Node process wrapping the `tsserver` of the project's or a global
+TypeScript). It is the most widely packaged server (npm, Bun, Homebrew,
+distro packages) and needs no editor-specific setup; vtsls has better
+VS Code parity for some features but is less commonly installed and adds a
+second layer of VS Code settings. Nothing in `lsp-client` is specific to
+it, so vtsls can be added as a second definition later. The definition
+(program name, `--stdio`, file extensions → LSP language ids) lives in
+`lang-js`.
+
+**Finding the server** (first match wins; `core`, using
+`lsp_client::find_program`):
+
+1. `<project>/node_modules/.bin/typescript-language-server` (`.cmd` on
+   Windows), so a project-pinned version wins;
+2. the user setting `typescript.serverPath` in `settings.json` in the app
+   config directory (Linux `~/.config/dev.ferrule.ide/`, macOS
+   `~/Library/Application Support/dev.ferrule.ide/`, Windows
+   `%APPDATA%\dev.ferrule.ide\`);
+3. `PATH` (on Windows with `PATHEXT`). Bun's global bin (`~/.bun/bin`) and
+   npm's are found only through `PATH`; no install locations are guessed.
+   Apps started from a desktop launcher (macOS Dock in particular) may get
+   a shorter `PATH` than a terminal, which is what the setting is for.
+
+If the program found is a Node script (a `#!` line naming `node`, or a
+Windows `.cmd` shim), `node` must also be on `PATH`. Missing server or
+missing Node is not an error dialog: the server state becomes _not found_
+with a status-bar message naming what to install or set, and every other
+editor feature keeps working.
+
+**Process lifecycle** (`lsp_client::Supervisor`).
+
+- One server per open project, started lazily when the first document of
+  one of its languages opens. Opening another project or closing the app
+  stops it.
+- Start: spawn with piped stdio (`kill_on_drop`), stderr lines go to
+  `tracing` (target `lsp_stderr`), `initialize` with the root URI, the
+  workspace folders (root plus detected workspace packages), our process id
+  (the server exits if we die) and the client capabilities, then
+  `initialized`. Server→client requests are answered
+  (`workspace/configuration` → `null`s, `client/registerCapability`,
+  `window/workDoneProgress/create` → ok; unknown → `MethodNotFound`).
+- States reported to the view: _starting_, _indexing_ (while a
+  `$/progress` work-done token is open), _ready_, _restarting_, _error_,
+  _not found_, _stopped_.
+- Crash (the process exits or stdout closes while running): pending
+  requests fail with `Cancelled`, then the supervisor restarts after
+  0.5 s, 1 s, 2 s, 4 s, 8 s. A server that stayed up for 60 s resets the
+  count; after 5 failed starts in a row the state is _error_ until "Restart
+  TypeScript Server" is run.
+- Stop: `shutdown` request (2 s timeout), `exit` notification, wait 1 s,
+  then kill. Done in the background so quitting stays within budget.
+
+**Document sync.** The Rust buffer is the only source of the text the
+server sees.
+
+- Every applied edit (typing, undo/redo, Enter, reload, save edits, Replace
+  in Files) yields, besides the tree-sitter byte edits, LSP-shaped changes
+  (`buffer::LspChange`: start/end as line + UTF-16 column, computed on the
+  rope at the moment each edit is applied, in application order), so they
+  form a valid incremental `didChange` content-change list.
+- Each server start has a _generation_. A document records the generation
+  it was opened in. While holding the document lock, `core` either queues
+  the changes (same generation) or sends `didOpen` with the full current
+  text (new generation, e.g. after a restart). Restart replays `didOpen`
+  for all open documents the same way. Because the check and the send
+  happen under the document lock and all messages go through one ordered
+  outgoing channel, the server can never see a change before its
+  `didOpen` or miss one.
+- `didChange` is debounced (100 ms after the last edit, changes merged into
+  one notification carrying the latest version). Requests, `didSave` and
+  `didClose` flush the document's pending changes first.
+
+**Position encoding.** We offer only `utf-16`
+(`general.positionEncodings`), the LSP default and the unit of our IPC
+offsets, so no transcoding is needed beyond line/column ↔ offset. `buffer`
+converts LSP positions to UTF-16 offsets (clamped to the line, and to the
+document) and back. A server answering with another encoding is stopped
+with an error state. Tests cover emoji (surrogate pairs) and CJK text.
+
+**Requests and cancellation.**
+
+- Requests are made with a `CancellationToken`. Cancelling sends
+  `$/cancelRequest`, drops the pending entry and returns
+  `IpcErrorKind::Cancelled`; a late response is ignored. Server errors
+  `RequestCancelled` and `ContentModified` also map to `Cancelled`, which
+  the view ignores silently.
+- Per document, a newer hover (later: completion, signature help) cancels
+  the older one. Navigation requests are cancelled by the next navigation.
+- The view sends requests with the document version it has synced; `core`
+  rejects a mismatch (`Conflict`). Requests do not run inside the view's
+  serialized edit queue: the queue only pushes pending edits, then the
+  request is awaited outside it so typing never waits for the server.
+
+**Diagnostics.** `publishDiagnostics` is stored per file in `core` (LSP
+ranges as received). `core` emits `problems-changed` for the file
+(severity, message, source, code, 0-based line and UTF-16 column). An
+editor showing that file then asks `doc_diagnostics(docId)`, which converts
+the stored ranges to UTF-16 offsets against the current text (tagged with
+its version, like highlights). Diagnostics of files that are no longer
+open are dropped when the server clears them; the Problems window shows
+whatever the server last published.
+
+**Hover rendering.** The server's Markdown (`MarkupContent` or
+`MarkedString`s) is rendered to HTML in Rust with `pulldown-cmark`. Raw HTML
+in the Markdown is escaped, images become their alt text, links keep only
+`http`, `https` and `mailto` URLs, and fenced code is highlighted with our
+tree-sitter languages (the same token classes as the editor). The view
+inserts that HTML into the tooltip; it never parses Markdown.
+
+**IPC (M3a).** Commands: `hover(docId, version, offset)` →
+`HoverResult | null` (`html`, `from`, `to`); `goto_definition(docId,
+version, offset, kind)` (`kind`: `definition`, `typeDefinition`,
+`implementation`) → `NavTarget[]` (`path`, `line`, `column`, `preview`);
+`doc_diagnostics(docId)` → `DocDiagnostics`; `problems()` →
+`FileProblems[]`; `language_servers()` → `ServerStatus[]`;
+`restart_language_server()`. Events: `server-status` (`ServerStatus`:
+name, state, message, detail) and `problems-changed` (`FileProblems`).
+Targets outside the project root are returned but cannot be opened yet.
+
+**Workspace.** `project` detects `tsconfig.json`/`jsconfig.json` files
+(skipping ignored directories) and workspace packages from `package.json`
+`workspaces` (npm, yarn, Bun) or `pnpm-workspace.yaml` (pnpm), with the
+package manager from the lock file. The server uses them as workspace
+folders; `tsserver` itself picks the nearest `tsconfig.json` per file.
+Files changed on disk (4.5) are forwarded as
+`workspace/didChangeWatchedFiles`, so the server notices new, deleted and
+externally edited files and `tsconfig.json` changes.
 
 ## 5. Editor view layer: CodeMirror 6 as a view only
 
@@ -443,14 +574,14 @@ only that CI step moves to Node and this section records why.
 
 Detailed task lists live in [ROADMAP.md](ROADMAP.md).
 
-| Milestone                      | Scope                                                                                                                                                                                                             | Done when                                                                                                                                                                              |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M0** Foundation              | This document, workspace skeleton (all crates compile, empty), Tauri v2 + Vite + Bun shell, typed IPC pipeline, licenses and community docs, CI on Linux/macOS/Windows.                                           | All Rust and frontend checks pass with zero warnings; the app opens a window showing the product name and version fetched over typed IPC; the e2e smoke test passes.                   |
-| **M1** Editor core             | Window layout, project tree (virtualized, lazy), tabs, rope buffer with undo/redo and multi-cursor, CodeMirror replica protocol, tree-sitter highlighting for JS/TS/JSX/TSX/CSS/HTML/JSON, save + recovery files. | See the concrete checklist in [ROADMAP.md, M1](ROADMAP.md#m1-editor-core).                                                                                                             |
-| **M2** Search and navigation   | File/symbol index with on-disk cache, Search Everywhere, Go to File/Symbol/Line, Recent Files, Find/Replace in Files (regex), file watching, Rust indentation.                                                    | See [ROADMAP.md, M2](ROADMAP.md#m2-search-and-navigation). Breadcrumbs, folding and the rest moved to M2b.                                                                             |
-| **M3** TypeScript intelligence | `lsp-client`, vtsls integration, completion, parameter hints, quick docs, go to definition/type/implementation, find usages, rename, diagnostics, Alt+Enter quick fixes, auto-import, ESLint + Prettier.          | On `fixtures/react-ts`: completion, go to definition, cross-file rename and diagnostics work end to end; LSP client tests run against a fake server; refactor edits have golden tests. |
-| **M4** Terminal and Git        | Integrated terminal (PTY), Git status in tree, commit, diff, blame, branches, log.                                                                                                                                | A shell runs in the terminal tool window on all three OSes; a change can be committed and its diff and log entry viewed from the UI; Git tests use temporary repositories.             |
-| **M5** Run, debug, tests       | Run configurations (Node, npm scripts), Jest/Vitest/Playwright runners with gutter icons, debugger UI over DAP/CDP.                                                                                               | An npm script and a Vitest suite run from the gutter; a breakpoint in a Node script stops and shows variables.                                                                         |
+| Milestone                      | Scope                                                                                                                                                                                                                                   | Done when                                                                                                                                                                  |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0** Foundation              | This document, workspace skeleton (all crates compile, empty), Tauri v2 + Vite + Bun shell, typed IPC pipeline, licenses and community docs, CI on Linux/macOS/Windows.                                                                 | All Rust and frontend checks pass with zero warnings; the app opens a window showing the product name and version fetched over typed IPC; the e2e smoke test passes.       |
+| **M1** Editor core             | Window layout, project tree (virtualized, lazy), tabs, rope buffer with undo/redo and multi-cursor, CodeMirror replica protocol, tree-sitter highlighting for JS/TS/JSX/TSX/CSS/HTML/JSON, save + recovery files.                       | See the concrete checklist in [ROADMAP.md, M1](ROADMAP.md#m1-editor-core).                                                                                                 |
+| **M2** Search and navigation   | File/symbol index with on-disk cache, Search Everywhere, Go to File/Symbol/Line, Recent Files, Find/Replace in Files (regex), file watching, Rust indentation.                                                                          | See [ROADMAP.md, M2](ROADMAP.md#m2-search-and-navigation). Breadcrumbs, folding and the rest moved to M2b.                                                                 |
+| **M3** TypeScript intelligence | `lsp-client`, `typescript-language-server` integration, completion, parameter hints, quick docs, go to definition/type/implementation, find usages, rename, diagnostics, Alt+Enter quick fixes, auto-import. In two parts, M3a and M3b. | See [ROADMAP.md, M3](ROADMAP.md#m3-typescript-intelligence).                                                                                                               |
+| **M4** Terminal and Git        | Integrated terminal (PTY), Git status in tree, commit, diff, blame, branches, log.                                                                                                                                                      | A shell runs in the terminal tool window on all three OSes; a change can be committed and its diff and log entry viewed from the UI; Git tests use temporary repositories. |
+| **M5** Run, debug, tests       | Run configurations (Node, npm scripts), Jest/Vitest/Playwright runners with gutter icons, debugger UI over DAP/CDP.                                                                                                                     | An npm script and a Vitest suite run from the gutter; a breakpoint in a Node script stops and shows variables.                                                             |
 
 The rest of the feature scope in `CLAUDE.md` (HTTP client, local history,
 frameworks, settings UI, themes, plugins, auto-update, i18n) follows M5 and
