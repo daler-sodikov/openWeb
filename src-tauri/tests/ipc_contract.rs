@@ -31,6 +31,18 @@ fn ipc_contract() {
         "closeDocument",
         "initialProject",
         "keymap",
+        "newLine",
+        "reloadDocument",
+        "diskChanged",
+        "searchEverywhere",
+        "recentFiles",
+        "findInFiles",
+        "replaceInFiles",
+        // events
+        "fsChanged",
+        "indexStatus",
+        "\"fs-changed\"",
+        "\"index-status\"",
         "baseVersion",
         "docId",
         // DTOs

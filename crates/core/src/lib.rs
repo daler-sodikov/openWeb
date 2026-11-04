@@ -4,8 +4,12 @@
 //! returns IPC DTOs and [`IpcError`]s, so `ferrule-app` only forwards calls.
 
 mod convert;
+mod events;
+mod project_runtime;
+mod search;
 mod session;
 
+pub use events::{EventSink, NoEvents, SessionEvent};
 pub use session::{DEFAULT_AUTOSAVE_DELAY, Session, SessionError};
 
 use ferrule_ipc::{

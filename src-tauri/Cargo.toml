@@ -29,7 +29,7 @@ path = "src/bin/headless.rs"
 required-features = ["headless"]
 
 [features]
-headless = ["tauri/test", "dep:tiny_http", "dep:serde_json"]
+headless = ["tauri/test", "dep:tiny_http"]
 
 [build-dependencies]
 tauri-build.workspace = true
@@ -39,7 +39,7 @@ ferrule-core.workspace = true
 ferrule-ipc.workspace = true
 anyhow.workspace = true
 serde.workspace = true
-serde_json = { workspace = true, optional = true }
+serde_json.workspace = true
 tiny_http = { workspace = true, optional = true }
 tauri-plugin-dialog.workspace = true
 specta.workspace = true

@@ -162,7 +162,7 @@ export class EditorTab {
   }
 
   private runAction(action: KeyAction): void {
-    const actions: Record<KeyAction, () => Promise<void> | void> = {
+    const actions: Partial<Record<KeyAction, () => Promise<void> | void>> = {
       save: () => this.save(),
       undo: () => this.undo(),
       redo: () => this.redo(),
@@ -174,7 +174,7 @@ export class EditorTab {
         this.host.closeTab(this);
       },
     };
-    void actions[action]();
+    void actions[action]?.();
   }
 
   private actionKeys(): CmKeyBinding[] {

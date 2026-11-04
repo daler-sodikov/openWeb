@@ -10,7 +10,7 @@ use specta::Type;
 
 /// Version of the IPC protocol. Bump on any breaking change to a command,
 /// event or DTO so that a mismatched frontend refuses to run.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Operating system the backend runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -148,6 +148,8 @@ pub struct OpenedDocument {
     pub dirty: bool,
     /// Whether unsaved text was restored from a recovery file.
     pub restored: bool,
+    /// Detected indentation unit (a tab or spaces), inserted by Tab.
+    pub indent_unit: String,
 }
 
 /// Replace the UTF-16 range `from..to` with `insert`.
@@ -285,7 +287,7 @@ pub struct Highlights {
     pub spans: Vec<HighlightSpan>,
 }
 
-/// Editor actions that have key bindings.
+/// Actions that can be bound to keys or run from Search Everywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 #[allow(missing_docs)]
@@ -298,6 +300,15 @@ pub enum KeyAction {
     SelectNextOccurrence,
     SelectAllOccurrences,
     CloseTab,
+    SearchEverywhere,
+    GotoFile,
+    GotoSymbol,
+    GotoAction,
+    GotoLine,
+    RecentFiles,
+    FindInFiles,
+    ReplaceInFiles,
+    OpenFolder,
 }
 
 /// Modifier used in double-tap gestures.
@@ -308,6 +319,8 @@ pub enum Modifier {
     Control,
     /// Alt / Option.
     Alt,
+    /// Shift.
+    Shift,
 }
 
 /// How a binding is triggered.
@@ -326,6 +339,11 @@ pub enum KeyStroke {
         /// The key (`ArrowUp`).
         key: String,
     },
+    /// Tap `modifier` twice quickly (double Shift).
+    DoubleTap {
+        /// The modifier.
+        modifier: Modifier,
+    },
 }
 
 /// A key binding.
@@ -336,6 +354,175 @@ pub struct KeyBinding {
     pub action: KeyAction,
     /// The key stroke.
     pub stroke: KeyStroke,
+}
+
+/// Search Everywhere tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum SearchTab {
+    All,
+    Files,
+    Symbols,
+    Actions,
+}
+
+/// One Search Everywhere result. `positions` are matched char indices (in
+/// `path` for files, in `name` for symbols and actions).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", tag = "type")]
+#[allow(missing_docs)]
+pub enum SearchItem {
+    #[serde(rename_all = "camelCase")]
+    File { path: String, positions: Vec<u32> },
+    #[serde(rename_all = "camelCase")]
+    Symbol {
+        name: String,
+        kind: String,
+        path: String,
+        line: u32,
+        column: u32,
+        positions: Vec<u32>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Action {
+        action: KeyAction,
+        name: String,
+        positions: Vec<u32>,
+    },
+}
+
+/// Search Everywhere results.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResults {
+    /// Ranked items; for the All tab grouped as files, symbols, actions.
+    pub items: Vec<SearchItem>,
+    /// Whether the index is still being built (results may be incomplete).
+    pub indexing: bool,
+}
+
+/// A Find/Replace in Files query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TextSearch {
+    /// Text or regex.
+    pub pattern: String,
+    /// Regex mode.
+    pub regex: bool,
+    /// Match case.
+    pub case_sensitive: bool,
+    /// Whole words only.
+    pub whole_word: bool,
+    /// Replacement for previews (`$1` expands in regex mode); `None` to only find.
+    pub replacement: Option<String>,
+}
+
+/// One match of Find in Files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FindMatch {
+    /// Project-relative path.
+    pub path: String,
+    /// Zero-based line.
+    pub line: u32,
+    /// Line text (truncated).
+    pub line_text: String,
+    /// Match start in the line (UTF-16).
+    pub column_start: u32,
+    /// Match end in the line (UTF-16).
+    pub column_end: u32,
+    /// Replacement preview, when a replacement was given.
+    pub replacement: Option<String>,
+}
+
+/// Find in Files results.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FindResults {
+    /// Matches, by path then position.
+    pub matches: Vec<FindMatch>,
+    /// Whether the match limit was reached.
+    pub truncated: bool,
+    /// Files searched.
+    pub files_searched: u32,
+    /// Whether the index is still being built.
+    pub indexing: bool,
+}
+
+/// Replacement edits for an open document, applied by the view so that they
+/// go through the normal edit path (and undo).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentReplace {
+    /// Document.
+    pub doc_id: DocId,
+    /// Version the edits are based on.
+    pub version: u32,
+    /// Sorted edits.
+    pub edits: Vec<TextEdit>,
+}
+
+/// Result of Replace in Files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceResult {
+    /// Closed files rewritten on disk.
+    pub files_written: u32,
+    /// Total replacements (files + open documents).
+    pub replacements: u32,
+    /// Edits for open documents.
+    pub open_documents: Vec<DocumentReplace>,
+}
+
+/// Result of reloading a document from disk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentReload {
+    /// Edits (one list per version step); empty if the text was unchanged.
+    pub updates: Vec<Vec<TextEdit>>,
+    /// Status afterwards.
+    pub status: DocStatus,
+}
+
+/// What happened to a path on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum FsChangeKind {
+    /// Created or modified (the path exists).
+    Changed,
+    /// Removed (the path no longer exists).
+    Removed,
+}
+
+/// One changed path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FsChange {
+    /// Project-relative path.
+    pub path: String,
+    /// What happened.
+    pub kind: FsChangeKind,
+}
+
+/// Payload of the file-change event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FsChangeBatch {
+    /// Changed paths.
+    pub changes: Vec<FsChange>,
+}
+
+/// Payload of the index-status event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexState {
+    /// Whether indexing is in progress.
+    pub indexing: bool,
+    /// Indexed files.
+    pub files: u32,
+    /// Indexed symbols.
+    pub symbols: u32,
 }
 
 #[cfg(test)]

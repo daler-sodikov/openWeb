@@ -10,11 +10,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+mod events;
+
+pub use events::{FsChanged, IndexStatus, TauriSink, encode as encode_event};
+
 use ferrule_core::Session;
 use ferrule_ipc::{
-    AppInfo, CaretDirection, ChangeTransaction, DirEntry, DocId, DocStatus, EditorSelection,
-    FrontendReadyReport, Highlights, IpcError, KeyBinding, OpenedDocument, PROTOCOL_VERSION,
-    ProjectInfo, RemoteUpdate,
+    AppInfo, CaretDirection, ChangeTransaction, DirEntry, DocId, DocStatus, DocumentReload,
+    EditorSelection, FindResults, FrontendReadyReport, Highlights, IpcError, KeyBinding,
+    OpenedDocument, PROTOCOL_VERSION, ProjectInfo, RemoteUpdate, ReplaceResult, SearchResults,
+    SearchTab, TextSearch,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -231,6 +236,75 @@ async fn close_document(session: SessionState<'_>, doc_id: DocId) -> Result<(), 
     session.close_document(doc_id).await
 }
 
+/// Enter: newline with language-aware indentation, computed in Rust.
+#[tauri::command]
+#[specta::specta]
+async fn new_line(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    selection: EditorSelection,
+) -> Result<RemoteUpdate, IpcError> {
+    session.new_line(doc_id, version, selection).await
+}
+
+/// Reloads a document from disk (one undoable step).
+#[tauri::command]
+#[specta::specta]
+async fn reload_document(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+) -> Result<DocumentReload, IpcError> {
+    session.reload_document(doc_id, version).await
+}
+
+/// Whether the file on disk differs from the last loaded/saved text.
+#[tauri::command]
+#[specta::specta]
+async fn disk_changed(session: SessionState<'_>, doc_id: DocId) -> Result<bool, IpcError> {
+    session.disk_changed(doc_id).await
+}
+
+/// Search Everywhere.
+#[tauri::command]
+#[specta::specta]
+async fn search_everywhere(
+    session: SessionState<'_>,
+    query: String,
+    tab: SearchTab,
+) -> Result<SearchResults, IpcError> {
+    session.search_everywhere(query, tab).await
+}
+
+/// Recently opened files, most recent first.
+#[tauri::command]
+#[specta::specta]
+async fn recent_files(session: SessionState<'_>) -> Result<Vec<String>, IpcError> {
+    session.recent_files().await
+}
+
+/// Find in Files (with optional replacement preview).
+#[tauri::command]
+#[specta::specta]
+async fn find_in_files(
+    session: SessionState<'_>,
+    search: TextSearch,
+) -> Result<FindResults, IpcError> {
+    session.find_in_files(search).await
+}
+
+/// Replace in Files.
+#[tauri::command]
+#[specta::specta]
+async fn replace_in_files(
+    session: SessionState<'_>,
+    search: TextSearch,
+    replacement: String,
+) -> Result<ReplaceResult, IpcError> {
+    session.replace_in_files(search, replacement).await
+}
+
 /// Builds the tauri-specta registry of every IPC command and constant.
 ///
 /// The same builder serves the runtime invoke handler and the TypeScript
@@ -254,7 +328,15 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             highlights,
             save_document,
             close_document,
+            new_line,
+            reload_document,
+            disk_changed,
+            search_everywhere,
+            recent_files,
+            find_in_files,
+            replace_in_files,
         ])
+        .events(tauri_specta::collect_events![FsChanged, IndexStatus])
         .constant("PROTOCOL_VERSION", PROTOCOL_VERSION)
 }
 
@@ -308,9 +390,11 @@ pub fn run() -> anyhow::Result<()> {
     )
     .plugin(tauri_plugin_dialog::init())
     .setup(move |app| {
-        let recovery_dir = app.path().app_data_dir()?.join("recovery");
-        tracing::info!(?recovery_dir, "recovery directory");
-        app.manage(Session::new(recovery_dir)?);
+        specta_builder::<tauri::Wry>().mount_events(app);
+        let data_dir = app.path().app_data_dir()?;
+        tracing::info!(?data_dir, "data directory");
+        let sink = Arc::new(TauriSink(app.handle().clone()));
+        app.manage(Session::new(data_dir, sink)?);
         if smoke_enabled {
             tracing::info!("smoke mode enabled");
             let handle = app.handle().clone();

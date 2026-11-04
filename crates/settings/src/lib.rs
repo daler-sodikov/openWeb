@@ -23,6 +23,24 @@ pub enum Action {
     SelectAllOccurrences,
     /// Close the current tab.
     CloseTab,
+    /// Search Everywhere.
+    SearchEverywhere,
+    /// Go to File.
+    GotoFile,
+    /// Go to Symbol.
+    GotoSymbol,
+    /// Find Action.
+    GotoAction,
+    /// Go to Line.
+    GotoLine,
+    /// Recent Files.
+    RecentFiles,
+    /// Find in Files.
+    FindInFiles,
+    /// Replace in Files.
+    ReplaceInFiles,
+    /// Open Folder (no default key).
+    OpenFolder,
 }
 
 /// Modifier used in double-tap gestures.
@@ -32,6 +50,8 @@ pub enum Modifier {
     Control,
     /// Alt / Option.
     Alt,
+    /// Shift.
+    Shift,
 }
 
 /// How a binding is triggered.
@@ -41,6 +61,8 @@ pub enum KeyStroke {
     Chord(&'static str),
     /// Double-tap a modifier, keep it held, then press a key.
     DoubleModifier(Modifier, &'static str),
+    /// Double-tap a modifier (double Shift).
+    DoubleTap(Modifier),
 }
 
 /// A key binding.
@@ -61,11 +83,55 @@ pub enum KeymapOs {
     Other,
 }
 
+/// Display name of an action (Search Everywhere's Actions tab).
+pub fn action_name(action: Action) -> &'static str {
+    match action {
+        Action::Save => "Save",
+        Action::Undo => "Undo",
+        Action::Redo => "Redo",
+        Action::AddCaretAbove => "Clone Caret Above",
+        Action::AddCaretBelow => "Clone Caret Below",
+        Action::SelectNextOccurrence => "Add Selection for Next Occurrence",
+        Action::SelectAllOccurrences => "Select All Occurrences",
+        Action::CloseTab => "Close Tab",
+        Action::SearchEverywhere => "Search Everywhere",
+        Action::GotoFile => "Go to File",
+        Action::GotoSymbol => "Go to Symbol",
+        Action::GotoAction => "Find Action",
+        Action::GotoLine => "Go to Line",
+        Action::RecentFiles => "Recent Files",
+        Action::FindInFiles => "Find in Files",
+        Action::ReplaceInFiles => "Replace in Files",
+        Action::OpenFolder => "Open Folder",
+    }
+}
+
+/// Every action, in display order.
+pub const ALL_ACTIONS: [Action; 17] = [
+    Action::GotoFile,
+    Action::GotoSymbol,
+    Action::GotoLine,
+    Action::RecentFiles,
+    Action::FindInFiles,
+    Action::ReplaceInFiles,
+    Action::SearchEverywhere,
+    Action::GotoAction,
+    Action::OpenFolder,
+    Action::Save,
+    Action::Undo,
+    Action::Redo,
+    Action::CloseTab,
+    Action::AddCaretAbove,
+    Action::AddCaretBelow,
+    Action::SelectNextOccurrence,
+    Action::SelectAllOccurrences,
+];
+
 /// IntelliJ-style default bindings (from the publicly documented default
 /// keymap) for the actions implemented so far.
 pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
     use Action as A;
-    use KeyStroke::{Chord, DoubleModifier};
+    use KeyStroke::{Chord, DoubleModifier, DoubleTap};
     let mac = os == KeymapOs::Mac;
     let caret_modifier = if mac {
         Modifier::Alt
@@ -95,6 +161,20 @@ pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
             }),
         ),
         bind(A::CloseTab, Chord(if mac { "Mod-w" } else { "Ctrl-F4" })),
+        bind(A::SearchEverywhere, DoubleTap(Modifier::Shift)),
+        bind(
+            A::GotoFile,
+            Chord(if mac { "Mod-Shift-o" } else { "Mod-Shift-n" }),
+        ),
+        bind(
+            A::GotoSymbol,
+            Chord(if mac { "Mod-Alt-o" } else { "Mod-Alt-Shift-n" }),
+        ),
+        bind(A::GotoAction, Chord("Mod-Shift-a")),
+        bind(A::GotoLine, Chord(if mac { "Mod-l" } else { "Ctrl-g" })),
+        bind(A::RecentFiles, Chord("Mod-e")),
+        bind(A::FindInFiles, Chord("Mod-Shift-f")),
+        bind(A::ReplaceInFiles, Chord("Mod-Shift-r")),
     ]
 }
 
@@ -115,6 +195,14 @@ mod tests {
                 Action::SelectNextOccurrence,
                 Action::SelectAllOccurrences,
                 Action::CloseTab,
+                Action::SearchEverywhere,
+                Action::GotoFile,
+                Action::GotoSymbol,
+                Action::GotoAction,
+                Action::GotoLine,
+                Action::RecentFiles,
+                Action::FindInFiles,
+                Action::ReplaceInFiles,
             ] {
                 assert_eq!(
                     keymap.iter().filter(|b| b.action == action).count(),

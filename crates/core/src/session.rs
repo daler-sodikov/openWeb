@@ -10,12 +10,20 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use ferrule_buffer::{Document, Edit, EditKind, LineEnding, Selection, Transaction};
+use std::sync::atomic::AtomicU64;
+
+use ferrule_buffer::{
+    Document, Edit, EditKind, IndentRules, LineEnding, Rope, Selection, Transaction,
+    detect_indent_unit,
+};
 use ferrule_ipc::{self as ipc, DocId, IpcError, IpcErrorKind};
 use ferrule_project::{EntryKind, Project};
 use ferrule_syntax::{LanguageRegistry, SyntaxError, SyntaxTree};
 use ferrule_vfs::RecoveryStore;
 use tokio_util::sync::CancellationToken;
+
+use crate::events::{EventSink, SessionEvent};
+use crate::project_runtime::{ProjectRuntime, index_project};
 
 use crate::convert::{
     buffer_error, edit_from_ipc, edit_to_ipc, io_error, kind_from_ipc, project_error,
@@ -33,18 +41,31 @@ pub enum SessionError {
     Syntax(#[from] SyntaxError),
 }
 
-struct DocState {
-    doc: Document,
+pub(crate) struct DocState {
+    pub doc: Document,
     syntax: Option<SyntaxTree>,
     line_ending: LineEnding,
     bom: bool,
+    /// Version and text at the last load/save/reload. "Modified" compares
+    /// text, so undoing back to the saved text clears it.
     saved_version: u32,
+    saved_text: Rope,
     restored: bool,
+    indent_unit: String,
+    indent_rules: IndentRules,
 }
 
 impl DocState {
-    fn dirty(&self) -> bool {
-        self.doc.version() != self.saved_version
+    pub fn dirty(&self) -> bool {
+        // Comparing ropes is O(1) when the lengths differ (the usual case
+        // while typing) and only walks the text when they are equal.
+        self.doc.version() != self.saved_version && *self.doc.rope() != self.saved_text
+    }
+
+    fn mark_saved(&mut self) {
+        self.saved_version = self.doc.version();
+        self.saved_text = self.doc.rope().clone();
+        self.restored = false;
     }
 
     fn status(&self) -> ipc::DocStatus {
@@ -55,17 +76,17 @@ impl DocState {
     }
 }
 
-struct DocHandle {
-    id: DocId,
-    path: PathBuf,
-    rel_path: String,
+pub(crate) struct DocHandle {
+    pub id: DocId,
+    pub path: PathBuf,
+    pub rel_path: String,
     language: Option<String>,
     state: Mutex<DocState>,
     autosave: Mutex<Option<CancellationToken>>,
 }
 
 impl DocHandle {
-    fn lock(&self) -> Result<MutexGuard<'_, DocState>, IpcError> {
+    pub fn lock(&self) -> Result<MutexGuard<'_, DocState>, IpcError> {
         lock(&self.state)
     }
 
@@ -79,6 +100,7 @@ impl DocHandle {
             language: self.language.clone(),
             dirty: state.dirty(),
             restored: state.restored,
+            indent_unit: state.indent_unit.clone(),
         })
     }
 
@@ -107,20 +129,24 @@ impl DocHandle {
 }
 
 #[derive(Default)]
-struct State {
-    project: Option<Arc<Project>>,
-    docs: HashMap<DocId, Arc<DocHandle>>,
+pub(crate) struct State {
+    project: Option<Arc<ProjectRuntime>>,
+    pub docs: HashMap<DocId, Arc<DocHandle>>,
     by_path: HashMap<PathBuf, DocId>,
     next_id: u32,
 }
 
 /// The editing session. Cheap to share as `Arc<Session>`.
 pub struct Session {
-    state: Mutex<State>,
+    pub(crate) state: Mutex<State>,
     recovery: RecoveryStore,
-    registry: Arc<LanguageRegistry>,
+    pub(crate) registry: Arc<LanguageRegistry>,
     autosave_delay: Duration,
     started: Instant,
+    data_dir: PathBuf,
+    pub(crate) sink: Arc<dyn EventSink>,
+    /// Incremented by every Find in Files request; older requests stop.
+    pub(crate) find_counter: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for Session {
@@ -129,13 +155,13 @@ impl std::fmt::Debug for Session {
     }
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, IpcError> {
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, IpcError> {
     mutex
         .lock()
         .map_err(|_| IpcError::new(IpcErrorKind::Internal, "internal state lock poisoned"))
 }
 
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, IpcError> + Send + 'static,
 ) -> Result<T, IpcError> {
     tokio::task::spawn_blocking(f).await.map_err(|err| {
@@ -159,22 +185,31 @@ fn languages() -> Result<LanguageRegistry, SyntaxError> {
 }
 
 impl Session {
-    /// Creates a session that keeps recovery files in `recovery_dir`.
-    pub fn new(recovery_dir: impl Into<PathBuf>) -> Result<Arc<Self>, SessionError> {
-        Self::with_autosave_delay(recovery_dir, DEFAULT_AUTOSAVE_DELAY)
+    /// Creates a session storing recovery files, index caches and project
+    /// data under `data_dir`, and pushing events to `sink`.
+    pub fn new(
+        data_dir: impl Into<PathBuf>,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<Arc<Self>, SessionError> {
+        Self::with_autosave_delay(data_dir, sink, DEFAULT_AUTOSAVE_DELAY)
     }
 
     /// Like [`Session::new`] with a custom recovery-file delay (tests).
     pub fn with_autosave_delay(
-        recovery_dir: impl Into<PathBuf>,
+        data_dir: impl Into<PathBuf>,
+        sink: Arc<dyn EventSink>,
         autosave_delay: Duration,
     ) -> Result<Arc<Self>, SessionError> {
+        let data_dir = data_dir.into();
         Ok(Arc::new(Self {
             state: Mutex::new(State::default()),
-            recovery: RecoveryStore::new(recovery_dir),
+            recovery: RecoveryStore::new(data_dir.join("recovery")),
             registry: Arc::new(languages()?),
             autosave_delay,
             started: Instant::now(),
+            data_dir,
+            sink,
+            find_counter: Arc::new(AtomicU64::new(0)),
         }))
     }
 
@@ -182,11 +217,15 @@ impl Session {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
-    fn project(&self) -> Result<Arc<Project>, IpcError> {
+    pub(crate) fn runtime(&self) -> Result<Arc<ProjectRuntime>, IpcError> {
         lock(&self.state)?
             .project
             .clone()
             .ok_or_else(|| IpcError::new(IpcErrorKind::Conflict, "no project is open"))
+    }
+
+    fn project(&self) -> Result<Arc<Project>, IpcError> {
+        Ok(self.runtime()?.project.clone())
     }
 
     fn doc(&self, id: DocId) -> Result<Arc<DocHandle>, IpcError> {
@@ -204,16 +243,40 @@ impl Session {
         self: &Arc<Self>,
         path: String,
     ) -> Result<ipc::ProjectInfo, IpcError> {
-        let project =
-            blocking(move || Project::open(Path::new(&path)).map_err(project_error)).await?;
-        let previous: Vec<Arc<DocHandle>> = {
+        let data_dir = self.data_dir.clone();
+        let runtime = blocking(move || {
+            let project = Project::open(Path::new(&path)).map_err(project_error)?;
+            Ok(Arc::new(ProjectRuntime::new(project, &data_dir)))
+        })
+        .await?;
+        let (previous_docs, previous_runtime) = {
             let mut state = lock(&self.state)?;
-            state.project = Some(Arc::new(project.clone()));
+            let old = state.project.replace(runtime.clone());
             state.by_path.clear();
-            state.docs.drain().map(|(_, doc)| doc).collect()
+            (
+                state.docs.drain().map(|(_, doc)| doc).collect::<Vec<_>>(),
+                old,
+            )
         };
-        self.flush_closed(previous).await;
+        if let Some(old) = previous_runtime {
+            old.cancel.cancel();
+        }
+        self.flush_closed(previous_docs).await;
+        let project = runtime.project.clone();
         tracing::info!(root = ?project.root(), "project opened");
+
+        // Index in the background; the tree is usable immediately.
+        self.sink
+            .emit(SessionEvent::IndexStatus(runtime.index_state()));
+        let registry = self.registry.clone();
+        let sink = self.sink.clone();
+        tokio::spawn(async move {
+            let task =
+                tokio::task::spawn_blocking(move || index_project(&runtime, &registry, &sink));
+            if let Err(err) = task.await {
+                tracing::error!(%err, "indexing task failed");
+            }
+        });
         Ok(ipc::ProjectInfo {
             name: project.name().to_owned(),
             root: project.root().to_string_lossy().into_owned(),
@@ -258,11 +321,12 @@ impl Session {
     /// file with different text exists, that text is restored as an unsaved
     /// change (undo returns to the text on disk).
     pub async fn open_document(&self, path: String) -> Result<ipc::OpenedDocument, IpcError> {
-        let project = self.project()?;
-        let abs = project.resolve(&path).map_err(project_error)?;
+        let runtime = self.runtime()?;
+        let abs = runtime.project.resolve(&path).map_err(project_error)?;
         if let Some(existing) = self.doc_by_path(&abs)? {
             return existing.opened();
         }
+        let recent_path = path.clone();
 
         let recovery = self.recovery.clone();
         let registry = self.registry.clone();
@@ -270,6 +334,8 @@ impl Session {
         let abs_for_load = abs.clone();
         let (state, language) = blocking(move || {
             let file = ferrule_vfs::read_text(&abs_for_load).map_err(vfs_error)?;
+            let saved_text = Rope::from_str(&file.text);
+            let indent_unit = detect_indent_unit(&file.text);
             let mut doc = Document::new(&file.text);
             let mut restored = false;
             if let Some(entry) = recovery.load(&abs_for_load) {
@@ -289,6 +355,9 @@ impl Session {
             }
             let language = registry.for_path(&abs_for_load);
             let name = language.as_ref().map(|l| l.name().to_owned());
+            let indent_rules = IndentRules {
+                markup_tags: language.as_ref().is_some_and(|l| l.markup_indent()),
+            };
             let syntax = match language {
                 Some(lang) => Some(SyntaxTree::new(lang).map_err(|e| {
                     IpcError::new(IpcErrorKind::Internal, e.to_string())
@@ -302,12 +371,18 @@ impl Session {
                     line_ending: file.line_ending,
                     bom: file.bom,
                     saved_version: 0,
+                    saved_text,
                     restored,
+                    indent_unit,
+                    indent_rules,
                 },
                 name,
             ))
         })
         .await?;
+        let touch = runtime.clone();
+        // Best effort: a failed recent-files write is logged, not reported.
+        tokio::task::spawn_blocking(move || touch.touch_recent(&recent_path));
 
         let handle = {
             let mut s = lock(&self.state)?;
@@ -529,6 +604,109 @@ impl Session {
         .await
     }
 
+    /// Enter at every caret: newline plus language-aware indentation,
+    /// recorded as typing so it undoes together with the surrounding text.
+    pub async fn new_line(
+        self: &Arc<Self>,
+        doc_id: DocId,
+        version: u32,
+        selection: ipc::EditorSelection,
+    ) -> Result<ipc::RemoteUpdate, IpcError> {
+        let handle = self.doc(doc_id)?;
+        let now = self.now_ms();
+        let h = handle.clone();
+        let update = blocking(move || {
+            let mut state = h.lock()?;
+            let before = selection_from_ipc(&selection);
+            let (edits, after) =
+                state
+                    .doc
+                    .newline_and_indent(&before, &state.indent_unit, state.indent_rules);
+            let tx = Transaction {
+                edits: edits.clone(),
+                kind: EditKind::Typing,
+                selection_before: before,
+                selection_after: after.clone(),
+            };
+            let outcome = state.doc.apply(version, &[tx], now).map_err(buffer_error)?;
+            if let Some(syntax) = &mut state.syntax {
+                syntax.edit(&outcome.byte_edits);
+            }
+            Ok(ipc::RemoteUpdate {
+                updates: vec![edits.iter().map(edit_to_ipc).collect()],
+                selection: selection_to_ipc(&after),
+                status: state.status(),
+            })
+        })
+        .await?;
+        self.schedule_autosave(handle);
+        Ok(update)
+    }
+
+    /// Reloads a document from disk. The change is one undoable step (only
+    /// the differing middle part is replaced, so carets elsewhere stay put);
+    /// afterwards the document is unmodified. No edits if the text matches.
+    pub async fn reload_document(
+        &self,
+        doc_id: DocId,
+        version: u32,
+    ) -> Result<ipc::DocumentReload, IpcError> {
+        let handle = self.doc(doc_id)?;
+        handle.cancel_autosave();
+        let recovery = self.recovery.clone();
+        let now = self.now_ms();
+        blocking(move || {
+            let file = ferrule_vfs::read_text(&handle.path).map_err(vfs_error)?;
+            let mut state = handle.lock()?;
+            if state.doc.version() != version {
+                return Err(buffer_error(ferrule_buffer::BufferError::VersionMismatch {
+                    expected: version,
+                    actual: state.doc.version(),
+                }));
+            }
+            let current = state.doc.text();
+            let mut updates = Vec::new();
+            if let Some(edit) = minimal_edit(&state.doc, &current, &file.text) {
+                let tx = Transaction {
+                    edits: vec![edit.clone()],
+                    kind: EditKind::Other,
+                    selection_before: Selection::cursor(edit.from),
+                    selection_after: Selection::cursor(edit.from),
+                };
+                let outcome = state.doc.apply(version, &[tx], now).map_err(buffer_error)?;
+                if let Some(syntax) = &mut state.syntax {
+                    syntax.edit(&outcome.byte_edits);
+                }
+                updates.push(vec![edit_to_ipc(&edit)]);
+            }
+            state.line_ending = file.line_ending;
+            state.bom = file.bom;
+            state.mark_saved();
+            recovery.remove(&handle.path).map_err(|e| io_error(&e))?;
+            Ok(ipc::DocumentReload {
+                updates,
+                status: state.status(),
+            })
+        })
+        .await
+    }
+
+    /// Whether the file on disk differs from the document's last loaded or
+    /// saved text (so a change event is not just our own save). A missing
+    /// file counts as changed.
+    pub async fn disk_changed(&self, doc_id: DocId) -> Result<bool, IpcError> {
+        let handle = self.doc(doc_id)?;
+        blocking(move || {
+            let disk = match ferrule_vfs::read_text(&handle.path) {
+                Ok(file) => file.text,
+                Err(_) => return Ok(true),
+            };
+            let state = handle.lock()?;
+            Ok(state.saved_text != disk.as_str())
+        })
+        .await
+    }
+
     /// Saves a document atomically with its original line endings and BOM,
     /// and deletes its recovery file.
     pub async fn save_document(&self, doc_id: DocId) -> Result<ipc::DocStatus, IpcError> {
@@ -539,8 +717,7 @@ impl Session {
             let mut state = handle.lock()?;
             let bytes = ferrule_vfs::encode(&state.doc.text(), state.line_ending, state.bom);
             ferrule_vfs::write_atomic(&handle.path, &bytes).map_err(|e| io_error(&e))?;
-            state.saved_version = state.doc.version();
-            state.restored = false;
+            state.mark_saved();
             recovery.remove(&handle.path).map_err(|e| io_error(&e))?;
             tracing::info!(path = ?handle.path, "saved");
             Ok(state.status())
@@ -593,4 +770,34 @@ impl Session {
             }
         });
     }
+}
+
+/// The single edit turning `old` into `new`: everything between their
+/// common prefix and common suffix. `None` if they are equal.
+fn minimal_edit(doc: &Document, old: &str, new: &str) -> Option<Edit> {
+    if old == new {
+        return None;
+    }
+    let mut prefix = old
+        .bytes()
+        .zip(new.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+    let max_suffix = old.len().min(new.len()) - prefix;
+    let mut suffix = old
+        .bytes()
+        .rev()
+        .zip(new.bytes().rev())
+        .take(max_suffix)
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
+        suffix -= 1;
+    }
+    let from = doc.byte_to_utf16(prefix);
+    let to = doc.byte_to_utf16(old.len() - suffix);
+    Some(Edit::new(from, to, &new[prefix..new.len() - suffix]))
 }

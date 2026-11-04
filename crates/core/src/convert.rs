@@ -116,29 +116,52 @@ pub(crate) fn io_error(err: &std::io::Error) -> IpcError {
     IpcError::new(IpcErrorKind::Io, err.to_string())
 }
 
+pub(crate) fn action_to_ipc(action: ferrule_settings::Action) -> ipc::KeyAction {
+    use ferrule_settings::Action as A;
+    use ipc::KeyAction as K;
+    match action {
+        A::Save => K::Save,
+        A::Undo => K::Undo,
+        A::Redo => K::Redo,
+        A::AddCaretAbove => K::AddCaretAbove,
+        A::AddCaretBelow => K::AddCaretBelow,
+        A::SelectNextOccurrence => K::SelectNextOccurrence,
+        A::SelectAllOccurrences => K::SelectAllOccurrences,
+        A::CloseTab => K::CloseTab,
+        A::SearchEverywhere => K::SearchEverywhere,
+        A::GotoFile => K::GotoFile,
+        A::GotoSymbol => K::GotoSymbol,
+        A::GotoAction => K::GotoAction,
+        A::GotoLine => K::GotoLine,
+        A::RecentFiles => K::RecentFiles,
+        A::FindInFiles => K::FindInFiles,
+        A::ReplaceInFiles => K::ReplaceInFiles,
+        A::OpenFolder => K::OpenFolder,
+    }
+}
+
+fn modifier_to_ipc(m: ferrule_settings::Modifier) -> ipc::Modifier {
+    match m {
+        ferrule_settings::Modifier::Control => ipc::Modifier::Control,
+        ferrule_settings::Modifier::Alt => ipc::Modifier::Alt,
+        ferrule_settings::Modifier::Shift => ipc::Modifier::Shift,
+    }
+}
+
 pub(crate) fn keymap_to_ipc(bindings: Vec<ferrule_settings::KeyBinding>) -> Vec<ipc::KeyBinding> {
-    use ferrule_settings::{Action, KeyStroke, Modifier};
+    use ferrule_settings::KeyStroke;
     bindings
         .into_iter()
         .map(|b| ipc::KeyBinding {
-            action: match b.action {
-                Action::Save => ipc::KeyAction::Save,
-                Action::Undo => ipc::KeyAction::Undo,
-                Action::Redo => ipc::KeyAction::Redo,
-                Action::AddCaretAbove => ipc::KeyAction::AddCaretAbove,
-                Action::AddCaretBelow => ipc::KeyAction::AddCaretBelow,
-                Action::SelectNextOccurrence => ipc::KeyAction::SelectNextOccurrence,
-                Action::SelectAllOccurrences => ipc::KeyAction::SelectAllOccurrences,
-                Action::CloseTab => ipc::KeyAction::CloseTab,
-            },
+            action: action_to_ipc(b.action),
             stroke: match b.stroke {
                 KeyStroke::Chord(keys) => ipc::KeyStroke::Chord { keys: keys.into() },
                 KeyStroke::DoubleModifier(m, key) => ipc::KeyStroke::DoubleModifier {
-                    modifier: match m {
-                        Modifier::Control => ipc::Modifier::Control,
-                        Modifier::Alt => ipc::Modifier::Alt,
-                    },
+                    modifier: modifier_to_ipc(m),
                     key: key.into(),
+                },
+                KeyStroke::DoubleTap(m) => ipc::KeyStroke::DoubleTap {
+                    modifier: modifier_to_ipc(m),
                 },
             },
         })

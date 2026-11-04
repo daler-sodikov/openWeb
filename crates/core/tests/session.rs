@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ferrule_core::Session;
+use ferrule_core::{NoEvents, Session};
 use ferrule_ipc::{
     CaretDirection, ChangeTransaction, DocId, EditKind, EditorSelection, EntryKind, IpcErrorKind,
     SelectionRange, TextEdit, TokenClass,
@@ -50,7 +50,8 @@ fn project_dir() -> tempfile::TempDir {
 }
 
 async fn session(dir: &Path) -> Arc<Session> {
-    let session = Session::with_autosave_delay(dir.join("recovery"), AUTOSAVE).unwrap();
+    let session =
+        Session::with_autosave_delay(dir.join("data"), Arc::new(NoEvents), AUTOSAVE).unwrap();
     session
         .open_project(dir.join("demo").to_string_lossy().into_owned())
         .await
@@ -61,7 +62,7 @@ async fn session(dir: &Path) -> Arc<Session> {
 #[tokio::test]
 async fn open_project_and_list_tree() {
     let dir = project_dir();
-    let session = Session::new(dir.path().join("recovery")).unwrap();
+    let session = Session::new(dir.path().join("data"), Arc::new(NoEvents)).unwrap();
     let info = session
         .open_project(dir.path().join("demo").to_string_lossy().into_owned())
         .await
@@ -271,5 +272,6 @@ async fn opening_twice_returns_the_same_document() {
 
 #[test]
 fn keymap_has_every_action() {
-    assert_eq!(ferrule_core::keymap().len(), 8);
+    // Every action except Open Folder (no default key in the IntelliJ keymap).
+    assert_eq!(ferrule_core::keymap().len(), 16);
 }
