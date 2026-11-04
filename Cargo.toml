@@ -64,6 +64,14 @@ tiny_http = "0.12"
 ignore = "0.4"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 regex = "1"
+# M2b
+tree-sitter-scss = "1"
+tree-sitter-less = "1"
+tree-sitter-yaml = "0.7"
+tree-sitter-md = "0.5"
+tree-sitter-svelte-ng = "1"
+globset = "0.4"
+x11rb = { version = "0.14", features = ["xtest"] }
 
 [workspace.lints.rust]
 missing_docs = "warn"
