@@ -1,8 +1,9 @@
 //! JavaScript, TypeScript, JSX, TSX and JSON language support.
 //!
 //! Tree-sitter grammars with the queries bundled with them, plus small
-//! queries of our own (marked below). `oxc`-based in-process features arrive
-//! with M3 (`docs/ROADMAP.md`).
+//! queries of our own (marked below), and the definition of the TypeScript
+//! language server ([`typescript_server`]). `oxc`-based in-process features
+//! arrive with M3b (`docs/ROADMAP.md`).
 
 use ferrule_syntax::{LanguageDef, Precedence};
 
@@ -114,10 +115,71 @@ pub fn languages() -> Vec<LanguageDef> {
     vec![typescript(), tsx(), javascript(), json()]
 }
 
+/// An external language server: how to find and start it, and which files
+/// it serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LanguageServerDef {
+    /// Display name in the UI ("TypeScript").
+    pub name: &'static str,
+    /// Executable name looked up in `node_modules/.bin` and on `PATH`.
+    pub program: &'static str,
+    /// Arguments.
+    pub args: &'static [&'static str],
+    /// User setting naming an explicit executable.
+    pub setting: &'static str,
+    /// What to tell the user when it is not installed.
+    pub install_hint: &'static str,
+    /// File extension (lowercase) → LSP language id.
+    pub languages: &'static [(&'static str, &'static str)],
+}
+
+impl LanguageServerDef {
+    /// The LSP language id for a file extension, if this server handles it.
+    pub fn language_id(&self, extension: &str) -> Option<&'static str> {
+        let extension = extension.to_ascii_lowercase();
+        self.languages
+            .iter()
+            .find(|(ext, _)| *ext == extension)
+            .map(|(_, id)| *id)
+    }
+}
+
+/// `typescript-language-server` (Apache-2.0), which drives the `tsserver` of
+/// the project's or a global TypeScript. Started with `--stdio`.
+pub fn typescript_server() -> LanguageServerDef {
+    LanguageServerDef {
+        name: "TypeScript",
+        program: "typescript-language-server",
+        args: &["--stdio"],
+        setting: "typescript.serverPath",
+        install_hint: "install it with `bun add -g typescript-language-server typescript` \
+                       (or npm/pnpm), or set typescript.serverPath in settings.json",
+        languages: &[
+            ("ts", "typescript"),
+            ("mts", "typescript"),
+            ("cts", "typescript"),
+            ("tsx", "typescriptreact"),
+            ("js", "javascript"),
+            ("mjs", "javascript"),
+            ("cjs", "javascript"),
+            ("jsx", "javascriptreact"),
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ferrule_syntax::HighlightLanguage;
+
+    #[test]
+    fn typescript_server_language_ids() {
+        let server = typescript_server();
+        assert_eq!(server.language_id("TSX"), Some("typescriptreact"));
+        assert_eq!(server.language_id("mjs"), Some("javascript"));
+        assert_eq!(server.language_id("jsx"), Some("javascriptreact"));
+        assert_eq!(server.language_id("json"), None);
+    }
 
     #[test]
     fn extracts_typescript_symbols() {
