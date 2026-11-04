@@ -30,6 +30,9 @@ None. No third-party source code is copied into this repository.
 | `ignore` (with `globset`)                                                                                     | Unlicense OR MIT (used under MIT) | Project walk honouring `.gitignore` (`indexer`)                                        |
 | `notify`                                                                                                      | CC0-1.0                           | File watching (`vfs`)                                                                  |
 | `inotify` (Linux, via `notify`)                                                                               | ISC                               | File watching backend; ISC is MIT-equivalent and allowed in `deny.toml`                |
+| `tree-sitter-scss`, `tree-sitter-less`, `tree-sitter-yaml`, `tree-sitter-md`, `tree-sitter-svelte-ng`         | MIT                               | SCSS, LESS, YAML, Markdown, Svelte grammars and bundled queries                        |
+| `globset`                                                                                                     | Unlicense OR MIT (used under MIT) | EditorConfig section globs (`settings`)                                                |
+| `x11rb` (`ferrule-perf` only, Linux)                                                                          | MIT OR Apache-2.0                 | Benchmark harness: screen capture and XTest input; not shipped                         |
 | `regex`                                                                                                       | MIT OR Apache-2.0                 | Find/Replace in Files (`search`)                                                       |
 | `tempfile`                                                                                                    | MIT OR Apache-2.0                 | Atomic saves (`vfs`) and temporary files in tests                                      |
 
@@ -49,11 +52,11 @@ None. No third-party source code is copied into this repository.
 
 ## JavaScript: runtime dependencies (bundled into the app)
 
-| Package                                                                               | License           |
-| ------------------------------------------------------------------------------------- | ----------------- |
-| `@tauri-apps/api`                                                                     | Apache-2.0 OR MIT |
-| `@tauri-apps/plugin-dialog`                                                           | Apache-2.0 OR MIT |
-| `@codemirror/view`, `@codemirror/state`, `@codemirror/collab`, `@codemirror/commands` | MIT               |
+| Package                                                                                                                                                                             | License           |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `@tauri-apps/api`                                                                                                                                                                   | Apache-2.0 OR MIT |
+| `@tauri-apps/plugin-dialog`                                                                                                                                                         | Apache-2.0 OR MIT |
+| `@codemirror/view`, `@codemirror/state`, `@codemirror/collab`, `@codemirror/commands`, `@codemirror/language` (folding UI), `@codemirror/autocomplete` (auto-closing brackets only) | MIT               |
 
 ## JavaScript: development tools (not distributed)
 

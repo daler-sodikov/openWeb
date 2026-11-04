@@ -225,6 +225,9 @@ Update this section at the end of every milestone.
 - [x] M2: search (files, symbols, text), Search Everywhere
       (2026-11-04; checks pass locally on Linux; see docs/ROADMAP.md M2;
       M2b editor polish comes before M3)
+- [x] M2b: split editors, breadcrumbs, folding, brackets, EditorConfig,
+      more languages, perf harness (2026-11-04; see docs/ROADMAP.md M2b and
+      perf/RESULTS.md: four budgets missed on Xvfb)
 - [ ] M3: LSP client + TypeScript intelligence
 - [ ] M4: terminal, Git basics
 - [ ] M5: run/debug, test runner

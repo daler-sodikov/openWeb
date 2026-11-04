@@ -164,17 +164,86 @@ Follow-ups found in M2:
 - [ ] Select Next Occurrence is case-sensitive plain matching (no whole-word
       mode yet).
 
-## M2b: Editor polish (before M3)
+## M2b: Editor polish (done)
 
-Moved here from M1/M2 so M2 stays reviewable; each item keeps its scope:
+Plan:
 
-- [ ] Split editors
-- [ ] Breadcrumbs, folding, bracket matching
-- [ ] EditorConfig
-- [ ] `.gitignore`-aware tree (greyed entries)
-- [ ] `perf/` typing-latency, startup and search-latency benchmarks
-- [ ] Non-UTF-8 encodings; read-only paging for files over 20 MB
-- [ ] Highlighting for SCSS/LESS/YAML/Markdown/Vue/Svelte
+- [x] `syntax`: language injections (HTML `<script>`/`<style>`, Vue and
+      Svelte blocks, Markdown inline text and fenced code), folding ranges,
+      bracket pairs and breadcrumbs from the syntax tree
+- [x] New languages: SCSS, LESS (`lang-css`), Vue, Svelte (`lang-html`),
+      YAML (`lang-yaml`), Markdown (`lang-markdown`); golden tests
+- [x] Highlighting fixes: capitalized function names use the function
+      color; CSS custom properties (`--gap`) get a variable color
+- [x] `settings`: EditorConfig (`indent_style`, `indent_size`, `tab_width`,
+      `end_of_line`, `trim_trailing_whitespace`, `insert_final_newline`,
+      `charset`), nearest file wins, `root = true` stops the search
+- [x] `project`: listings mark `.gitignore`d entries (and `node_modules`)
+- [x] Frontend: split editors (two groups, the same file in both), code
+      folding, bracket matching, auto-closing brackets and quotes,
+      breadcrumbs, greyed ignored entries
+- [x] `perf/`: external benchmark harness on a generated ~1000-file project
+      (Linux/X11 first)
+
+**Done when:**
+
+1. **Split editors.** "Split Right" (tab button, Search Everywhere action)
+   opens the current file in a second group; both groups have their own
+   tabs; the same file can be open in both and edits in one appear in the
+   other immediately; closing a group's last tab removes the group.
+2. **Breadcrumbs.** A bar under the editor shows the structural path at the
+   caret (e.g. `App › main › Counter` in a TSX file, `.card › h1`
+   in CSS, `scripts › build` in JSON/YAML); clicking a crumb moves the caret
+   there.
+3. **Folding.** Gutter markers on multi-line blocks (braces, brackets,
+   multi-line comments, markup elements, YAML/Markdown sections); click or
+   Ctrl+Minus / Ctrl+Plus (macOS Cmd) folds/unfolds; Ctrl+Shift+Minus /
+   Ctrl+Shift+Plus folds/unfolds all. Ranges come from Rust.
+4. **Brackets.** The bracket pair at the caret is highlighted (from the
+   syntax tree, so brackets in strings and comments are ignored);
+   Ctrl+Shift+M (macOS Cmd+Ctrl+M) jumps to the matching bracket. Typing
+   `(`, `[`, `{`, quotes (and backticks in JS/TS) inserts the closing
+   character; typing it again steps over; Backspace in an empty pair
+   deletes both.
+5. **EditorConfig.** With a `.editorconfig`, Tab and Enter use its
+   indentation, tab width follows `tab_width`, and saving applies
+   `trim_trailing_whitespace`, `insert_final_newline` and `end_of_line`
+   (as one undoable step, visible in the editor).
+6. **Ignored files.** `.gitignore`d entries and `node_modules` are shown
+   greyed in the tree (still openable).
+7. **Highlighting.** `.scss`, `.less`, `.yaml`/`.yml`, `.md`, `.vue` and
+   `.svelte` are highlighted, including `<script>`/`<style>` blocks in Vue,
+   Svelte and HTML and fenced code in Markdown; the two quirks are fixed;
+   golden tests cover every language.
+8. **Benchmarks.** `cargo run -p ferrule-perf --release -- …` generates a
+   ~1000-file project, launches the release app as a separate process, and
+   measures from the outside: time to a window showing the project (screen
+   pixels), ready time (process-tree CPU settled), memory (PSS of the whole
+   process tree), idle CPU, typing latency (key injected with XTest until
+   the glyph appears on screen) and quit time. Results with machine
+   details are recorded in `perf/RESULTS.md`; only measured numbers.
+9. **Tests.** Rust tests for injections, folding, brackets, breadcrumbs,
+   EditorConfig, ignored entries and the new languages (golden); Playwright
+   `ui` tests for 1–7; all checks pass with zero warnings.
+
+Status: points 1–9 verified on 2026-11-04 (Linux; Playwright `ui` in
+Chromium). The benchmark harness works; its first measurements miss four
+budgets (see `perf/RESULTS.md` and the backlog).
+
+Not in M2b (moved to the backlog below): non-UTF-8 encodings and
+read-only paging for files over 20 MB.
+
+## Backlog (unscheduled)
+
+- [ ] Non-UTF-8 encodings; read-only paging for files over 20 MB (from M1)
+- [ ] `perf/` on macOS and Windows; comparison runs against other IDEs with
+      the same method
+- [ ] Search-latency benchmark
+- [ ] Performance (from `perf/RESULTS.md`, M2b run on Xvfb): idle CPU with an
+      open editor (21 % of a core; ~0 % without one), typing latency
+      (53 ms median), memory (308 MiB PSS) and "ready" miss the budget.
+      Measure on a GPU desktop, then reduce the editor's idle repaint cost
+      (caret blink), typing-path work and memory.
 
 ## M3: TypeScript intelligence
 

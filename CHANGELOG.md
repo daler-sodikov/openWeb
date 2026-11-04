@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M2b: editor polish)
+
+- Split editors: "Split Right" opens the current file in a second group;
+  the same file can be edited in both, kept in sync through one replica.
+- Breadcrumbs under the editor (named scopes at the caret; click to jump).
+- Code folding with gutter markers and Ctrl/Cmd+Minus/Plus (Shift for all);
+  ranges come from tree-sitter in Rust.
+- Bracket matching from the syntax tree, Move Caret to Matching Brace
+  (Ctrl+Shift+M, macOS Cmd+Ctrl+M), auto-closing brackets and quotes.
+- EditorConfig: indentation, tab width, trailing whitespace, final newline,
+  line endings and UTF-8 BOM.
+- `.gitignore`d entries and `node_modules` shown greyed in the tree.
+- Highlighting for SCSS, LESS, YAML, Markdown, Vue and Svelte, and for
+  embedded `<script>`/`<style>` blocks (HTML, Vue, Svelte) and fenced code
+  in Markdown, via injections; golden tests per language.
+- `ferrule <folder> [file]` opens a file at startup.
+- `ferrule-perf`: external benchmark harness (Linux/X11) for startup, ready
+  time, memory, idle CPU, typing latency and quit time; results in
+  `perf/RESULTS.md`.
+
+### Fixed (M2b)
+
+- Capitalized function names (React components) were colored as types.
+- CSS custom properties (`--gap`) were plain text; SCSS/LESS variables are
+  colored too.
+
 ### Added (M2: search and navigation)
 
 - Search Everywhere (double Shift) with All / Files / Symbols / Actions tabs;
