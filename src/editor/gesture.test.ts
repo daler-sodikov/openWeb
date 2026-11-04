@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DOUBLE_TAP_MS, DoubleModifierGesture } from "./gesture";
+import { DOUBLE_TAP_MS, DoubleModifierGesture, DoubleTapDetector } from "./gesture";
 
 describe("DoubleModifierGesture", () => {
   it("arms after tap + press-and-hold", () => {
@@ -37,5 +37,38 @@ describe("DoubleModifierGesture", () => {
     g.keyup("Alt", 10);
     g.keydown("Control", 50);
     expect(g.keydown("ArrowUp", 60)).toBeNull();
+  });
+});
+
+describe("DoubleTapDetector", () => {
+  it("fires on the second clean release", () => {
+    const d = new DoubleTapDetector("Shift");
+    d.keydown("Shift");
+    expect(d.keyup("Shift", 100)).toBe(false);
+    d.keydown("Shift");
+    expect(d.keyup("Shift", 300)).toBe(true);
+    // A third tap starts over.
+    d.keydown("Shift");
+    expect(d.keyup("Shift", 400)).toBe(false);
+  });
+
+  it("ignores Shift used for typing and slow taps", () => {
+    const d = new DoubleTapDetector("Shift");
+    d.keydown("Shift");
+    d.keydown("A");
+    expect(d.keyup("Shift", 100)).toBe(false);
+    d.keydown("Shift");
+    expect(d.keyup("Shift", 200)).toBe(false);
+    d.keydown("Shift");
+    expect(d.keyup("Shift", 200 + DOUBLE_TAP_MS + 1)).toBe(false);
+  });
+
+  it("is reset by another key between taps", () => {
+    const d = new DoubleTapDetector("Shift");
+    d.keydown("Shift");
+    d.keyup("Shift", 100);
+    d.keydown("x");
+    d.keydown("Shift");
+    expect(d.keyup("Shift", 200)).toBe(false);
   });
 });

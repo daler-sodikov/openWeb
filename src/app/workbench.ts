@@ -1,10 +1,26 @@
 // Main window layout: toolbar, project tree, editor tabs, status bar.
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { EditorTab, type EditorTabHost } from "../editor/editor-tab";
-import { commands, type AppInfo, type KeyBinding } from "../ipc/bindings";
+import { EDITOR_ACTIONS, EditorTab, type EditorTabHost } from "../editor/editor-tab";
+import { DoubleTapDetector } from "../editor/gesture";
+import {
+  commands,
+  events,
+  type AppInfo,
+  type FsChangeBatch,
+  type IndexState,
+  type KeyAction,
+  type KeyBinding,
+  type ReplaceResult,
+  type SearchTab,
+} from "../ipc/bindings";
 import { errorMessage, unwrap } from "../ipc/result";
+import { FindInFiles } from "../popup/find-in-files";
+import type { Popup } from "../popup/popup";
+import { SearchEverywhere } from "../popup/search-everywhere";
+import { GotoLine, RecentFiles } from "../popup/simple-popups";
 import { TreeView } from "../tree/tree-view";
+import { chordMatches, formatChord } from "../ui/keys";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -30,13 +46,19 @@ export class Workbench implements EditorTabHost {
   private readonly statusPosition = el("span", "status-position", "status-position");
   private readonly statusLanguage = el("span", "status-language", "status-language");
   private readonly statusState = el("span", "status-state", "status-state");
+  private readonly statusIndex = el("span", "status-index", "status-index");
   private readonly opening = new Map<string, Promise<void>>();
+  private readonly mac: boolean;
+  private readonly doubleShift = new DoubleTapDetector("Shift");
+  private popup: Popup | null = null;
+  private hasProject = false;
 
   constructor(
     root: HTMLElement,
     private readonly info: AppInfo,
     private readonly keymap: readonly KeyBinding[],
   ) {
+    this.mac = info.platform === "macos";
     const toolbar = el("header", "toolbar");
     const brand = el("span", "toolbar-brand", "app-name");
     brand.textContent = info.name;
@@ -77,6 +99,7 @@ export class Workbench implements EditorTabHost {
       this.statusPath,
       this.statusNotice,
       this.statusPosition,
+      this.statusIndex,
       this.statusLanguage,
       this.statusState,
     );
@@ -85,6 +108,226 @@ export class Workbench implements EditorTabHost {
     shell.append(toolbar, body, status);
     root.replaceChildren(shell);
     this.updateChrome();
+    this.installGlobalKeys();
+    void this.listenToBackend();
+  }
+
+  // Global shortcuts, actions and popups
+
+  private installGlobalKeys(): void {
+    // Capture phase: works whether the editor, the tree or a popup has focus.
+    window.addEventListener(
+      "keydown",
+      (event) => {
+        this.doubleShift.keydown(event.key);
+        for (const binding of this.keymap) {
+          if (EDITOR_ACTIONS.has(binding.action) || binding.stroke.type !== "chord") continue;
+          if (chordMatches(event, binding.stroke.keys, this.mac)) {
+            event.preventDefault();
+            event.stopPropagation();
+            this.runAction(binding.action);
+            return;
+          }
+        }
+      },
+      true,
+    );
+    window.addEventListener(
+      "keyup",
+      (event) => {
+        if (this.doubleShift.keyup(event.key, event.timeStamp)) this.runAction("searchEverywhere");
+      },
+      true,
+    );
+  }
+
+  private async listenToBackend(): Promise<void> {
+    try {
+      await events.fsChanged.listen((event) => {
+        void this.onFsChanged(event.payload);
+      });
+      await events.indexStatus.listen((event) => {
+        this.onIndexStatus(event.payload);
+      });
+    } catch (error: unknown) {
+      this.notify(`Backend events unavailable: ${errorMessage(error)}`);
+    }
+  }
+
+  /** Runs an action from a shortcut or Search Everywhere. */
+  runAction(action: KeyAction): void {
+    const tab = this.active;
+    switch (action) {
+      case "searchEverywhere":
+        this.openSearch("all");
+        return;
+      case "gotoFile":
+        this.openSearch("files");
+        return;
+      case "gotoSymbol":
+        this.openSearch("symbols");
+        return;
+      case "gotoAction":
+        this.openSearch("actions");
+        return;
+      case "recentFiles":
+        if (this.requireProject()) {
+          this.showPopup(
+            new RecentFiles((path) => {
+              void this.openFile(path);
+            }),
+          );
+        }
+        return;
+      case "gotoLine":
+        if (tab) {
+          const state = tab.view.state;
+          const line = state.doc.lineAt(state.selection.main.head);
+          const current = `${String(line.number)}:${String(state.selection.main.head - line.from + 1)}`;
+          this.showPopup(
+            new GotoLine(current, (l, c) => {
+              tab.reveal(l, c);
+            }),
+          );
+        }
+        return;
+      case "findInFiles":
+      case "replaceInFiles":
+        if (this.requireProject()) {
+          this.showPopup(new FindInFiles(this, action === "replaceInFiles", this.selectedText()));
+        }
+        return;
+      case "openFolder":
+        void this.pickFolder();
+        return;
+      case "closeTab":
+        if (tab) this.closeTab(tab);
+        return;
+      case "save":
+        void tab?.save();
+        return;
+      case "undo":
+        void tab?.undo();
+        return;
+      case "redo":
+        void tab?.redo();
+        return;
+      case "addCaretAbove":
+        void tab?.addCaret("up");
+        return;
+      case "addCaretBelow":
+        void tab?.addCaret("down");
+        return;
+      case "selectNextOccurrence":
+        void tab?.selectNextOccurrence();
+        return;
+      case "selectAllOccurrences":
+        void tab?.selectAllOccurrences();
+        return;
+    }
+  }
+
+  /** Shortcut text for an action (shown in Search Everywhere). */
+  shortcutFor(action: KeyAction): string {
+    const binding = this.keymap.find((b) => b.action === action);
+    if (!binding) return "";
+    switch (binding.stroke.type) {
+      case "chord":
+        return formatChord(binding.stroke.keys, this.mac);
+      case "doubleTap":
+        return "Double Shift";
+      case "doubleModifier":
+        return `Double ${binding.stroke.modifier === "control" ? "Ctrl" : this.mac ? "⌥" : "Alt"} + ${binding.stroke.key.replace("Arrow", "")}`;
+    }
+  }
+
+  private requireProject(): boolean {
+    if (!this.hasProject) this.notify("Open a folder first.");
+    return this.hasProject;
+  }
+
+  private openSearch(tab: SearchTab): void {
+    if (this.popup instanceof SearchEverywhere && !this.popup.isClosed) {
+      this.popup.setTab(tab);
+      return;
+    }
+    this.showPopup(new SearchEverywhere(this, tab, this.selectedText()));
+  }
+
+  private showPopup(popup: Popup): void {
+    this.popup?.close();
+    this.popup = popup;
+    popup.onClose = () => {
+      if (this.popup === popup) this.popup = null;
+      if (!document.querySelector(".popup")) this.active?.view.focus();
+    };
+    popup.open();
+  }
+
+  /** Single-line selection of the active editor, to prefill searches. */
+  private selectedText(): string {
+    const state = this.active?.view.state;
+    if (!state) return "";
+    const { from, to } = state.selection.main;
+    const text = state.sliceDoc(from, to);
+    return text.includes("\n") ? "" : text;
+  }
+
+  /** Opens a file and, if given, moves the caret to a zero-based line and column. */
+  openLocation(path: string, line?: number, column?: number): void {
+    void (async () => {
+      await this.openFile(path);
+      const tab = this.tabs.find((t) => t.path === path);
+      if (tab && line !== undefined) tab.reveal(line, column ?? 0);
+    })();
+  }
+
+  async flushAll(): Promise<void> {
+    await Promise.all(this.tabs.map((t) => t.flush()));
+  }
+
+  async applyReplace(result: ReplaceResult): Promise<string[]> {
+    const failures: string[] = [];
+    for (const doc of result.openDocuments) {
+      const tab = this.tabs.find((t) => t.docId === doc.docId);
+      if (!tab) {
+        failures.push(`document ${String(doc.docId)}`);
+        continue;
+      }
+      try {
+        await tab.applyReplace(doc.version, doc.edits);
+      } catch (error: unknown) {
+        failures.push(`${tab.name} (${errorMessage(error)})`);
+      }
+    }
+    this.updateChrome();
+    return failures;
+  }
+
+  // Backend events
+
+  private async onFsChanged(batch: FsChangeBatch): Promise<void> {
+    const removed = batch.changes.filter((c) => c.kind === "removed").map((c) => c.path);
+    await this.tree.refreshPaths(
+      batch.changes.map((c) => c.path),
+      removed,
+    );
+    for (const change of batch.changes) {
+      const tab = this.tabs.find((t) => t.path === change.path);
+      if (!tab) continue;
+      if (change.kind === "removed") {
+        this.notify(`${tab.name} was deleted on disk; saving recreates it.`);
+      } else {
+        void tab.onDiskChange();
+      }
+    }
+  }
+
+  private onIndexStatus(state: IndexState): void {
+    this.statusIndex.textContent = state.indexing ? "Indexing…" : "";
+    this.statusIndex.title = state.indexing
+      ? ""
+      : `${String(state.files)} files, ${String(state.symbols)} symbols indexed`;
   }
 
   async pickFolder(): Promise<void> {
@@ -103,6 +346,7 @@ export class Workbench implements EditorTabHost {
       this.projectName.textContent = project.name;
       this.projectName.title = project.root;
       document.title = `${this.info.name} — ${project.name}`;
+      this.hasProject = true;
       this.tree.setRoot(unwrap(await commands.listDir("")));
       this.notify("");
       this.renderWelcome(project.name);
