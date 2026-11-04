@@ -11,3 +11,4 @@ playwright-report/
 fixtures/
 crates/*/tests/golden/
 .openidea/
+third_party/

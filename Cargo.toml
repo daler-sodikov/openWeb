@@ -2,6 +2,8 @@
 resolver = "3"
 members = ["crates/*", "src-tauri", "perf"]
 default-members = ["crates/*", "src-tauri", "perf"]
+# Vendored third-party crates are dependencies, not members.
+exclude = ["third_party"]
 
 [workspace.package]
 version = "0.1.0"
@@ -92,3 +94,8 @@ print_stderr = "warn"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# tree-sitter-scss 1.0.0 with an MSVC-compatible build script (see
+# third_party/tree-sitter-scss/VENDORED.md).
+[patch.crates-io]
+tree-sitter-scss = { path = "third_party/tree-sitter-scss" }
