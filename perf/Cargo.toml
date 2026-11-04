@@ -1,0 +1,20 @@
+[package]
+name = "ferrule-perf"
+description = "External benchmark harness: launches the release app and measures startup, memory, CPU and typing latency from outside."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tempfile.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb.workspace = true
+
+[lints]
+workspace = true
