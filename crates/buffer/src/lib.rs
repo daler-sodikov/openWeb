@@ -9,6 +9,7 @@
 
 mod document;
 mod history;
+mod indent;
 mod multicursor;
 mod selection;
 mod text;
@@ -17,6 +18,7 @@ pub use document::{
     ApplyOutcome, BufferError, ByteEdit, Document, Edit, EditKind, Point, Transaction,
 };
 pub use history::UndoOutcome;
+pub use indent::{IndentRules, detect_indent_unit};
 pub use multicursor::CaretDirection;
 pub use ropey::Rope;
 pub use selection::{SelRange, Selection};
