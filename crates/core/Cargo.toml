@@ -27,6 +27,14 @@ ferrule-git.workspace = true
 ferrule-terminal.workspace = true
 ferrule-run-debug.workspace = true
 ferrule-plugin-host.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

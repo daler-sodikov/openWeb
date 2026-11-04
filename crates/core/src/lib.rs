@@ -1,8 +1,12 @@
 //! Application core: owns runtime state and wires the domain crates together.
 //!
-//! In M0 it only provides application metadata and the frontend startup
-//! check. Sessions, projects and documents arrive in M1 (see
-//! `docs/ROADMAP.md`).
+//! [`Session`] holds the open project and documents. Every public method
+//! returns IPC DTOs and [`IpcError`]s, so `ferrule-app` only forwards calls.
+
+mod convert;
+mod session;
+
+pub use session::{DEFAULT_AUTOSAVE_DELAY, Session, SessionError};
 
 use ferrule_ipc::{
     AppInfo, FrontendReadyReport, IpcError, IpcErrorKind, PROTOCOL_VERSION, Platform,
@@ -10,6 +14,16 @@ use ferrule_ipc::{
 
 /// Product name shown in window titles and the UI.
 pub const PRODUCT_NAME: &str = "Ferrule";
+
+/// IntelliJ-style key bindings for the current OS.
+pub fn keymap() -> Vec<ferrule_ipc::KeyBinding> {
+    let os = if cfg!(target_os = "macos") {
+        ferrule_settings::KeymapOs::Mac
+    } else {
+        ferrule_settings::KeymapOs::Other
+    };
+    convert::keymap_to_ipc(ferrule_settings::intellij_keymap(os))
+}
 
 /// Returns static information about the running application.
 pub fn app_info() -> AppInfo {
