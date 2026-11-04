@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Write as _;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -43,6 +43,11 @@ const EDITOR_FIRST_LINE: Rect = Rect {
     h: 24,
 };
 const CLICK_LINE_END: (i16, i16) = (1150, 80);
+/// In `--only typing` runs: time for the language server to start and load
+/// the project before typing (the same in every run, so runs compare).
+const TYPING_WARMUP: Duration = Duration::from_secs(8);
+/// Typing-path timings written by the app (`FERRULE_TYPING_TRACE`).
+const TRACE_FILE: &str = "typing-trace.tsv";
 
 #[derive(Debug, Clone, Copy)]
 struct Rect {
@@ -310,6 +315,7 @@ fn launch(args: &Args, project: &Path, data: &Path, x: &X11, full: bool) -> anyh
             .arg(project)
             .arg("main.ts")
             .env("XDG_DATA_HOME", data)
+            .env("FERRULE_TYPING_TRACE", data.join(TRACE_FILE))
             .env("GDK_BACKEND", "x11")
             .env_remove("WAYLAND_DISPLAY")
             .stdout(Stdio::null())
@@ -324,6 +330,17 @@ fn launch(args: &Args, project: &Path, data: &Path, x: &X11, full: bool) -> anyh
     })
     .context("the project tree never appeared")?;
     run.window_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    if args.only_typing {
+        std::thread::sleep(TYPING_WARMUP);
+        run.typing_ms = typing_latency(x, window, args.keys)?;
+        // Let the view flush its last timings (it does so every second).
+        std::thread::sleep(Duration::from_millis(1500));
+        x.close(window)?;
+        wait_for(Duration::from_secs(10), || app.0.try_wait().ok().flatten())
+            .context("the app did not quit")?;
+        return Ok(run);
+    }
 
     // Ready: CPU settled for SETTLE_FOR (sampled in 100 ms steps).
     let step = Duration::from_millis(100);
@@ -344,6 +361,7 @@ fn launch(args: &Args, project: &Path, data: &Path, x: &X11, full: bool) -> anyh
         (run.pss_mib, run.rss_mib) = memory_mib(pid);
         run.idle_cpu = cpu_percent(pid, IDLE_SAMPLE);
         run.typing_ms = typing_latency(x, window, args.keys)?;
+        std::thread::sleep(Duration::from_millis(1500));
     }
 
     let quit = Instant::now();
@@ -445,10 +463,28 @@ pub fn run(args: &Args) -> anyhow::Result<()> {
     let x = X11::connect()?;
     let dir = tempfile::tempdir()?;
     let project = dir.path().join("bench-project");
-    let files = crate::generate::generate(&project, args.files)?;
+    let files = crate::generate::generate(&project, args.files, args.target)?;
     let data = dir.path().join("data");
+    fs::create_dir_all(&data)?;
+
+    if args.only_typing {
+        let run = launch(args, &project, &data, &x, true)?;
+        let mut out = std::io::stdout().lock();
+        writeln!(out, "Machine: {}", machine())?;
+        writeln!(
+            out,
+            "Project: {files} generated files; app: {}; typing into {:?}",
+            args.app.display(),
+            args.target
+        )?;
+        writeln!(out)?;
+        report_typing(&mut out, &run.typing_ms, &data.join(TRACE_FILE))?;
+        return Ok(());
+    }
 
     let cold = launch(args, &project, &data, &x, false)?;
+    // Only the warm run's typing goes into the trace breakdown.
+    let _ = fs::remove_file(data.join(TRACE_FILE));
     let warm = launch(args, &project, &data, &x, true)?;
 
     let mut typing = warm.typing_ms.clone();
@@ -502,5 +538,71 @@ pub fn run(args: &Args) -> anyhow::Result<()> {
         typing.last().copied().unwrap_or(f64::NAN)
     )?;
     writeln!(out, "| Quit | {:.0} ms | < 0.5 s |", warm.quit_ms)?;
+    writeln!(out)?;
+    report_typing(&mut out, &warm.typing_ms, &data.join(TRACE_FILE))?;
+    Ok(())
+}
+
+/// The external key-to-glyph latency and the app's own typing-path stages.
+fn report_typing(out: &mut impl Write, typing: &[f64], trace: &Path) -> anyhow::Result<()> {
+    let mut stages: Vec<(String, Vec<f64>)> = Vec::new();
+    for line in fs::read_to_string(trace).unwrap_or_default().lines() {
+        let Some((stage, ms)) = line.split_once('\t') else {
+            continue;
+        };
+        let Ok(ms) = ms.parse::<f64>() else { continue };
+        match stages.iter_mut().find(|(name, _)| name == stage) {
+            Some((_, values)) => values.push(ms),
+            None => stages.push((stage.to_owned(), vec![ms])),
+        }
+    }
+    let mut typing = typing.to_vec();
+    typing.sort_by(f64::total_cmp);
+    writeln!(out, "| Typing path | Samples | Median | p95 |")?;
+    writeln!(out, "| --- | --- | --- | --- |")?;
+    writeln!(
+        out,
+        "| Key → glyph on screen (external, XTest + GetImage) | {} | {:.1} ms | {:.1} ms |",
+        typing.len(),
+        percentile(&typing, 0.5),
+        percentile(&typing, 0.95)
+    )?;
+    let order = [
+        ("view.dispatch", "Key event → local edit dispatched (view)"),
+        (
+            "view.echo_frame",
+            "Key event → frame with the local echo (view)",
+        ),
+        (
+            "view.rust_confirmed",
+            "Key event → edit confirmed by Rust (view)",
+        ),
+        (
+            "view.highlight_frame",
+            "Key event → frame with fresh highlights (view)",
+        ),
+        (
+            "rust.apply_changes",
+            "apply_changes in Rust (buffer, syntax, LSP queue)",
+        ),
+        (
+            "rust.highlights",
+            "highlights in Rust (tree-sitter, viewport)",
+        ),
+    ];
+    for (stage, label) in order {
+        let Some((_, values)) = stages.iter_mut().find(|(name, _)| name == stage) else {
+            writeln!(out, "| {label} | 0 | – | – |")?;
+            continue;
+        };
+        values.sort_by(f64::total_cmp);
+        writeln!(
+            out,
+            "| {label} | {} | {:.2} ms | {:.2} ms |",
+            values.len(),
+            percentile(values, 0.5),
+            percentile(values, 0.95)
+        )?;
+    }
     Ok(())
 }

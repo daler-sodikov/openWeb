@@ -31,6 +31,7 @@ import {
 } from "./convert";
 import { buildDecorations } from "./highlight";
 import { buildDiagnostics } from "./insight";
+import { type KeyTrace, mark, markNextFrame } from "../perf/typing-trace";
 
 /** Marks transactions that mirror a change made elsewhere (not to forward). */
 export const mirrored = Annotation.define<boolean>();
@@ -83,6 +84,9 @@ export class DocModel {
   private caretTimer: ReturnType<typeof setTimeout> | undefined;
   private diagnosticsTimer: ReturnType<typeof setTimeout> | undefined;
   private destroyed = false;
+  /** Traced keystrokes not yet confirmed by Rust / not yet highlighted. */
+  private unconfirmed: KeyTrace[] = [];
+  private unhighlighted: KeyTrace[] = [];
 
   constructor(
     doc: OpenedDocument,
@@ -141,7 +145,8 @@ export class DocModel {
   // Changes from panes and from Rust
 
   /** A pane made a local edit: record it in the hub and mirror it. */
-  applyLocal(tr: Transaction, from: DocPane): void {
+  applyLocal(tr: Transaction, from: DocPane, trace: KeyTrace | null = null): void {
+    if (trace) this.unconfirmed.push(trace);
     const userEvent = tr.annotation(Transaction.userEvent);
     // The hub carries the pane's selections so undo can restore them.
     this.hub = this.hub.update({ selection: tr.startState.selection }).state;
@@ -346,6 +351,8 @@ export class DocModel {
           updates.map((u) => ({ changes: u.changes, clientID: u.clientID })),
         ),
       );
+      for (const trace of this.unconfirmed) mark(trace, "rust_confirmed");
+      this.unhighlighted.push(...this.unconfirmed.splice(0));
       this.setStatus(status);
     }
   }
@@ -406,6 +413,7 @@ export class DocModel {
     let decorations = buildDecorations(result.spans, length);
     if (pending.length > 0) decorations = decorations.map(composePending(pending, length));
     for (const pane of this.panes) pane.setHighlights(decorations);
+    for (const trace of this.unhighlighted.splice(0)) markNextFrame(trace, "highlight_frame");
   }
 
   private scheduleFolds(delay: number): void {

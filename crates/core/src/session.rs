@@ -27,6 +27,7 @@ use tokio_util::sync::CancellationToken;
 use crate::events::{EventSink, SessionEvent};
 use crate::lsp::{LanguageService, SyncKey};
 use crate::project_runtime::{ProjectRuntime, index_project};
+use crate::trace::TypingTrace;
 
 use crate::convert::{
     buffer_error, edit_from_ipc, edit_to_ipc, io_error, kind_from_ipc, project_error,
@@ -159,6 +160,8 @@ pub struct SessionConfig {
     pub settings_file: PathBuf,
     /// Delay between the last edit and writing the recovery file.
     pub autosave_delay: Duration,
+    /// Typing-path timing file (`FERRULE_TYPING_TRACE`), off when `None`.
+    pub typing_trace: Option<PathBuf>,
 }
 
 impl SessionConfig {
@@ -170,6 +173,7 @@ impl SessionConfig {
             settings_file: data_dir.join("settings.json"),
             data_dir,
             autosave_delay: DEFAULT_AUTOSAVE_DELAY,
+            typing_trace: None,
         }
     }
 }
@@ -183,6 +187,7 @@ pub struct Session {
     started: Instant,
     data_dir: PathBuf,
     settings_file: PathBuf,
+    pub(crate) trace: Option<Arc<TypingTrace>>,
     pub(crate) sink: Arc<dyn EventSink>,
     /// Incremented by every Find in Files request; older requests stop.
     pub(crate) find_counter: Arc<AtomicU64>,
@@ -256,6 +261,7 @@ impl Session {
             data_dir,
             settings_file,
             autosave_delay,
+            typing_trace,
         } = config;
         Ok(Arc::new(Self {
             state: Mutex::new(State::default()),
@@ -265,6 +271,7 @@ impl Session {
             started: Instant::now(),
             data_dir,
             settings_file,
+            trace: typing_trace.map(|path| Arc::new(TypingTrace::new(path))),
             sink,
             find_counter: Arc::new(AtomicU64::new(0)),
         }))
@@ -542,7 +549,10 @@ impl Session {
         let now = self.now_ms();
         let h = handle.clone();
         let lsp = self.lsp_for(&handle);
+        let trace = self.trace.clone();
         let status = blocking(move || {
+            let _span = tracing::debug_span!("apply_changes", doc = doc_id.0).entered();
+            let started = Instant::now();
             let txs: Vec<Transaction> = transactions
                 .iter()
                 .map(|t| Transaction {
@@ -562,6 +572,9 @@ impl Session {
             }
             if let Some(lsp) = &lsp {
                 lsp.sync(&h, &mut state, &outcome.lsp_changes);
+            }
+            if let Some(trace) = &trace {
+                trace.record("rust.apply_changes", started.elapsed());
             }
             Ok(state.status())
         })
@@ -701,7 +714,10 @@ impl Session {
         to: u32,
     ) -> Result<ipc::Highlights, IpcError> {
         let handle = self.doc(doc_id)?;
+        let trace = self.trace.clone();
         blocking(move || {
+            let _span = tracing::debug_span!("highlights", doc = doc_id.0).entered();
+            let started = Instant::now();
             let mut guard = handle.lock()?;
             let state = &mut *guard;
             let version = state.doc.version();
@@ -723,6 +739,9 @@ impl Session {
                     class: token_to_ipc(s.class),
                 })
                 .collect();
+            if let Some(trace) = &trace {
+                trace.record("rust.highlights", started.elapsed());
+            }
             Ok(ipc::Highlights { version, spans })
         })
         .await
@@ -997,6 +1016,22 @@ impl Session {
         }
         self.flush_closed(vec![handle]).await;
         Ok(())
+    }
+
+    /// Whether typing-path timing is on (`FERRULE_TYPING_TRACE`).
+    pub fn typing_trace_enabled(&self) -> bool {
+        self.trace.is_some()
+    }
+
+    /// Appends the view's typing-path samples (and Rust's own) to the trace.
+    pub async fn record_typing_trace(
+        &self,
+        samples: Vec<ipc::TraceSample>,
+    ) -> Result<(), IpcError> {
+        let Some(trace) = self.trace.clone() else {
+            return Ok(());
+        };
+        blocking(move || trace.flush(&samples).map_err(|e| io_error(&e))).await
     }
 
     fn schedule_autosave(self: &Arc<Self>, handle: Arc<DocHandle>) {

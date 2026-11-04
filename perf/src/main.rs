@@ -5,8 +5,8 @@
 //! CPU and memory (`/proc`). Linux/X11 only for now (`docs/ROADMAP.md`).
 //!
 //! Usage: `cargo run -p ferrule-perf --release -- [--app target/release/ferrule]
-//! [--files 1000] [--keys 30]` with `DISPLAY` set (a real X server, XWayland,
-//! or `xvfb-run`).
+//! [--files 1000] [--keys 30] [--target comment|code] [--only typing]` with
+//! `DISPLAY` set (a real X server, XWayland, or `xvfb-run`).
 
 mod generate;
 #[cfg(target_os = "linux")]
@@ -25,6 +25,20 @@ pub struct Args {
     pub files: usize,
     /// Number of keystrokes for the typing-latency measurement.
     pub keys: usize,
+    /// Where the keystrokes go.
+    pub target: Target,
+    /// Measure typing only (one launch, no startup/memory/CPU numbers).
+    pub only_typing: bool,
+}
+
+/// Where the typing benchmark types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// At the end of a comment line (no completion, no new diagnostics).
+    Comment,
+    /// After `1 + ` in code: completion, signature help and diagnostics
+    /// react to every keystroke when a language server runs.
+    Code,
 }
 
 fn parse_args() -> anyhow::Result<Args> {
@@ -32,6 +46,8 @@ fn parse_args() -> anyhow::Result<Args> {
         app: PathBuf::from("target/release/ferrule"),
         files: 1000,
         keys: 30,
+        target: Target::Comment,
+        only_typing: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -39,6 +55,20 @@ fn parse_args() -> anyhow::Result<Args> {
             "--app" => args.app = it.next().context("--app needs a path")?.into(),
             "--files" => args.files = it.next().context("--files needs a number")?.parse()?,
             "--keys" => args.keys = it.next().context("--keys needs a number")?.parse()?,
+            "--target" => {
+                args.target = match it.next().as_deref() {
+                    Some("comment") => Target::Comment,
+                    Some("code") => Target::Code,
+                    other => bail!("--target needs comment or code, got {other:?}"),
+                }
+            }
+            "--only" => {
+                let what = it.next();
+                if what.as_deref() != Some("typing") {
+                    bail!("--only supports `typing`, got {what:?}");
+                }
+                args.only_typing = true;
+            }
             other => bail!("unknown argument {other:?}"),
         }
     }

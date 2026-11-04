@@ -11,6 +11,7 @@ mod lsp;
 mod project_runtime;
 mod search;
 mod session;
+mod trace;
 
 pub use events::{EventSink, NoEvents, SessionEvent};
 pub use session::{DEFAULT_AUTOSAVE_DELAY, Session, SessionConfig, SessionError};

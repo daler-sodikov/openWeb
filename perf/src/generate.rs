@@ -61,15 +61,20 @@ fn data(f: usize, i: usize) -> String {
 }
 
 /// Writes about `files` files under `root` and returns how many were written.
-pub fn generate(root: &Path, files: usize) -> io::Result<usize> {
+pub fn generate(root: &Path, files: usize, target: crate::Target) -> io::Result<usize> {
     fs::create_dir_all(root.join("src/shared"))?;
     fs::write(
         root.join("package.json"),
         "{\n  \"name\": \"bench-project\",\n  \"private\": true\n}\n",
     )?;
+    // The typing benchmark clicks the end of the first line and types `x`.
+    let first_line = match target {
+        crate::Target::Comment => "// Typing target for ferrule-perf.",
+        crate::Target::Code => "export const typed = 1 + ",
+    };
     fs::write(
         root.join("main.ts"),
-        "// Typing target for ferrule-perf.\nexport const answer = 42;\n",
+        format!("{first_line}\nexport const answer = 42;\n"),
     )?;
     fs::write(
         root.join("src/shared/format.ts"),

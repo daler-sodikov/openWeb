@@ -4,6 +4,7 @@ import { renderFatal, renderedAppName } from "./app/shell";
 import { Workbench } from "./app/workbench";
 import { PROTOCOL_VERSION, commands } from "./ipc/bindings";
 import { unwrap } from "./ipc/result";
+import { initTypingTrace } from "./perf/typing-trace";
 
 async function main(root: HTMLElement): Promise<void> {
   const info = await commands.appInfo();
@@ -15,6 +16,7 @@ async function main(root: HTMLElement): Promise<void> {
     return;
   }
   document.title = info.name;
+  await initTypingTrace();
   const workbench = new Workbench(root, info, await commands.keymap());
 
   const report = await commands.reportFrontendReady({

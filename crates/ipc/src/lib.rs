@@ -785,6 +785,16 @@ pub struct NavTarget {
     pub preview: String,
 }
 
+/// One typing-path timing from the view (`FERRULE_TYPING_TRACE`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceSample {
+    /// Stage name (`view.echo_frame`).
+    pub stage: String,
+    /// Milliseconds since the key event.
+    pub ms: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

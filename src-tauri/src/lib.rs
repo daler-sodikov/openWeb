@@ -22,7 +22,7 @@ use ferrule_ipc::{
     DocStatus, DocumentReload, EditorSelection, FileProblems, FindResults, FoldRanges,
     FrontendReadyReport, Highlights, HoverResult, IpcError, KeyBinding, NavKind, NavTarget,
     OpenedDocument, PROTOCOL_VERSION, ProjectInfo, RemoteUpdate, ReplaceResult, SaveResult,
-    SearchResults, SearchTab, ServerStatus, StartupTarget, TextSearch,
+    SearchResults, SearchTab, ServerStatus, StartupTarget, TextSearch, TraceSample,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -384,6 +384,23 @@ async fn restart_language_server(session: SessionState<'_>) -> Result<(), IpcErr
     session.restart_language_server().await
 }
 
+/// Whether typing-path timing is on (`FERRULE_TYPING_TRACE`).
+#[tauri::command]
+#[specta::specta]
+async fn typing_trace_enabled(session: SessionState<'_>) -> Result<bool, IpcError> {
+    Ok(session.typing_trace_enabled())
+}
+
+/// Appends typing-path timings from the view to the trace file.
+#[tauri::command]
+#[specta::specta]
+async fn record_typing_trace(
+    session: SessionState<'_>,
+    samples: Vec<TraceSample>,
+) -> Result<(), IpcError> {
+    session.record_typing_trace(samples).await
+}
+
 /// Builds the tauri-specta registry of every IPC command and constant.
 ///
 /// The same builder serves the runtime invoke handler and the TypeScript
@@ -422,6 +439,8 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             problems,
             language_servers,
             restart_language_server,
+            typing_trace_enabled,
+            record_typing_trace,
         ])
         .events(tauri_specta::collect_events![
             FsChanged,
@@ -493,6 +512,8 @@ pub fn run() -> anyhow::Result<()> {
         let sink = Arc::new(TauriSink(app.handle().clone()));
         let mut config = SessionConfig::new(data_dir);
         config.settings_file = settings_file;
+        // Typing-path timing for ferrule-perf (docs/ARCHITECTURE.md, 4.8).
+        config.typing_trace = std::env::var_os("FERRULE_TYPING_TRACE").map(PathBuf::from);
         app.manage(Session::with_config(config, sink)?);
         if smoke_enabled {
             tracing::info!("smoke mode enabled");

@@ -38,6 +38,7 @@ import {
 
 import type { CaretInfo, FoldSpan, KeyAction, KeyBinding, NavKind } from "../ipc/bindings";
 import { errorMessage } from "../ipc/result";
+import { keyPressed, mark, markNextFrame, takeKey } from "../perf/typing-trace";
 import { type DocModel, type DocPane, mirrored } from "./doc-model";
 import { DoubleModifierGesture } from "./gesture";
 import { highlightField, setHighlights } from "./highlight";
@@ -140,7 +141,14 @@ export class EditorPane implements DocPane {
       dispatchTransactions: (trs, view) => {
         view.update(trs);
         for (const tr of trs) {
-          if (tr.docChanged && !tr.annotation(mirrored)) this.doc.applyLocal(tr, this);
+          if (tr.docChanged && !tr.annotation(mirrored)) {
+            const trace = tr.isUserEvent("input.type") ? takeKey() : null;
+            if (trace) {
+              mark(trace, "dispatch");
+              markNextFrame(trace, "echo_frame");
+            }
+            this.doc.applyLocal(tr, this, trace);
+          }
         }
       },
     });
@@ -499,6 +507,7 @@ export class EditorPane implements DocPane {
         return true;
       },
       keydown: (event) => {
+        if (event.key.length === 1) keyPressed(event.timeStamp);
         // While an Enter is in flight, hold every key back (see newLine).
         if (this.deferredKeys !== null && !event.isComposing) {
           if (!["Shift", "Control", "Alt", "Meta"].includes(event.key)) {
