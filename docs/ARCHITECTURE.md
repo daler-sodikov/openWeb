@@ -69,7 +69,7 @@ ferrule-app (src-tauri) ──► core ──► ipc
 | `settings`    | Layered settings (defaults, user, project, `.editorconfig`), keymap presets (IntelliJ-style), schema and validation.                                                                         | none                                |
 | `project`     | Project model: roots, ignore rules, `package.json`/`tsconfig.json` discovery, npm/pnpm/yarn workspaces, open-document registry, recent files.                                                | `vfs`, `buffer`, `settings`         |
 | `syntax`      | Shared tree-sitter machinery: incremental parsing, highlight captures to token spans, folding ranges, bracket pairs, language registry.                                                      | `buffer`                            |
-| `lang-js`     | JS/TS/JSX/TSX grammars and queries, `oxc` integration (parse, semantics, import resolution, unused imports, quick fixes).                                                                    | `syntax`                            |
+| `lang-js`     | JS/TS/JSX/TSX and JSON grammars and queries, `oxc` integration (parse, semantics, import resolution, unused imports, quick fixes).                                                           | `syntax`                            |
 | `lang-css`    | CSS/SCSS/LESS grammars, queries and in-process features.                                                                                                                                     | `syntax`                            |
 | `lang-html`   | HTML (later Vue/Svelte embedding) grammars, queries and in-process features.                                                                                                                 | `syntax`                            |
 | `indexer`     | Incremental project indexing: file list, symbols, on-disk cache, invalidation on file change.                                                                                                | `project`, `vfs`, `lang-*`          |
@@ -137,12 +137,31 @@ Rules that follow from the graph:
 - `ipc::PROTOCOL_VERSION` is returned by `app_info`; the frontend refuses to
   run against a mismatched backend.
 
-### 3.4 Surface in M0
+### 3.4 Command surface (M1)
 
-| Command                         | Returns                                                | Purpose                                                              |
-| ------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------- |
-| `app_info`                      | `AppInfo { name, version, protocolVersion, platform }` | Shell renders product name/version; protocol check.                  |
-| `report_frontend_ready(report)` | `()`                                                   | Frontend signals it mounted. Used by the e2e smoke test (section 7). |
+All commands are request/response. M1 needs no Rust → frontend push events:
+the view pulls highlights and receives Rust-originated edits (undo/redo) as
+command responses. Push events arrive with file watching in M2.
+
+| Command                                                                        | Returns                | Purpose                                                  |
+| ------------------------------------------------------------------------------ | ---------------------- | -------------------------------------------------------- |
+| `app_info`                                                                     | `AppInfo`              | Product name/version; protocol check.                    |
+| `report_frontend_ready(report)`                                                | `()`                   | Startup report; used by the smoke test (section 7).      |
+| `initial_project`                                                              | `string \| null`       | Folder passed on the command line (`ferrule <path>`).    |
+| `open_project(path)`                                                           | `ProjectInfo`          | Opens a folder (replaces the current one).               |
+| `list_dir(path)`                                                               | `DirEntry[]`           | Lazy tree listing; `path` is project-relative with `/`.  |
+| `open_document(path)`                                                          | `OpenedDocument`       | Text, version, language, dirty/restored flags.           |
+| `apply_changes(docId, baseVersion, transactions)`                              | `DocVersion`           | Local edits from the view (4.2).                         |
+| `undo` / `redo(docId, version)`                                                | `RemoteUpdate \| null` | Edits + selection computed by Rust.                      |
+| `add_carets(docId, version, selection, direction)`                             | `Selection`            | Clone carets above/below.                                |
+| `select_next_occurrence` / `select_all_occurrences(docId, version, selection)` | `Selection`            | Multi-cursor selection commands.                         |
+| `highlights(docId, from, to)`                                                  | `Highlights`           | Token spans for a range, for the current version.        |
+| `save_document(docId)`                                                         | `DocVersion`           | Atomic save; clears the recovery file.                   |
+| `close_document(docId)`                                                        | `()`                   | Closes the tab; unsaved text stays in the recovery file. |
+| `keymap`                                                                       | `KeyBinding[]`         | IntelliJ-style key bindings resolved in `settings`.      |
+
+The native folder picker is a Tauri dialog plugin call made by the view; it
+only returns a path, which then goes through `open_project`.
 
 ## 4. Data flows
 
@@ -175,14 +194,22 @@ is a **replica** that follows the authority model of `@codemirror/collab`
    `buffer::Document` at version 0, runs the initial tree-sitter parse, and
    returns `{ docId, text, version, highlights for the first viewport }`.
 2. User types. CodeMirror applies the change locally (instant echo) and
-   sends `apply_changes(docId, baseVersion, changes)`, where `changes` is a
-   list of `{ from, to, insert }` in UTF-16 offsets.
+   sends `apply_changes(docId, baseVersion, transactions)`. Each transaction
+   is one CodeMirror update: a list of `{ from, to, insert }` edits in UTF-16
+   offsets relative to the text before that transaction, the user-event kind
+   (`input.type`, `delete.backward`, `input.paste`, ...) and the selection
+   before and after. Versions count transactions, exactly like
+   `@codemirror/collab`, so one transaction = one version step. The view keeps
+   at most one request in flight per document and queues everything else
+   (local pushes and Rust commands) behind it, so Rust sees edits in order.
 3. `core` applies them to the rope, records undo history, bumps the
    version and returns it. Then, off the response path:
-   - `syntax` reparses incrementally and emits `HighlightsChanged` for the
-     affected visible range;
-   - `lsp-client` sends a debounced `textDocument/didChange`;
-   - `vfs` writes a recovery file after a short idle delay.
+   - the syntax tree is edited (`tree.edit`) and marked stale; the next
+     `highlights` request reparses incrementally. The view requests
+     highlights for its visible range after edits settle (debounced) and on
+     scroll, and maps existing decorations through local changes meanwhile;
+   - (M3) `lsp-client` sends a debounced `textDocument/didChange`;
+   - a recovery file is written after one second without further edits.
 4. Edits originating in Rust (undo/redo, multi-cursor commands, format,
    rename, quick fixes, auto-indent, file changed on disk) are pushed as
    `DocumentChanged { docId, version, changes, selections }`. If the view
@@ -193,7 +220,13 @@ is a **replica** that follows the authority model of `@codemirror/collab`
    auto-indent) are Rust commands. CodeMirror's history, language packages,
    autocomplete, lint and search are not used.
 6. Save: `save_document(docId)` → `vfs` writes atomically (temp file +
-   rename), applies EditorConfig rules, deletes the recovery file.
+   rename) with the file's original line endings and BOM, deletes the
+   recovery file. (EditorConfig rules: M2.)
+7. Text is normalized to `\n` line endings on load, because CodeMirror
+   normalizes too and offsets must agree. Closing a tab with unsaved changes
+   never discards them: the recovery file stays, and reopening the file (or
+   restarting after a crash) restores the text and marks the tab as
+   modified ("restored unsaved changes").
 
 ### 4.3 Completions from the TypeScript language server
 
@@ -275,8 +308,12 @@ Costs we accept:
 - Every long operation takes a `tokio_util::sync::CancellationToken`;
   superseded requests (new query, new completion, closed project) cancel
   their predecessors.
-- No lock is held across `.await`. Each open document is owned by one actor
-  task that owns its `buffer`; other code talks to it through messages.
+- No lock is held across `.await`. Each open document sits behind its own
+  `std::sync::Mutex`, which is only ever locked inside `spawn_blocking`
+  closures (edit, parse, highlight, save). This serializes work per document
+  without blocking async workers. (The M0 plan said "actor task"; the mutex
+  is equivalent here and simpler. Revisit if per-document work needs
+  priorities.)
 - CPU-heavy work (full parses, indexing, regex over many files) runs on
   `spawn_blocking` or a dedicated rayon pool, never on async workers.
 - Dirty buffers are autosaved to recovery files in the platform data
@@ -292,18 +329,47 @@ Costs we accept:
 | Frontend views | Vitest via `bun run test`                                        | View functions and components with IPC mocked.                                         |
 | App end-to-end | Playwright via `bunx playwright test`                            | See below.                                                                             |
 
-**End-to-end and Playwright.** Playwright cannot attach to WebKitGTK (Linux)
-or WKWebView (macOS). The M0 smoke test therefore uses Playwright as the test
-runner and process driver: it builds and launches the real app binary with
-`FERRULE_E2E_SMOKE=1`; the frontend mounts, renders the product name it got
-over IPC and calls `report_frontend_ready` with what it rendered; the app
-checks the report and exits 0 only if the window opened, the bundled frontend
-loaded and the IPC round trip worked. On Linux CI it runs under `xvfb-run`.
+**End-to-end and Playwright.** Tauri's webviews cannot be driven by
+Playwright on Linux (WebKitGTK) or macOS (WKWebView); only Windows' WebView2
+exposes CDP. Options considered:
 
-For interactive UI tests from M1 on, the options are Playwright
-`connectOverCDP` against WebView2 on Windows, and/or Playwright driving a
-browser against the Vite build with IPC bridged to a headless Rust backend.
-The choice is made and recorded here at the start of M1.
+| Option                                                       | Real Rust logic | Real webview         | Cost                               | Verdict                                                                                                               |
+| ------------------------------------------------------------ | --------------- | -------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| A. Playwright + Vite, IPC mocked in TypeScript               | no              | no                   | low                                | Rejected: buffer, undo and multi-cursor live in Rust, so mocks would re-implement them in TS and test fake behaviour. |
+| B. Playwright + Vite, IPC bridged to a headless Rust backend | yes             | no (Chromium)        | medium                             | **Chosen** for UI tests.                                                                                              |
+| C. WebdriverIO + `tauri-driver`                              | yes             | yes (Linux, Windows) | high, no macOS, separate toolchain | Not now.                                                                                                              |
+| D. Playwright `connectOverCDP` to WebView2                   | yes             | yes (Windows only)   | medium                             | Later addition for Windows-specific checks.                                                                           |
+| E. Real-binary smoke test (M0)                               | yes             | yes                  | low                                | **Kept**: proves the real window, bundled assets and IPC.                                                             |
+
+Decision: **B + E.**
+
+- **UI tests (Playwright project `ui`).** Playwright drives Chromium against
+  the Vite dev server. An init script installs a `window.__TAURI_INTERNALS__`
+  shim that forwards every `invoke(cmd, args)` over HTTP to
+  `ferrule-headless`, a binary of `ferrule-app` built with the `headless`
+  feature. It builds the app with Tauri's mock runtime (`tauri::test`) and
+  the **same** tauri-specta invoke handler, managed state and command
+  functions as the real app, and passes each request through
+  `tauri::test::get_ipc_response`. So argument decoding, commands and all
+  Rust logic are real; only the transport and the browser engine differ.
+  Each test copies a project from `fixtures/` into a temp directory and opens
+  it via the `?project=<path>` URL parameter (the browser cannot show the
+  native folder dialog).
+- **Smoke test (Playwright project `smoke`).** Unchanged from M0: the real
+  binary, real webview, bundled frontend, `FERRULE_E2E_SMOKE=1`.
+- **Production CSP in `ui` tests.** Vite serves the pages with the CSP from
+  `tauri.conf.json` (plus `connect-src` for the test backend) during UI
+  tests, so a CSP that breaks the UI fails the tests. Added after a manual
+  check found CodeMirror unstyled in the real app: its base theme is a
+  runtime `<style>` element, so `style-src` must include `'unsafe-inline'`
+  (scripts stay `'self'` only).
+- **Local browser override.** `FERRULE_E2E_CHROMIUM=<path to chrome>` makes
+  the `ui` project use an already installed Chromium instead of the one
+  `bunx playwright install chromium` downloads (for slow or offline
+  machines). CI does not set it.
+- **Known gaps:** engine differences (Chromium vs WebKitGTK/WKWebView/
+  WebView2) and the dialog plugin are not covered by `ui`. Manual checks on
+  each OS cover them until option D is added.
 
 Playwright runs under Bun today (`bunx playwright test`). If that breaks,
 only that CI step moves to Node and this section records why.
@@ -312,14 +378,14 @@ only that CI step moves to Node and this section records why.
 
 Detailed task lists live in [ROADMAP.md](ROADMAP.md).
 
-| Milestone                      | Scope                                                                                                                                                                                                             | Done when                                                                                                                                                                                                                                                 |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M0** Foundation              | This document, workspace skeleton (all crates compile, empty), Tauri v2 + Vite + Bun shell, typed IPC pipeline, licenses and community docs, CI on Linux/macOS/Windows.                                           | All Rust and frontend checks pass with zero warnings; the app opens a window showing the product name and version fetched over typed IPC; the e2e smoke test passes.                                                                                      |
-| **M1** Editor core             | Window layout, project tree (virtualized, lazy), tabs, rope buffer with undo/redo and multi-cursor, CodeMirror replica protocol, tree-sitter highlighting for JS/TS/JSX/TSX/CSS/HTML/JSON, save + recovery files. | Open `fixtures/react-ts`, browse the tree, edit several files in tabs with correct highlighting, undo/redo and multi-cursor; kill the process and recover unsaved text; golden highlight tests and buffer tests pass; typing latency measured in `perf/`. |
-| **M2** Navigation and search   | File/symbol index with on-disk cache, Search Everywhere, Go to File/Symbol/Line, Recent Files, Find/Replace in Files (regex), breadcrumbs, folding.                                                               | Double Shift finds files and symbols in `fixtures/` in under 50 ms on a warm index; Find in Files with regex and replace preview works; Playwright covers each popup.                                                                                     |
-| **M3** TypeScript intelligence | `lsp-client`, vtsls integration, completion, parameter hints, quick docs, go to definition/type/implementation, find usages, rename, diagnostics, Alt+Enter quick fixes, auto-import, ESLint + Prettier.          | On `fixtures/react-ts`: completion, go to definition, cross-file rename and diagnostics work end to end; LSP client tests run against a fake server; refactor edits have golden tests.                                                                    |
-| **M4** Terminal and Git        | Integrated terminal (PTY), Git status in tree, commit, diff, blame, branches, log.                                                                                                                                | A shell runs in the terminal tool window on all three OSes; a change can be committed and its diff and log entry viewed from the UI; Git tests use temporary repositories.                                                                                |
-| **M5** Run, debug, tests       | Run configurations (Node, npm scripts), Jest/Vitest/Playwright runners with gutter icons, debugger UI over DAP/CDP.                                                                                               | An npm script and a Vitest suite run from the gutter; a breakpoint in a Node script stops and shows variables.                                                                                                                                            |
+| Milestone                      | Scope                                                                                                                                                                                                             | Done when                                                                                                                                                                              |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0** Foundation              | This document, workspace skeleton (all crates compile, empty), Tauri v2 + Vite + Bun shell, typed IPC pipeline, licenses and community docs, CI on Linux/macOS/Windows.                                           | All Rust and frontend checks pass with zero warnings; the app opens a window showing the product name and version fetched over typed IPC; the e2e smoke test passes.                   |
+| **M1** Editor core             | Window layout, project tree (virtualized, lazy), tabs, rope buffer with undo/redo and multi-cursor, CodeMirror replica protocol, tree-sitter highlighting for JS/TS/JSX/TSX/CSS/HTML/JSON, save + recovery files. | See the concrete checklist in [ROADMAP.md, M1](ROADMAP.md#m1-editor-core).                                                                                                             |
+| **M2** Navigation and search   | File/symbol index with on-disk cache, Search Everywhere, Go to File/Symbol/Line, Recent Files, Find/Replace in Files (regex), breadcrumbs, folding.                                                               | Double Shift finds files and symbols in `fixtures/` in under 50 ms on a warm index; Find in Files with regex and replace preview works; Playwright covers each popup.                  |
+| **M3** TypeScript intelligence | `lsp-client`, vtsls integration, completion, parameter hints, quick docs, go to definition/type/implementation, find usages, rename, diagnostics, Alt+Enter quick fixes, auto-import, ESLint + Prettier.          | On `fixtures/react-ts`: completion, go to definition, cross-file rename and diagnostics work end to end; LSP client tests run against a fake server; refactor edits have golden tests. |
+| **M4** Terminal and Git        | Integrated terminal (PTY), Git status in tree, commit, diff, blame, branches, log.                                                                                                                                | A shell runs in the terminal tool window on all three OSes; a change can be committed and its diff and log entry viewed from the UI; Git tests use temporary repositories.             |
+| **M5** Run, debug, tests       | Run configurations (Node, npm scripts), Jest/Vitest/Playwright runners with gutter icons, debugger UI over DAP/CDP.                                                                                               | An npm script and a Vitest suite run from the gutter; a breakpoint in a Node script stops and shows variables.                                                                         |
 
 The rest of the feature scope in `CLAUDE.md` (HTTP client, local history,
 frameworks, settings UI, themes, plugins, auto-update, i18n) follows M5 and
