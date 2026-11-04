@@ -15,5 +15,8 @@ tree-sitter-typescript.workspace = true
 tree-sitter-javascript.workspace = true
 tree-sitter-json.workspace = true
 
+[dev-dependencies]
+ferrule-buffer.workspace = true
+
 [lints]
 workspace = true

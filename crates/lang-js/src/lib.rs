@@ -1,88 +1,96 @@
 //! JavaScript, TypeScript, JSX, TSX and JSON language support.
 //!
-//! M1: tree-sitter grammars and the highlight queries bundled with them.
-//! `oxc`-based in-process features arrive with M3 (`docs/ROADMAP.md`).
+//! Tree-sitter grammars with the queries bundled with them, plus small
+//! queries of our own (marked below). `oxc`-based in-process features arrive
+//! with M3 (`docs/ROADMAP.md`).
 
 use ferrule_syntax::{LanguageDef, Precedence};
 
-/// Symbols the bundled tags queries do not cover: type aliases and enums.
+/// Ours: symbols the bundled tags queries do not cover (type aliases, enums).
 const EXTRA_TS_TAGS: &str = r#"
 (type_alias_declaration name: (type_identifier) @name) @definition.type
 (enum_declaration name: (identifier) @name) @definition.enum
 "#;
 
+/// Pairs auto-closed in JavaScript-family languages (including backticks).
+pub const JS_AUTO_CLOSE: &[&str] = &["()", "[]", "{}", "''", "\"\"", "``"];
+
 /// TypeScript (`.ts`, `.mts`, `.cts`).
 pub fn typescript() -> LanguageDef {
-    LanguageDef {
-        id: "typescript",
-        name: "TypeScript",
-        extensions: &["ts", "mts", "cts"],
-        language: tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        highlight_queries: vec![
+    LanguageDef::new(
+        "typescript",
+        "TypeScript",
+        &["ts", "mts", "cts"],
+        tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        vec![
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_typescript::HIGHLIGHTS_QUERY,
         ],
-        precedence: Precedence::LastWins,
-        tags_queries: vec![
-            tree_sitter_javascript::TAGS_QUERY,
-            tree_sitter_typescript::TAGS_QUERY,
-            EXTRA_TS_TAGS,
-        ],
-        markup_indent: false,
-    }
+        Precedence::LastWins,
+    )
+    .aliases(&["ts"])
+    .tags(vec![
+        tree_sitter_javascript::TAGS_QUERY,
+        tree_sitter_typescript::TAGS_QUERY,
+        EXTRA_TS_TAGS,
+    ])
+    .auto_close(JS_AUTO_CLOSE)
 }
 
 /// TypeScript with JSX (`.tsx`).
 pub fn tsx() -> LanguageDef {
-    LanguageDef {
-        id: "tsx",
-        name: "TypeScript JSX",
-        extensions: &["tsx"],
-        language: tree_sitter_typescript::LANGUAGE_TSX.into(),
-        highlight_queries: vec![
+    LanguageDef::new(
+        "tsx",
+        "TypeScript JSX",
+        &["tsx"],
+        tree_sitter_typescript::LANGUAGE_TSX.into(),
+        vec![
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
             tree_sitter_typescript::HIGHLIGHTS_QUERY,
         ],
-        precedence: Precedence::LastWins,
-        tags_queries: vec![
-            tree_sitter_javascript::TAGS_QUERY,
-            tree_sitter_typescript::TAGS_QUERY,
-            EXTRA_TS_TAGS,
-        ],
-        markup_indent: true,
-    }
+        Precedence::LastWins,
+    )
+    .tags(vec![
+        tree_sitter_javascript::TAGS_QUERY,
+        tree_sitter_typescript::TAGS_QUERY,
+        EXTRA_TS_TAGS,
+    ])
+    .markup_indent()
+    .auto_close(JS_AUTO_CLOSE)
 }
 
 /// JavaScript and JSX (`.js`, `.mjs`, `.cjs`, `.jsx`).
 pub fn javascript() -> LanguageDef {
-    LanguageDef {
-        id: "javascript",
-        name: "JavaScript",
-        extensions: &["js", "mjs", "cjs", "jsx"],
-        language: tree_sitter_javascript::LANGUAGE.into(),
-        highlight_queries: vec![
+    LanguageDef::new(
+        "javascript",
+        "JavaScript",
+        &["js", "mjs", "cjs", "jsx"],
+        tree_sitter_javascript::LANGUAGE.into(),
+        vec![
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
         ],
-        precedence: Precedence::LastWins,
-        tags_queries: vec![tree_sitter_javascript::TAGS_QUERY],
-        markup_indent: true,
-    }
+        Precedence::LastWins,
+    )
+    .aliases(&["js", "jsx", "mjs", "cjs"])
+    .tags(vec![tree_sitter_javascript::TAGS_QUERY])
+    .markup_indent()
+    .auto_close(JS_AUTO_CLOSE)
 }
 
 /// JSON, with comments allowed (`.json`, `.jsonc`).
 pub fn json() -> LanguageDef {
-    LanguageDef {
-        id: "json",
-        name: "JSON",
-        extensions: &["json", "jsonc"],
-        language: tree_sitter_json::LANGUAGE.into(),
-        highlight_queries: vec![tree_sitter_json::HIGHLIGHTS_QUERY],
-        precedence: Precedence::FirstWins,
-        tags_queries: Vec::new(),
-        markup_indent: false,
-    }
+    LanguageDef::new(
+        "json",
+        "JSON",
+        &["json", "jsonc"],
+        tree_sitter_json::LANGUAGE.into(),
+        vec![tree_sitter_json::HIGHLIGHTS_QUERY],
+        Precedence::FirstWins,
+    )
+    .aliases(&["jsonc"])
+    .auto_close(&["[]", "{}", "\"\""])
 }
 
 /// All languages of this crate.

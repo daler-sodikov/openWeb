@@ -1,0 +1,12 @@
+// Theme
+@gap: 4px;
+.rounded(@radius: 2px) {
+  border-radius: @radius;
+}
+.card {
+  .rounded(4px);
+  margin: (@gap * 2) auto;
+  &:hover {
+    color: darken(#336699, 10%);
+  }
+}

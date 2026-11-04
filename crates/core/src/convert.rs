@@ -81,6 +81,11 @@ pub(crate) fn token_to_ipc(class: TokenClass) -> ipc::TokenClass {
         TokenClass::Punctuation => T::Punctuation,
         TokenClass::Tag => T::Tag,
         TokenClass::Attribute => T::Attribute,
+        TokenClass::Variable => T::Variable,
+        TokenClass::Heading => T::Heading,
+        TokenClass::Emphasis => T::Emphasis,
+        TokenClass::Strong => T::Strong,
+        TokenClass::Link => T::Link,
     }
 }
 

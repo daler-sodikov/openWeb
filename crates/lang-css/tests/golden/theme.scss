@@ -1,0 +1,15 @@
+// Theme
+@use "sass:math";
+$gap: 4px;
+
+@mixin card($radius: 2px) {
+  border-radius: $radius;
+}
+
+.card {
+  @include card(4px);
+  padding: math.div($gap, 2);
+  &:hover > .title {
+    color: #333;
+  }
+}

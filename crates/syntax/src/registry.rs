@@ -1,4 +1,4 @@
-//! Language definitions and the extension registry.
+//! Language definitions and the registry.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -10,8 +10,8 @@ use crate::highlight::{TokenClass, class_for_capture};
 /// Errors from building languages.
 #[derive(Debug, thiserror::Error)]
 pub enum SyntaxError {
-    /// A highlight query did not compile against its grammar.
-    #[error("highlight query for {language} is invalid: {message}")]
+    /// A query did not compile against its grammar.
+    #[error("query for {language} is invalid: {message}")]
     Query {
         /// Language id.
         language: &'static str,
@@ -40,6 +40,9 @@ pub enum Precedence {
     LastWins,
 }
 
+/// Bracket and quote pairs closed automatically when typing the opener.
+pub const DEFAULT_AUTO_CLOSE: &[&str] = &["()", "[]", "{}", "''", "\"\""];
+
 /// Static description of a language, provided by a `lang-*` crate.
 pub struct LanguageDef {
     /// Stable id (`typescript`, `tsx`, `css`, ...).
@@ -48,6 +51,8 @@ pub struct LanguageDef {
     pub name: &'static str,
     /// Lowercase file extensions without the dot.
     pub extensions: &'static [&'static str],
+    /// Other names used by injections (`ts`, `js`, `yml`, ...).
+    pub aliases: &'static [&'static str],
     /// The tree-sitter grammar.
     pub language: Language,
     /// Highlight queries, concatenated in order.
@@ -57,16 +62,89 @@ pub struct LanguageDef {
     /// Tags queries (`@name` + `@definition.<kind>`) for the symbol index;
     /// empty if the language has no symbols.
     pub tags_queries: Vec<&'static str>,
+    /// Injection queries (`@injection.content` plus `@injection.language` or
+    /// `#set! injection.language`): embedded languages.
+    pub injection_queries: Vec<&'static str>,
     /// Whether Enter indents after opening markup tags.
     pub markup_indent: bool,
+    /// Whether `@variable` captures are colored (CSS custom properties,
+    /// SCSS/LESS variables) instead of plain text (JS identifiers).
+    pub colored_variables: bool,
+    /// Pairs closed automatically when typing the opener.
+    pub auto_close: &'static [&'static str],
 }
 
-/// A language with its compiled highlight query.
+impl LanguageDef {
+    /// A language with highlighting only; add features with the builder
+    /// methods.
+    pub fn new(
+        id: &'static str,
+        name: &'static str,
+        extensions: &'static [&'static str],
+        language: Language,
+        highlight_queries: Vec<&'static str>,
+        precedence: Precedence,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            extensions,
+            aliases: &[],
+            language,
+            highlight_queries,
+            precedence,
+            tags_queries: Vec::new(),
+            injection_queries: Vec::new(),
+            markup_indent: false,
+            colored_variables: false,
+            auto_close: DEFAULT_AUTO_CLOSE,
+        }
+    }
+
+    /// Sets the alias names.
+    pub fn aliases(mut self, aliases: &'static [&'static str]) -> Self {
+        self.aliases = aliases;
+        self
+    }
+
+    /// Sets the tags queries.
+    pub fn tags(mut self, queries: Vec<&'static str>) -> Self {
+        self.tags_queries = queries;
+        self
+    }
+
+    /// Sets the injection queries.
+    pub fn injections(mut self, queries: Vec<&'static str>) -> Self {
+        self.injection_queries = queries;
+        self
+    }
+
+    /// Enables indentation after opening markup tags.
+    pub fn markup_indent(mut self) -> Self {
+        self.markup_indent = true;
+        self
+    }
+
+    /// Colors `@variable` captures.
+    pub fn colored_variables(mut self) -> Self {
+        self.colored_variables = true;
+        self
+    }
+
+    /// Sets the auto-close pairs.
+    pub fn auto_close(mut self, pairs: &'static [&'static str]) -> Self {
+        self.auto_close = pairs;
+        self
+    }
+}
+
+/// A language with its compiled queries.
 pub struct HighlightLanguage {
     pub(crate) def: LanguageDef,
     pub(crate) query: Query,
     pub(crate) classes: Vec<Option<TokenClass>>,
     pub(crate) tags: Option<Query>,
+    pub(crate) injections: Option<Query>,
 }
 
 impl std::fmt::Debug for HighlightLanguage {
@@ -77,35 +155,40 @@ impl std::fmt::Debug for HighlightLanguage {
     }
 }
 
-impl HighlightLanguage {
-    /// Compiles the highlight query of `def`.
-    pub fn new(def: LanguageDef) -> Result<Self, SyntaxError> {
-        let source = def.highlight_queries.join("\n");
-        let query = Query::new(&def.language, &source).map_err(|err| SyntaxError::Query {
+fn compile(def: &LanguageDef, sources: &[&str], what: &str) -> Result<Option<Query>, SyntaxError> {
+    if sources.is_empty() {
+        return Ok(None);
+    }
+    Query::new(&def.language, &sources.join("\n"))
+        .map(Some)
+        .map_err(|err| SyntaxError::Query {
             language: def.id,
-            message: err.to_string(),
+            message: format!("{what}: {err}"),
+        })
+}
+
+impl HighlightLanguage {
+    /// Compiles the queries of `def`.
+    pub fn new(def: LanguageDef) -> Result<Self, SyntaxError> {
+        let query = compile(&def, &def.highlight_queries, "highlights")?.ok_or_else(|| {
+            SyntaxError::Query {
+                language: def.id,
+                message: "no highlight query".into(),
+            }
         })?;
         let classes = query
             .capture_names()
             .iter()
-            .map(|n| class_for_capture(n))
+            .map(|n| class_for_capture(n, def.colored_variables))
             .collect();
-        let tags = if def.tags_queries.is_empty() {
-            None
-        } else {
-            let source = def.tags_queries.join("\n");
-            Some(
-                Query::new(&def.language, &source).map_err(|err| SyntaxError::Query {
-                    language: def.id,
-                    message: format!("tags: {err}"),
-                })?,
-            )
-        };
+        let tags = compile(&def, &def.tags_queries, "tags")?;
+        let injections = compile(&def, &def.injection_queries, "injections")?;
         Ok(Self {
             def,
             query,
             classes,
             tags,
+            injections,
         })
     }
 
@@ -128,9 +211,23 @@ impl HighlightLanguage {
     pub fn has_symbols(&self) -> bool {
         self.tags.is_some()
     }
+
+    /// Pairs closed automatically when typing the opener.
+    pub fn auto_close(&self) -> &'static [&'static str] {
+        self.def.auto_close
+    }
+
+    fn answers_to(&self, name: &str) -> bool {
+        self.def.id.eq_ignore_ascii_case(name)
+            || self
+                .def
+                .aliases
+                .iter()
+                .any(|a| a.eq_ignore_ascii_case(name))
+    }
 }
 
-/// All known languages, looked up by file extension.
+/// All known languages, looked up by file extension or name.
 #[derive(Debug, Default)]
 pub struct LanguageRegistry {
     languages: Vec<Arc<HighlightLanguage>>,
@@ -160,5 +257,12 @@ impl LanguageRegistry {
             .iter()
             .find(|l| l.def.extensions.contains(&ext.as_str()))
             .cloned()
+    }
+
+    /// The language with this id or alias (case-insensitive), e.g. the name
+    /// in a Markdown code fence or a `lang` attribute.
+    pub fn for_name(&self, name: &str) -> Option<Arc<HighlightLanguage>> {
+        let name = name.trim();
+        self.languages.iter().find(|l| l.answers_to(name)).cloned()
     }
 }

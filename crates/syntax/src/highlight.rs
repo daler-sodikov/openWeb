@@ -39,6 +39,16 @@ pub enum TokenClass {
     Tag,
     /// Markup attributes.
     Attribute,
+    /// Variables that are colored: CSS custom properties, SCSS/LESS variables.
+    Variable,
+    /// Markdown headings.
+    Heading,
+    /// Markdown emphasis.
+    Emphasis,
+    /// Markdown strong emphasis.
+    Strong,
+    /// Links and URLs.
+    Link,
 }
 
 impl TokenClass {
@@ -61,10 +71,15 @@ impl TokenClass {
             Self::Punctuation => "punctuation",
             Self::Tag => "tag",
             Self::Attribute => "attribute",
+            Self::Variable => "variable",
+            Self::Heading => "heading",
+            Self::Emphasis => "emphasis",
+            Self::Strong => "strong",
+            Self::Link => "link",
         }
     }
 
-    pub(crate) const ALL: [Self; 16] = [
+    pub(crate) const ALL: [Self; 21] = [
         Self::Keyword,
         Self::String,
         Self::StringSpecial,
@@ -81,6 +96,11 @@ impl TokenClass {
         Self::Punctuation,
         Self::Tag,
         Self::Attribute,
+        Self::Variable,
+        Self::Heading,
+        Self::Emphasis,
+        Self::Strong,
+        Self::Link,
     ];
 
     pub(crate) fn code(self) -> u8 {
@@ -99,7 +119,11 @@ impl TokenClass {
 
 /// Maps a capture name to a token class. The most specific known prefix
 /// wins (`function.method.builtin` → `function`). `None` means plain text.
-pub(crate) fn class_for_capture(name: &str) -> Option<TokenClass> {
+/// With `colored_variables`, `@variable` maps to [`TokenClass::Variable`].
+pub(crate) fn class_for_capture(name: &str, colored_variables: bool) -> Option<TokenClass> {
+    if colored_variables && name == "variable" {
+        return Some(TokenClass::Variable);
+    }
     let mut key = name;
     loop {
         if let Some(class) = exact(key) {
@@ -114,9 +138,18 @@ pub(crate) fn class_for_capture(name: &str) -> Option<TokenClass> {
 fn exact(name: &str) -> Option<Option<TokenClass>> {
     use TokenClass as T;
     Some(match name {
-        "keyword" | "charset" | "import" | "keyframes" | "media" | "namespace" | "supports" => {
-            Some(T::Keyword)
-        }
+        "keyword" | "charset" | "import" | "keyframes" | "media" | "namespace" | "supports"
+        | "at" | "debug" | "each" | "error" | "extend" | "for" | "forward" | "include"
+        | "mixin" | "return" | "use" | "warn" | "while" | "type.qualifier" => Some(T::Keyword),
+        "string.escape" => Some(T::Escape),
+        "label" => Some(T::Constant),
+        "tag.delimiter" => Some(T::Punctuation),
+        "text.title" => Some(T::Heading),
+        "text.emphasis" => Some(T::Emphasis),
+        "text.strong" => Some(T::Strong),
+        "text.uri" | "text.reference" => Some(T::Link),
+        "text.literal" => Some(T::StringSpecial),
+        "none" | "spell" => None,
         "string.special.key" => Some(T::Property),
         "string.special" | "string.regexp" => Some(T::StringSpecial),
         "string" => Some(T::String),
@@ -181,24 +214,45 @@ mod tests {
     #[test]
     fn capture_mapping_uses_most_specific_prefix() {
         assert_eq!(
-            class_for_capture("function.method.builtin"),
+            class_for_capture("function.method.builtin", false),
             Some(TokenClass::Function)
         );
         assert_eq!(
-            class_for_capture("string.special.key"),
+            class_for_capture("string.special.key", false),
             Some(TokenClass::Property)
         );
         assert_eq!(
-            class_for_capture("string.special.regex"),
+            class_for_capture("string.special.regex", false),
             Some(TokenClass::StringSpecial)
         );
         assert_eq!(
-            class_for_capture("punctuation.bracket"),
+            class_for_capture("punctuation.bracket", false),
             Some(TokenClass::Punctuation)
         );
-        assert_eq!(class_for_capture("variable"), None);
-        assert_eq!(class_for_capture("variable.member"), None);
-        assert_eq!(class_for_capture("unknown.thing"), None);
+        assert_eq!(class_for_capture("variable", false), None);
+        assert_eq!(class_for_capture("variable.member", false), None);
+        assert_eq!(class_for_capture("unknown.thing", false), None);
+    }
+
+    #[test]
+    fn colored_variables_and_markup_captures() {
+        assert_eq!(
+            class_for_capture("variable", true),
+            Some(TokenClass::Variable)
+        );
+        assert_eq!(
+            class_for_capture("variable.parameter", true),
+            Some(TokenClass::Parameter)
+        );
+        assert_eq!(
+            class_for_capture("text.title", false),
+            Some(TokenClass::Heading)
+        );
+        assert_eq!(
+            class_for_capture("string.escape", false),
+            Some(TokenClass::Escape)
+        );
+        assert_eq!(class_for_capture("none", false), None);
     }
 
     #[test]

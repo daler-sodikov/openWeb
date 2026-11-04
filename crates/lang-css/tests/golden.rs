@@ -1,12 +1,23 @@
 //! Golden highlight tests: every `tests/golden/<name>` input is highlighted
 //! and compared with `tests/golden/<name>.golden`. Run with
 //! `UPDATE_GOLDEN=1 cargo test` to rewrite the expectations, then review the
-//! diff by hand.
+//! diff by hand. Embedded languages are resolved through a registry.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
 
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
+
+use ferrule_syntax::LanguageRegistry;
+
+fn registry() -> Arc<LanguageRegistry> {
+    let mut registry = LanguageRegistry::default();
+    for def in ferrule_lang_css::languages().into_iter() {
+        registry.register(def).unwrap();
+    }
+    Arc::new(registry)
+}
 
 #[test]
 fn golden_highlights() {
@@ -20,16 +31,13 @@ fn golden_highlights() {
         if path.extension().is_some_and(|e| e == "golden") {
             continue;
         }
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let def = ferrule_lang_css::languages()
             .into_iter()
-            .find(|d| {
-                path.extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| d.extensions.contains(&e))
-            })
+            .find(|d| d.extensions.contains(&ext))
             .unwrap_or_else(|| panic!("no language for {}", path.display()));
         let input = fs::read_to_string(&path).unwrap();
-        let actual = ferrule_syntax::render_highlights(def, &input).unwrap();
+        let actual = ferrule_syntax::render_highlights(def, &input, Some(registry())).unwrap();
         let golden = path.with_file_name(format!(
             "{}.golden",
             path.file_name().unwrap().to_string_lossy()

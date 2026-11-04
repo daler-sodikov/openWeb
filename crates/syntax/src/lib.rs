@@ -9,21 +9,33 @@
 
 mod highlight;
 mod registry;
+mod structure;
 mod symbols;
 mod tree;
 
 pub use highlight::{HighlightSpan, TokenClass, render_spans};
-pub use registry::{HighlightLanguage, LanguageDef, LanguageRegistry, Precedence, SyntaxError};
+pub use registry::{
+    DEFAULT_AUTO_CLOSE, HighlightLanguage, LanguageDef, LanguageRegistry, Precedence, SyntaxError,
+};
+pub use structure::{BracketPair, Crumb, FoldRange};
 pub use symbols::SymbolDef;
 pub use tree::SyntaxTree;
 
 use std::sync::Arc;
 
 /// Highlights a whole text with `def` and renders the spans with
-/// [`render_spans`]. Used by the golden tests of the `lang-*` crates.
-pub fn render_highlights(def: LanguageDef, text: &str) -> Result<String, SyntaxError> {
+/// [`render_spans`]. Used by the golden tests of the `lang-*` crates;
+/// `registry` resolves embedded languages.
+pub fn render_highlights(
+    def: LanguageDef,
+    text: &str,
+    registry: Option<Arc<LanguageRegistry>>,
+) -> Result<String, SyntaxError> {
     let language = Arc::new(HighlightLanguage::new(def)?);
     let mut tree = SyntaxTree::new(language)?;
+    if let Some(registry) = registry {
+        tree = tree.with_registry(registry);
+    }
     let rope = ferrule_buffer::Rope::from_str(text);
     let spans = tree.highlight(&rope, 0..rope.len_bytes());
     Ok(render_spans(&rope, &spans))

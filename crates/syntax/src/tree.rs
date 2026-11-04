@@ -1,4 +1,4 @@
-//! Incremental syntax tree for one document.
+//! Incremental syntax tree for one document, with injected languages.
 
 use std::cmp::Reverse;
 use std::ops::Range;
@@ -9,15 +9,25 @@ use streaming_iterator::StreamingIterator;
 use tree_sitter::{InputEdit, Node, Parser, Point, QueryCursor, Tree};
 
 use crate::highlight::{HighlightSpan, TokenClass};
-use crate::registry::{HighlightLanguage, Precedence, SyntaxError};
+use crate::registry::{HighlightLanguage, LanguageRegistry, Precedence, SyntaxError};
+
+/// An embedded-language region (e.g. a `<script>` body) with its own tree.
+struct Injected {
+    range: Range<usize>,
+    language: Arc<HighlightLanguage>,
+    tree: Tree,
+}
 
 /// Parser state for one document. Edits mark the tree stale; the next
-/// highlight request reparses incrementally.
+/// request reparses incrementally. Injected regions are parsed on demand
+/// for the requested range and cached until the next edit.
 pub struct SyntaxTree {
     language: Arc<HighlightLanguage>,
     parser: Parser,
-    tree: Option<Tree>,
+    pub(crate) tree: Option<Tree>,
     stale: bool,
+    registry: Option<Arc<LanguageRegistry>>,
+    injected: Vec<Injected>,
 }
 
 impl std::fmt::Debug for SyntaxTree {
@@ -29,8 +39,28 @@ impl std::fmt::Debug for SyntaxTree {
     }
 }
 
+/// Reads rope chunks for tree-sitter.
+fn reader<'a>(rope: &'a Rope) -> impl FnMut(usize, Point) -> &'a [u8] + 'a {
+    let len = rope.len_bytes();
+    move |byte: usize, _: Point| -> &[u8] {
+        if byte >= len {
+            return &[];
+        }
+        let (chunk, chunk_start, _, _) = rope.chunk_at_byte(byte);
+        &chunk.as_bytes()[byte - chunk_start..]
+    }
+}
+
+/// Text of a node for query predicates.
+pub(crate) fn node_text(rope: &Rope, node: Node<'_>) -> String {
+    let start = rope.byte_to_char(node.start_byte().min(rope.len_bytes()));
+    let end = rope.byte_to_char(node.end_byte().min(rope.len_bytes()));
+    rope.slice(start..end).to_string()
+}
+
 impl SyntaxTree {
-    /// Creates an unparsed tree for `language`.
+    /// Creates an unparsed tree for `language`. Without a registry (see
+    /// [`SyntaxTree::with_registry`]) embedded languages are not highlighted.
     pub fn new(language: Arc<HighlightLanguage>) -> Result<Self, SyntaxError> {
         let mut parser = Parser::new();
         parser
@@ -44,7 +74,15 @@ impl SyntaxTree {
             parser,
             tree: None,
             stale: true,
+            registry: None,
+            injected: Vec::new(),
         })
+    }
+
+    /// Resolves injected languages through `registry`.
+    pub fn with_registry(mut self, registry: Arc<LanguageRegistry>) -> Self {
+        self.registry = Some(registry);
+        self
     }
 
     /// The language of this tree.
@@ -68,6 +106,7 @@ impl SyntaxTree {
         }
         if !edits.is_empty() {
             self.stale = true;
+            self.injected.clear();
         }
     }
 
@@ -76,14 +115,7 @@ impl SyntaxTree {
         if !self.stale && self.tree.is_some() {
             return;
         }
-        let len = rope.len_bytes();
-        let mut read = |byte: usize, _: Point| -> &[u8] {
-            if byte >= len {
-                return &[];
-            }
-            let (chunk, chunk_start, _, _) = rope.chunk_at_byte(byte);
-            &chunk.as_bytes()[byte - chunk_start..]
-        };
+        let mut read = reader(rope);
         // `parse_with_options` returns None only on cancellation/timeouts,
         // which we do not configure; keep the old tree in that case.
         if let Some(tree) = self
@@ -92,69 +124,28 @@ impl SyntaxTree {
         {
             self.tree = Some(tree);
             self.stale = false;
+            self.injected.clear();
         }
     }
 
     /// Highlight spans intersecting `range` (bytes), clipped to it, sorted
-    /// and non-overlapping.
+    /// and non-overlapping. Embedded languages are painted over the host.
     pub fn highlight(&mut self, rope: &Rope, range: Range<usize>) -> Vec<HighlightSpan> {
         self.ensure_parsed(rope);
-        let Some(tree) = &self.tree else {
-            return Vec::new();
-        };
         let range = range.start.min(rope.len_bytes())..range.end.min(rope.len_bytes());
         if range.is_empty() {
             return Vec::new();
         }
-
-        let language = &self.language;
-        let mut cursor = QueryCursor::new();
-        cursor.set_byte_range(range.clone());
-        let text = |node: Node<'_>| {
-            let start = rope.byte_to_char(node.start_byte());
-            let end = rope.byte_to_char(node.end_byte());
-            rope.slice(start..end).chunks().map(str::as_bytes)
+        self.load_injections(rope, range.clone());
+        let Some(tree) = &self.tree else {
+            return Vec::new();
         };
-        let mut captures = cursor.captures(&language.query, tree.root_node(), text);
-
-        // (start, end, pattern, class)
-        let mut items: Vec<(usize, usize, usize, Option<TokenClass>)> = Vec::new();
-        while let Some((m, index)) = captures.next() {
-            let capture = m.captures()[*index];
-            let class = language
-                .classes
-                .get(capture.index as usize)
-                .copied()
-                .flatten();
-            items.push((
-                capture.node.start_byte(),
-                capture.node.end_byte(),
-                m.pattern_index,
-                class,
-            ));
-        }
-        // Outer nodes first; for the same node, the winning pattern first.
-        let last_wins = language.def.precedence == Precedence::LastWins;
-        items.sort_by_key(|&(s, e, p, _)| {
-            (
-                s,
-                Reverse(e),
-                if last_wins {
-                    Reverse(p)
-                } else {
-                    Reverse(usize::MAX - p)
-                },
-            )
-        });
-        items.dedup_by_key(|&mut (s, e, _, _)| (s, e));
 
         let mut paint = vec![0u8; range.len()];
-        for (start, end, _, class) in items {
-            let s = start.max(range.start) - range.start;
-            let e = end.min(range.end).saturating_sub(range.start);
-            if s < e {
-                let code = class.map_or(0, TokenClass::code);
-                paint[s..e].fill(code);
+        paint_captures(&self.language, tree, rope, &range, &mut paint);
+        for injected in &self.injected {
+            if injected.range.start < range.end && injected.range.end > range.start {
+                paint_captures(&injected.language, &injected.tree, rope, &range, &mut paint);
             }
         }
 
@@ -177,6 +168,136 @@ impl SyntaxTree {
         }
         spans
     }
+
+    /// Finds and parses (or reuses) injected regions intersecting `range`.
+    fn load_injections(&mut self, rope: &Rope, range: Range<usize>) {
+        let (Some(query), Some(registry), Some(tree)) =
+            (&self.language.injections, &self.registry, &self.tree)
+        else {
+            return;
+        };
+        let names = query.capture_names();
+        let mut cursor = QueryCursor::new();
+        cursor.set_byte_range(range);
+        let text = |node: Node<'_>| {
+            let start = rope.byte_to_char(node.start_byte());
+            let end = rope.byte_to_char(node.end_byte());
+            rope.slice(start..end).chunks().map(str::as_bytes)
+        };
+        let mut matches = cursor.matches(query, tree.root_node(), text);
+        // (content range, pattern index, language name); the first matching
+        // pattern decides the language of a region.
+        let mut found: Vec<(tree_sitter::Range, usize, String)> = Vec::new();
+        while let Some(m) = matches.next() {
+            let mut content = None;
+            let mut language = None;
+            for capture in m.captures() {
+                match names.get(capture.index as usize).copied() {
+                    Some("injection.content") => content = Some(capture.node),
+                    Some("injection.language") => language = Some(node_text(rope, capture.node)),
+                    _ => {}
+                }
+            }
+            if language.is_none() {
+                language = query
+                    .property_settings(m.pattern_index)
+                    .iter()
+                    .find(|p| &*p.key == "injection.language")
+                    .and_then(|p| p.value.as_deref().map(str::to_owned));
+            }
+            if let (Some(node), Some(language)) = (content, language) {
+                found.push((node.range(), m.pattern_index, language));
+            }
+        }
+        found.sort_by_key(|(r, p, _)| (r.start_byte, Reverse(r.end_byte), *p));
+        found.dedup_by_key(|(r, _, _)| (r.start_byte, r.end_byte));
+
+        for (region, _, name) in found {
+            let bytes = region.start_byte..region.end_byte;
+            let Some(language) = registry.for_name(&name) else {
+                continue;
+            };
+            if bytes.is_empty()
+                || self
+                    .injected
+                    .iter()
+                    .any(|i| i.range == bytes && i.language.id() == language.id())
+            {
+                continue;
+            }
+            let mut parser = Parser::new();
+            if parser.set_language(&language.def.language).is_err()
+                || parser.set_included_ranges(&[region]).is_err()
+            {
+                continue;
+            }
+            let mut read = reader(rope);
+            if let Some(tree) = parser.parse_with_options(&mut read, None, None) {
+                self.injected.push(Injected {
+                    range: bytes,
+                    language,
+                    tree,
+                });
+            }
+        }
+    }
+}
+
+/// Paints the highlight captures of `tree` within `range` into `paint`.
+/// Inner nodes override outer ones; for the same node the language's
+/// [`Precedence`] decides.
+fn paint_captures(
+    language: &HighlightLanguage,
+    tree: &Tree,
+    rope: &Rope,
+    range: &Range<usize>,
+    paint: &mut [u8],
+) {
+    let mut cursor = QueryCursor::new();
+    cursor.set_byte_range(range.clone());
+    let text = |node: Node<'_>| {
+        let start = rope.byte_to_char(node.start_byte());
+        let end = rope.byte_to_char(node.end_byte());
+        rope.slice(start..end).chunks().map(str::as_bytes)
+    };
+    let mut captures = cursor.captures(&language.query, tree.root_node(), text);
+    // (start, end, pattern, class)
+    let mut items: Vec<(usize, usize, usize, Option<TokenClass>)> = Vec::new();
+    while let Some((m, index)) = captures.next() {
+        let capture = m.captures()[*index];
+        let class = language
+            .classes
+            .get(capture.index as usize)
+            .copied()
+            .flatten();
+        items.push((
+            capture.node.start_byte(),
+            capture.node.end_byte(),
+            m.pattern_index,
+            class,
+        ));
+    }
+    // Outer nodes first; for the same node, the winning pattern first.
+    let last_wins = language.def.precedence == Precedence::LastWins;
+    items.sort_by_key(|&(s, e, p, _)| {
+        (
+            s,
+            Reverse(e),
+            if last_wins {
+                Reverse(p)
+            } else {
+                Reverse(usize::MAX - p)
+            },
+        )
+    });
+    items.dedup_by_key(|&mut (s, e, _, _)| (s, e));
+    for (start, end, _, class) in items {
+        let s = start.max(range.start) - range.start;
+        let e = end.min(range.end).saturating_sub(range.start);
+        if s < e {
+            paint[s..e].fill(class.map_or(0, TokenClass::code));
+        }
+    }
 }
 
 fn point(p: ferrule_buffer::Point) -> Point {
@@ -189,21 +310,19 @@ fn point(p: ferrule_buffer::Point) -> Point {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::LanguageDef;
+    use crate::registry::{LanguageDef, Precedence};
     use ferrule_buffer::{Document, Edit, EditKind, Selection, Transaction};
 
     fn json() -> Arc<HighlightLanguage> {
         Arc::new(
-            HighlightLanguage::new(LanguageDef {
-                id: "json",
-                name: "JSON",
-                extensions: &["json"],
-                language: tree_sitter_json::LANGUAGE.into(),
-                highlight_queries: vec![tree_sitter_json::HIGHLIGHTS_QUERY],
-                precedence: Precedence::FirstWins,
-                tags_queries: Vec::new(),
-                markup_indent: false,
-            })
+            HighlightLanguage::new(LanguageDef::new(
+                "json",
+                "JSON",
+                &["json"],
+                tree_sitter_json::LANGUAGE.into(),
+                vec![tree_sitter_json::HIGHLIGHTS_QUERY],
+                Precedence::FirstWins,
+            ))
             .unwrap(),
         )
     }

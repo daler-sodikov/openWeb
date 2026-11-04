@@ -895,22 +895,30 @@ dependencies = [
 name = "ferrule-lang-css"
 version = "0.1.0"
 dependencies = [
+ "ferrule-buffer",
  "ferrule-syntax",
  "tree-sitter-css",
+ "tree-sitter-less",
+ "tree-sitter-scss",
 ]
 
 [[package]]
 name = "ferrule-lang-html"
 version = "0.1.0"
 dependencies = [
+ "ferrule-buffer",
+ "ferrule-lang-css",
+ "ferrule-lang-js",
  "ferrule-syntax",
  "tree-sitter-html",
+ "tree-sitter-svelte-ng",
 ]
 
 [[package]]
 name = "ferrule-lang-js"
 version = "0.1.0"
 dependencies = [
+ "ferrule-buffer",
  "ferrule-syntax",
  "tree-sitter-javascript",
  "tree-sitter-json",
@@ -4297,6 +4305,36 @@ name = "tree-sitter-language"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0af592be68c579aa78a16846bd19422978c3c52e438523d45ff5d1bff1f9d4a"
+
+[[package]]
+name = "tree-sitter-less"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66d4fd0af04a7338929f0e27ca078b4831de8e1ebf90ce8182e69012094a0ae0"
+dependencies = [
+ "cc",
+ "tree-sitter",
+]
+
+[[package]]
+name = "tree-sitter-scss"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33909a9ca86390ebbf3461e9949c4bbe2767d2d024b486306d27616641d4ba24"
+dependencies = [
+ "cc",
+ "tree-sitter",
+]
+
+[[package]]
+name = "tree-sitter-svelte-ng"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef0a71f9cf5e94373cc86c64893630c8a29bb25d3390a248268d08af2165fa37"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "tree-sitter-typescript"

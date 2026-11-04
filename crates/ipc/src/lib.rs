@@ -263,6 +263,11 @@ pub enum TokenClass {
     Punctuation,
     Tag,
     Attribute,
+    Variable,
+    Heading,
+    Emphasis,
+    Strong,
+    Link,
 }
 
 /// A highlighted UTF-16 range.

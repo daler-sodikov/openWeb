@@ -12,6 +12,11 @@ publish.workspace = true
 [dependencies]
 ferrule-syntax.workspace = true
 tree-sitter-css.workspace = true
+tree-sitter-scss.workspace = true
+tree-sitter-less.workspace = true
+
+[dev-dependencies]
+ferrule-buffer.workspace = true
 
 [lints]
 workspace = true
