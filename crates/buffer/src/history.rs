@@ -1,6 +1,7 @@
 //! Undo/redo history with typing groups.
 
 use crate::document::{ByteEdit, Edit, EditKind};
+use crate::lsp::LspChange;
 use crate::selection::Selection;
 
 /// Transactions closer together than this are grouped (if their kind and
@@ -88,4 +89,6 @@ pub struct UndoOutcome {
     pub selection: Selection,
     /// Byte edits for incremental parsing, in application order.
     pub byte_edits: Vec<ByteEdit>,
+    /// The same edits as LSP incremental changes, in application order.
+    pub lsp_changes: Vec<LspChange>,
 }

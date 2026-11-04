@@ -10,6 +10,7 @@
 mod document;
 mod history;
 mod indent;
+mod lsp;
 mod multicursor;
 mod selection;
 mod text;
@@ -19,6 +20,7 @@ pub use document::{
 };
 pub use history::UndoOutcome;
 pub use indent::{IndentRules, detect_indent_unit};
+pub use lsp::{LinePos, LspChange, offset_of};
 pub use multicursor::CaretDirection;
 pub use ropey::Rope;
 pub use selection::{SelRange, Selection};

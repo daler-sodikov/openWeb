@@ -3,6 +3,7 @@
 use ropey::Rope;
 
 use crate::history::{Entry, History, UndoOutcome};
+use crate::lsp::{LspChange, line_pos_of_char};
 use crate::selection::Selection;
 
 /// Replace the UTF-16 range `from..to` with `insert`.
@@ -102,6 +103,8 @@ pub struct ApplyOutcome {
     pub version: u32,
     /// Byte edits for incremental parsing, in application order.
     pub byte_edits: Vec<ByteEdit>,
+    /// The same edits as LSP incremental changes, in application order.
+    pub lsp_changes: Vec<LspChange>,
 }
 
 /// A text document with version tracking and undo history.
@@ -191,9 +194,11 @@ impl Document {
     ) -> Result<ApplyOutcome, BufferError> {
         self.check_version(base_version)?;
         let mut byte_edits = Vec::new();
+        let mut lsp_changes = Vec::new();
         for tx in transactions {
-            let (inverse, mut edits) = self.apply_edits(&tx.edits)?;
+            let (inverse, mut edits, mut changes) = self.apply_edits(&tx.edits)?;
             byte_edits.append(&mut edits);
+            lsp_changes.append(&mut changes);
             self.version += 1;
             self.history.record(Entry {
                 forward: tx.edits.clone(),
@@ -207,6 +212,7 @@ impl Document {
         Ok(ApplyOutcome {
             version: self.version,
             byte_edits,
+            lsp_changes,
         })
     }
 
@@ -218,9 +224,11 @@ impl Document {
         };
         let mut updates = Vec::with_capacity(group.len());
         let mut byte_edits = Vec::new();
+        let mut lsp_changes = Vec::new();
         for entry in group.iter().rev() {
-            let (_, mut edits) = self.apply_edits(&entry.inverse)?;
+            let (_, mut edits, mut changes) = self.apply_edits(&entry.inverse)?;
             byte_edits.append(&mut edits);
+            lsp_changes.append(&mut changes);
             updates.push(entry.inverse.clone());
             self.version += 1;
         }
@@ -234,6 +242,7 @@ impl Document {
             updates,
             selection,
             byte_edits,
+            lsp_changes,
         }))
     }
 
@@ -245,9 +254,11 @@ impl Document {
         };
         let mut updates = Vec::with_capacity(group.len());
         let mut byte_edits = Vec::new();
+        let mut lsp_changes = Vec::new();
         for entry in &group {
-            let (_, mut edits) = self.apply_edits(&entry.forward)?;
+            let (_, mut edits, mut changes) = self.apply_edits(&entry.forward)?;
             byte_edits.append(&mut edits);
+            lsp_changes.append(&mut changes);
             updates.push(entry.forward.clone());
             self.version += 1;
         }
@@ -261,6 +272,7 @@ impl Document {
             updates,
             selection,
             byte_edits,
+            lsp_changes,
         }))
     }
 
@@ -286,8 +298,9 @@ impl Document {
     }
 
     /// Validates and applies one set of edits. Returns the inverse edits
-    /// (relative to the text after the change) and the byte edits.
-    fn apply_edits(&mut self, edits: &[Edit]) -> Result<(Vec<Edit>, Vec<ByteEdit>), BufferError> {
+    /// (relative to the text after the change), the byte edits and the LSP
+    /// changes (both in application order).
+    fn apply_edits(&mut self, edits: &[Edit]) -> Result<AppliedEdits, BufferError> {
         // Validate and convert everything before mutating.
         let mut char_ranges = Vec::with_capacity(edits.len());
         let mut prev_to = 0;
@@ -320,7 +333,13 @@ impl Document {
 
         // Apply from the end so earlier offsets stay valid.
         let mut byte_edits = Vec::with_capacity(edits.len());
+        let mut lsp_changes = Vec::with_capacity(edits.len());
         for (edit, &(cf, ct)) in edits.iter().zip(&char_ranges).rev() {
+            lsp_changes.push(LspChange {
+                start: line_pos_of_char(&self.rope, cf),
+                end: line_pos_of_char(&self.rope, ct),
+                text: edit.insert.clone(),
+            });
             let start_byte = self.rope.char_to_byte(cf);
             let old_end_byte = self.rope.char_to_byte(ct);
             let start_point = self.point_of_byte(start_byte);
@@ -337,7 +356,7 @@ impl Document {
                 new_end_point: self.point_of_byte(new_end_byte),
             });
         }
-        Ok((inverse, byte_edits))
+        Ok((inverse, byte_edits, lsp_changes))
     }
 
     fn point_of_byte(&self, byte: usize) -> Point {
@@ -348,6 +367,9 @@ impl Document {
         }
     }
 }
+
+/// Inverse edits, byte edits and LSP changes of one applied edit set.
+type AppliedEdits = (Vec<Edit>, Vec<ByteEdit>, Vec<LspChange>);
 
 fn utf16_len(text: &str) -> usize {
     text.encode_utf16().count()
