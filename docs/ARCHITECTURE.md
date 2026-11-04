@@ -299,6 +299,37 @@ emits `index-status`. Searches before it finishes report `indexing: true`.
    `disk_changed` and, only if the disk really differs from the last saved
    text, shows **Reload** / **Keep my changes**.
 
+### 4.6 Split editors and structure (M2b)
+
+- **One replica per document, many views.** `DocModel` (view layer) holds
+  a single collab hub `EditorState` that talks to Rust through the
+  serialized queue (4.2). Each visible `EditorPane` (one per editor group)
+  is a mirror: its local edits are forwarded to the hub and to the other
+  panes; Rust-originated edits fan out from the hub to every pane. So the
+  same file can be open in both groups and Rust still sees exactly one
+  writer. Selection commands, undo and Enter act on the pane that invoked
+  them.
+- **Structure from the syntax tree.** `syntax` computes folding ranges
+  (bracketed blocks, multi-line comments, markup elements, YAML/Markdown
+  sections), the bracket pair at a position (tokens only, so brackets in
+  strings and comments never match) and breadcrumbs (named scopes:
+  functions, classes, elements, CSS rules, JSON/YAML keys, Markdown
+  sections). The view requests folds after edits settle and caret info
+  (breadcrumbs + bracket pair) after the caret moves; both are discarded if
+  the document moved on.
+- **Injections.** A language may declare injection queries; `SyntaxTree`
+  parses the embedded regions (`<script>`/`<style>`, Svelte expressions,
+  Markdown inline text and fenced code) with the named language from the
+  registry and paints their highlights over the host's. One level deep;
+  injected trees are reparsed (not incrementally) after edits.
+- **EditorConfig** is resolved in `settings` when a document opens:
+  indentation unit and tab width go to the view; trimming, final newline,
+  line endings and BOM are applied by Rust on save as one undoable step that
+  the view receives like any backend edit.
+- **Auto-closing brackets** are view input behaviour (CodeMirror's
+  `closeBrackets`) configured per language from Rust (`autoClose` pairs),
+  so typing never waits for IPC.
+
 ## 5. Editor view layer: CodeMirror 6 as a view only
 
 **Decision: CodeMirror 6 (MIT) is the input and rendering engine. Rust is
