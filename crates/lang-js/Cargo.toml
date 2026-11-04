@@ -11,6 +11,9 @@ publish.workspace = true
 
 [dependencies]
 ferrule-syntax.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-json.workspace = true
 
 [lints]
 workspace = true

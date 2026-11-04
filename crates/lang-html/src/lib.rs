@@ -1,5 +1,24 @@
-//! HTML language support (later Vue/Svelte embedding): grammars, queries and in-process features.
+//! HTML language support.
 //!
-//! Empty in M0: the crate exists so the workspace layout and dependency
-//! graph from `docs/ARCHITECTURE.md` are in place. Its scope and milestone
-//! are listed in `docs/ROADMAP.md`.
+//! M1: the tree-sitter HTML grammar and its bundled highlight query.
+//! Embedded `<script>`/`<style>` highlighting (injections) and Vue/Svelte
+//! arrive later (`docs/ROADMAP.md`).
+
+use ferrule_syntax::{LanguageDef, Precedence};
+
+/// HTML (`.html`, `.htm`).
+pub fn html() -> LanguageDef {
+    LanguageDef {
+        id: "html",
+        name: "HTML",
+        extensions: &["html", "htm"],
+        language: tree_sitter_html::LANGUAGE.into(),
+        highlight_queries: vec![tree_sitter_html::HIGHLIGHTS_QUERY],
+        precedence: Precedence::FirstWins,
+    }
+}
+
+/// All languages of this crate.
+pub fn languages() -> Vec<LanguageDef> {
+    vec![html()]
+}

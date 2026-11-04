@@ -1,0 +1,13 @@
+/* Layout */
+@media (max-width: 600px) {
+  .card > h1:hover,
+  #main::before {
+    color: #ff8800;
+    --gap: 4px;
+    margin: calc(var(--gap) * 2) auto !important;
+  }
+}
+
+a[href^="http"] {
+  font-family: "Inter", sans-serif;
+}

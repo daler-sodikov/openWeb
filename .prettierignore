@@ -8,3 +8,5 @@ src-tauri/gen/
 src-tauri/icons/
 test-results/
 playwright-report/
+fixtures/
+crates/*/tests/golden/

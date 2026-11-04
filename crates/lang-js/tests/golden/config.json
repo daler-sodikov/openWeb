@@ -1,0 +1,7 @@
+{
+  "name": "demo",
+  "version": "1.0.0",
+  "private": true,
+  "files": ["dist", "src"],
+  "nested": { "count": 3, "empty": null, "escaped": "a\nb" }
+}
