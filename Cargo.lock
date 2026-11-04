@@ -935,6 +935,7 @@ dependencies = [
  "ferrule-buffer",
  "ferrule-settings",
  "ferrule-vfs",
+ "ignore",
  "tempfile",
  "thiserror 2.0.21",
 ]

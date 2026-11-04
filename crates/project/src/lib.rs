@@ -5,9 +5,10 @@
 //! separator on every OS, and never contain `.`/`..` components. The empty
 //! string is the project root.
 //!
-//! M1 scope: one root folder, `.git` hidden, everything else listed.
-//! `.gitignore` awareness, workspaces and tsconfig discovery come later
-//! (`docs/ROADMAP.md`).
+//! One root folder; `.git` is hidden, everything else is listed. Entries
+//! excluded by `.gitignore` files (at any level, the deepest decides) or
+//! inside `node_modules` are listed but marked as ignored. Workspaces and
+//! tsconfig discovery come later (`docs/ROADMAP.md`).
 
 use std::cmp::Ordering;
 use std::fs;
@@ -16,6 +17,8 @@ use std::path::{Component, Path, PathBuf};
 
 /// Directory names never shown in the tree.
 const HIDDEN_DIRS: &[&str] = &[".git"];
+/// Directory names always treated as ignored.
+const IGNORED_DIRS: &[&str] = &["node_modules"];
 
 /// Errors from project operations.
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +52,8 @@ pub struct Entry {
     pub path: String,
     /// Directory or file.
     pub kind: EntryKind,
+    /// Excluded by `.gitignore` (or inside `node_modules`).
+    pub ignored: bool,
 }
 
 /// An opened project folder.
@@ -124,6 +129,8 @@ impl Project {
     /// case-insensitively. Hidden directories (`.git`) are skipped.
     pub fn list_dir(&self, rel: &str) -> Result<Vec<Entry>, ProjectError> {
         let dir = self.resolve(rel)?;
+        let ignores = IgnoreChain::new(&self.root, &dir);
+        let dir_ignored = ignores.ancestors_ignored(&self.root, &dir);
         let mut entries = Vec::new();
         for item in fs::read_dir(&dir)? {
             let item = item?;
@@ -140,6 +147,9 @@ impl Project {
             } else {
                 format!("{rel}/{name}")
             };
+            let ignored = dir_ignored
+                || (is_dir && IGNORED_DIRS.contains(&name.as_str()))
+                || ignores.is_ignored(&item.path(), is_dir);
             entries.push(Entry {
                 name,
                 path,
@@ -148,10 +158,68 @@ impl Project {
                 } else {
                     EntryKind::File
                 },
+                ignored,
             });
         }
         entries.sort_by(compare_entries);
         Ok(entries)
+    }
+}
+
+/// The `.gitignore` files from the project root down to one directory.
+struct IgnoreChain {
+    /// (directory, its `.gitignore`), root first.
+    levels: Vec<ignore::gitignore::Gitignore>,
+}
+
+impl IgnoreChain {
+    fn new(root: &Path, dir: &Path) -> Self {
+        let mut dirs: Vec<PathBuf> = dir
+            .ancestors()
+            .take_while(|d| d.starts_with(root))
+            .map(Path::to_path_buf)
+            .collect();
+        dirs.reverse();
+        let levels = dirs
+            .into_iter()
+            .filter_map(|d| {
+                let file = d.join(".gitignore");
+                if !file.is_file() {
+                    return None;
+                }
+                let mut builder = ignore::gitignore::GitignoreBuilder::new(&d);
+                // A bad line is skipped; the rest of the file still applies.
+                let _ = builder.add(&file);
+                builder.build().ok()
+            })
+            .collect();
+        Self { levels }
+    }
+
+    /// Whether `path` is ignored; the deepest `.gitignore` with an opinion
+    /// decides (so `!pattern` in a subdirectory re-includes).
+    fn is_ignored(&self, path: &Path, is_dir: bool) -> bool {
+        for level in self.levels.iter().rev() {
+            let m = level.matched(path, is_dir);
+            if m.is_ignore() {
+                return true;
+            }
+            if m.is_whitelist() {
+                return false;
+            }
+        }
+        false
+    }
+
+    /// Whether `dir` or any directory between the root and it is ignored.
+    fn ancestors_ignored(&self, root: &Path, dir: &Path) -> bool {
+        dir.ancestors()
+            .take_while(|d| *d != root && d.starts_with(root))
+            .any(|d| {
+                d.file_name()
+                    .is_some_and(|n| IGNORED_DIRS.contains(&n.to_string_lossy().as_ref()))
+                    || self.is_ignored(d, true)
+            })
     }
 }
 
@@ -212,6 +280,48 @@ mod tests {
         assert_eq!(src[0].kind, EntryKind::Directory);
         assert_eq!(src[1].path, "src/index.ts");
         assert_eq!(src[1].kind, EntryKind::File);
+    }
+
+    #[test]
+    fn marks_ignored_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("node_modules/react")).unwrap();
+        fs::create_dir_all(root.join("dist/assets")).unwrap();
+        fs::create_dir_all(root.join("src/gen")).unwrap();
+        fs::write(root.join(".gitignore"), "dist\n*.log\n").unwrap();
+        fs::write(root.join("src/.gitignore"), "gen/\n!keep.log\n").unwrap();
+        fs::write(root.join("debug.log"), "").unwrap();
+        fs::write(root.join("src/keep.log"), "").unwrap();
+        fs::write(root.join("src/other.log"), "").unwrap();
+        fs::write(root.join("src/a.ts"), "").unwrap();
+        let project = Project::open(root).unwrap();
+        let flags = |rel: &str| -> Vec<(String, bool)> {
+            project
+                .list_dir(rel)
+                .unwrap()
+                .into_iter()
+                .map(|e| (e.name, e.ignored))
+                .collect()
+        };
+        let top = flags("");
+        assert!(top.contains(&("dist".into(), true)));
+        assert!(top.contains(&("node_modules".into(), true)));
+        assert!(top.contains(&("debug.log".into(), true)));
+        assert!(top.contains(&("src".into(), false)));
+        let src = flags("src");
+        assert!(src.contains(&("gen".into(), true)));
+        assert!(
+            src.contains(&("keep.log".into(), false)),
+            "re-included by src/.gitignore"
+        );
+        assert!(src.contains(&("other.log".into(), true)));
+        assert!(src.contains(&("a.ts".into(), false)));
+        assert!(
+            flags("dist").iter().all(|(_, ignored)| *ignored),
+            "inside an ignored dir"
+        );
+        assert!(flags("node_modules").iter().all(|(_, ignored)| *ignored));
     }
 
     #[test]

@@ -14,6 +14,7 @@ ferrule-vfs.workspace = true
 ferrule-buffer.workspace = true
 ferrule-settings.workspace = true
 thiserror.workspace = true
+ignore.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
