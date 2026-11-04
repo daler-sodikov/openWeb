@@ -1,0 +1,9 @@
+# Check out text files with LF on every OS. Golden test files, fixtures and
+# the code itself compare byte-for-byte; Windows' default autocrlf would turn
+# them into CRLF and break those tests. Tests that need CRLF create their
+# files at runtime.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
