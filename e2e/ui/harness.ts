@@ -12,8 +12,51 @@ export const isMac = process.platform === "darwin";
 
 /** Runs in the page before any app script. */
 function installTauriShim(backend: string): void {
+  type Handler = (event: { event: string; id: number; payload: unknown }) => void;
+  const callbacks = new Map<number, Handler>();
+  const listeners = new Map<number, { event: string; handler: number }>();
+  let nextId = 1;
+  let polling = false;
+
+  // Delivers backend events (long poll on the headless backend).
+  const poll = async (): Promise<void> => {
+    let after = "latest";
+    for (;;) {
+      try {
+        const response = await fetch(`${backend}/events?after=${after}`);
+        const body = (await response.json()) as {
+          next: number;
+          events: { event: string; payload: unknown }[];
+        };
+        after = String(body.next);
+        for (const e of body.events) {
+          for (const [id, l] of listeners) {
+            if (l.event === e.event)
+              callbacks.get(l.handler)?.({ event: e.event, id, payload: e.payload });
+          }
+        }
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+  };
+
   const internals = {
     invoke: async (cmd: string, args?: unknown): Promise<unknown> => {
+      if (cmd === "plugin:event|listen") {
+        const { event, handler } = args as { event: string; handler: number };
+        const id = nextId++;
+        listeners.set(id, { event, handler });
+        if (!polling) {
+          polling = true;
+          void poll();
+        }
+        return id;
+      }
+      if (cmd === "plugin:event|unlisten") {
+        listeners.delete((args as { eventId: number }).eventId);
+        return null;
+      }
       const response = await fetch(`${backend}/invoke/${cmd}`, {
         method: "POST",
         body: JSON.stringify(args ?? {}),
@@ -26,13 +69,43 @@ function installTauriShim(backend: string): void {
       }
       return body.ok;
     },
-    transformCallback: () => 0,
+    transformCallback: (callback: Handler): number => {
+      const id = nextId++;
+      callbacks.set(id, callback);
+      return id;
+    },
     metadata: {
       currentWindow: { label: "main" },
       currentWebview: { windowLabel: "main", label: "main" },
     },
   };
   Object.defineProperty(window, "__TAURI_INTERNALS__", { value: internals });
+}
+
+/** Calls a backend command directly from the test process. */
+export async function backend(cmd: string, args: unknown): Promise<unknown> {
+  const response = await fetch(`${BACKEND_URL}/invoke/${cmd}`, {
+    method: "POST",
+    body: JSON.stringify(args),
+  });
+  const body = (await response.json()) as { ok?: unknown; err?: unknown };
+  if ("err" in body) throw new Error(JSON.stringify(body.err));
+  return body.ok;
+}
+
+/** Waits until the project index is built. */
+export async function waitForIndex(): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const r = (await backend("search_everywhere", { query: "", tab: "files" })) as {
+          indexing: boolean;
+        };
+        return r.indexing;
+      },
+      { timeout: 20_000 },
+    )
+    .toBe(false);
 }
 
 export const test = base.extend<{ project: string }>({
@@ -56,6 +129,7 @@ export { expect };
 export async function openApp(page: Page, project: string): Promise<void> {
   await page.goto(`/?project=${encodeURIComponent(project)}`);
   await expect(page.getByTestId("project-name")).toHaveText(path.basename(project));
+  await waitForIndex();
 }
 
 export function treeRow(page: Page, relPath: string): Locator {
@@ -99,4 +173,11 @@ export const keys = {
   selectNext: isMac ? "Control+g" : "Alt+j",
   selectAll: isMac ? "Meta+Control+g" : "Control+Alt+Shift+j",
   caretModifier: isMac ? "Alt" : "Control",
+  gotoFile: isMac ? "Meta+Shift+O" : "Control+Shift+N",
+  gotoSymbol: isMac ? "Meta+Alt+O" : "Control+Alt+Shift+N",
+  gotoAction: "ControlOrMeta+Shift+A",
+  gotoLine: isMac ? "Meta+l" : "Control+g",
+  recentFiles: "ControlOrMeta+e",
+  findInFiles: "ControlOrMeta+Shift+F",
+  replaceInFiles: "ControlOrMeta+Shift+R",
 };
