@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,3 +20,6 @@ export const FRONTEND_URL = `http://127.0.0.1:${String(FRONTEND_PORT)}`;
 /** Headless Rust backend used by the `ui` project. */
 export const BACKEND_PORT = 1431;
 export const BACKEND_URL = `http://127.0.0.1:${String(BACKEND_PORT)}`;
+
+/** Data directory of the headless backend (its `settings.json` lives here). */
+export const BACKEND_DATA = path.join(os.tmpdir(), "ferrule-e2e-backend");

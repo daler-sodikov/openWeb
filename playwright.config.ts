@@ -1,12 +1,8 @@
-import os from "node:os";
-import path from "node:path";
-
 import { defineConfig, devices } from "@playwright/test";
 
-import { BACKEND_PORT, BACKEND_URL, FRONTEND_PORT, FRONTEND_URL } from "./e2e/paths";
+import { BACKEND_DATA, BACKEND_PORT, BACKEND_URL, FRONTEND_PORT, FRONTEND_URL } from "./e2e/paths";
 
 const ci = !!process.env.CI;
-const backendData = path.join(os.tmpdir(), "ferrule-e2e-backend");
 // Optional local override: path to an already installed Chromium/Chrome
 // binary, for machines where `bunx playwright install chromium` is not
 // possible. CI does not set it.
@@ -46,7 +42,7 @@ export default defineConfig({
       timeout: 600_000,
     },
     {
-      command: `cargo run --quiet -p ferrule-app --features headless --bin ferrule-headless -- --port ${String(BACKEND_PORT)} --data-dir "${backendData}"`,
+      command: `cargo run --quiet -p ferrule-app --features headless --bin ferrule-headless -- --port ${String(BACKEND_PORT)} --data-dir "${BACKEND_DATA}"`,
       url: `${BACKEND_URL}/health`,
       reuseExistingServer: false,
       timeout: 900_000,

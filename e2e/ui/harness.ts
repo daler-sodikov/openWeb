@@ -181,4 +181,24 @@ export const keys = {
   findInFiles: "ControlOrMeta+Shift+F",
   replaceInFiles: "ControlOrMeta+Shift+R",
   matchingBrace: isMac ? "Meta+Control+m" : "Control+Shift+M",
+  quickDoc: isMac ? "F1" : "Control+q",
+  gotoDeclaration: "ControlOrMeta+b",
+  gotoImplementation: isMac ? "Meta+Alt+b" : "Control+Alt+b",
+  problems: isMac ? "Meta+6" : "Alt+6",
 };
+
+/**
+ * Why the real TypeScript server tests cannot run here, or null when
+ * `typescript-language-server` and `node` are on PATH (the headless backend
+ * inherits this process's environment).
+ */
+export function tsServerMissing(): string | null {
+  const dirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const exts = process.platform === "win32" ? [".cmd", ".exe", ""] : [""];
+  const found = (name: string) =>
+    dirs.some((dir) => exts.some((ext) => fs.existsSync(path.join(dir, name + ext))));
+  const missing = ["typescript-language-server", "node"].filter((name) => !found(name));
+  return missing.length === 0
+    ? null
+    : `${missing.join(" and ")} not on PATH; install with \`bun add -g typescript-language-server typescript\``;
+}
