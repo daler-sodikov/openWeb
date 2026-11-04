@@ -960,6 +960,11 @@ dependencies = [
 [[package]]
 name = "ferrule-settings"
 version = "0.1.0"
+dependencies = [
+ "globset",
+ "tempfile",
+ "tracing",
+]
 
 [[package]]
 name = "ferrule-syntax"

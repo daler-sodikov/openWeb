@@ -1,8 +1,12 @@
 //! Layered settings and keymap presets.
 //!
-//! M1 scope: the IntelliJ-style key bindings for the editor actions that
-//! exist so far. Settings files and EditorConfig arrive later
+//! Contents: the IntelliJ-style key bindings, and EditorConfig resolution
+//! ([`resolve_editorconfig`]). User/project settings files come later
 //! (`docs/ROADMAP.md`).
+
+mod editorconfig;
+
+pub use editorconfig::{EditorConfig, EndOfLine, IndentStyle, resolve as resolve_editorconfig};
 
 /// Editor actions that have key bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
