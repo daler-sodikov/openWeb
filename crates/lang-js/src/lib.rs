@@ -12,6 +12,19 @@ const EXTRA_TS_TAGS: &str = r#"
 (enum_declaration name: (identifier) @name) @definition.enum
 "#;
 
+/// Ours, appended last (last pattern wins): the bundled queries color every
+/// capitalized identifier as a type/constructor, which also hits function
+/// names such as React components. Declarations and calls of functions keep
+/// the function color.
+const FUNCTION_OVERRIDES: &str = r#"
+(function_declaration name: (identifier) @function)
+(generator_function_declaration name: (identifier) @function)
+(call_expression function: (identifier) @function)
+(variable_declarator
+  name: (identifier) @function
+  value: [(arrow_function) (function_expression)])
+"#;
+
 /// Pairs auto-closed in JavaScript-family languages (including backticks).
 pub const JS_AUTO_CLOSE: &[&str] = &["()", "[]", "{}", "''", "\"\"", "``"];
 
@@ -25,6 +38,7 @@ pub fn typescript() -> LanguageDef {
         vec![
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_typescript::HIGHLIGHTS_QUERY,
+            FUNCTION_OVERRIDES,
         ],
         Precedence::LastWins,
     )
@@ -48,6 +62,7 @@ pub fn tsx() -> LanguageDef {
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
             tree_sitter_typescript::HIGHLIGHTS_QUERY,
+            FUNCTION_OVERRIDES,
         ],
         Precedence::LastWins,
     )
@@ -70,6 +85,7 @@ pub fn javascript() -> LanguageDef {
         vec![
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
+            FUNCTION_OVERRIDES,
         ],
         Precedence::LastWins,
     )

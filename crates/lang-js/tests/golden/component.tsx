@@ -8,3 +8,6 @@ export function Button({ label }: { label: string }) {
     </button>
   );
 }
+
+const Panel = () => <section />;
+Button({ label: "x" });

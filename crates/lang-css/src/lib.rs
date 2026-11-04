@@ -1,6 +1,6 @@
 //! CSS, SCSS and LESS language support: tree-sitter grammars and their
-//! bundled highlight queries. SCSS and LESS variables (`$scss`, `@less`)
-//! are colored.
+//! bundled highlight queries. Variables (`--custom`, `$scss`, `@less`) are
+//! colored.
 
 use ferrule_syntax::{LanguageDef, Precedence};
 
@@ -25,6 +25,7 @@ pub fn css() -> LanguageDef {
         Precedence::FirstWins,
     )
     .aliases(&["postcss"])
+    .colored_variables()
     .auto_close(CSS_AUTO_CLOSE)
 }
 

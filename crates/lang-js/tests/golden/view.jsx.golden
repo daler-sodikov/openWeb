@@ -1,5 +1,5 @@
 L1:1 keyword "const"
-L1:7 type "View"
+L1:7 function "View"
 L1:12 operator "="
 L1:14 punctuation "("
 L1:20 punctuation ")"
