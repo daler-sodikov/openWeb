@@ -23,7 +23,7 @@ jobs:
         os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -48,6 +48,9 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: clippy (headless UI-test backend)
+        run: cargo clippy -p ferrule-app --features headless --all-targets -- -D warnings
+
       - name: cargo test
         run: cargo test --workspace
 
@@ -64,6 +67,9 @@ jobs:
       - name: Vitest
         run: bun run test
 
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
       - name: Playwright end-to-end (Linux, virtual display)
         if: runner.os == 'Linux'
         run: xvfb-run -a bunx playwright test
@@ -76,7 +82,7 @@ jobs:
     name: cargo-deny
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
@@ -91,7 +97,7 @@ jobs:
         os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -111,7 +117,7 @@ jobs:
       - name: Build release bundles
         run: bun tauri build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ferrule-${{ matrix.os }}
           path: target/release/bundle/
