@@ -14,6 +14,9 @@ import {
   type DocStatus,
   type EditorSelection as IpcSelection,
   type FoldSpan,
+  type HoverResult,
+  type NavKind,
+  type NavTarget,
   type OpenedDocument_Serialize as OpenedDocument,
   type TextEdit,
 } from "../ipc/bindings";
@@ -27,6 +30,7 @@ import {
   toIpcSelection,
 } from "./convert";
 import { buildDecorations } from "./highlight";
+import { buildDiagnostics } from "./insight";
 
 /** Marks transactions that mirror a change made elsewhere (not to forward). */
 export const mirrored = Annotation.define<boolean>();
@@ -38,6 +42,7 @@ export interface DocPane {
   reset(text: string): void;
   setHighlights(decorations: DecorationSet): void;
   setFolds(ranges: readonly FoldSpan[]): void;
+  setDiagnostics(decorations: DecorationSet): void;
   setCaretInfo(info: CaretInfo | null): void;
   showExternalChange(show: boolean): void;
   /** Keys typed while an Enter was in flight; replayed afterwards. */
@@ -53,6 +58,7 @@ const HIGHLIGHT_MARGIN = 4000;
 const HIGHLIGHT_DEBOUNCE_MS = 40;
 const FOLD_DEBOUNCE_MS = 300;
 const CARET_DEBOUNCE_MS = 60;
+const DIAGNOSTICS_RETRY_MS = 150;
 
 type SelectionCall = (
   docId: DocId,
@@ -75,6 +81,7 @@ export class DocModel {
   private highlightTimer: ReturnType<typeof setTimeout> | undefined;
   private foldTimer: ReturnType<typeof setTimeout> | undefined;
   private caretTimer: ReturnType<typeof setTimeout> | undefined;
+  private diagnosticsTimer: ReturnType<typeof setTimeout> | undefined;
   private destroyed = false;
 
   constructor(
@@ -104,6 +111,7 @@ export class DocModel {
     this.panes.add(pane);
     this.scheduleHighlights();
     this.scheduleFolds(0);
+    this.scheduleDiagnostics(0);
   }
 
   detach(pane: DocPane): void {
@@ -115,6 +123,7 @@ export class DocModel {
     clearTimeout(this.highlightTimer);
     clearTimeout(this.foldTimer);
     clearTimeout(this.caretTimer);
+    clearTimeout(this.diagnosticsTimer);
   }
 
   /** Runs after all queued work for this document has finished. */
@@ -445,6 +454,71 @@ export class DocModel {
     return box.info;
   }
 
+  // Code insight from the language server
+
+  /** Fetches the diagnostics (after the server published new ones). */
+  scheduleDiagnostics(delay: number): void {
+    clearTimeout(this.diagnosticsTimer);
+    this.diagnosticsTimer = setTimeout(() => {
+      void this.enqueue(async () => {
+        if (this.panes.size === 0) return;
+        await this.pushAll();
+        const result = unwrap(await commands.docDiagnostics(this.docId));
+        if (!this.isSynced(result.version)) {
+          this.scheduleDiagnostics(DIAGNOSTICS_RETRY_MS);
+          return;
+        }
+        const length = this.hub.doc.length;
+        const decorations = buildDiagnostics(result.items, length);
+        for (const pane of this.panes) pane.setDiagnostics(decorations);
+      });
+    }, delay);
+  }
+
+  /** Hover / Quick Documentation at `pos` of `pane` (null: nothing to show). */
+  hover(pane: DocPane, pos: number): Promise<HoverResult | null> {
+    return this.insightRequest(pane, pos, async (version, offset) =>
+      commands.hover(this.docId, version, offset),
+    );
+  }
+
+  /** Navigation targets for the symbol at `pos` (default: the caret). */
+  async navigate(pane: DocPane, kind: NavKind, pos: number | null): Promise<NavTarget[]> {
+    return (
+      (await this.insightRequest(pane, pos, async (version, offset) =>
+        commands.gotoDefinition(this.docId, version, offset, kind),
+      )) ?? []
+    );
+  }
+
+  /**
+   * Pushes pending edits through the queue, then sends `call` outside it so
+   * typing never waits for the language server. `Cancelled` (a newer
+   * request replaced this one) resolves to null; other errors throw.
+   */
+  private async insightRequest<T>(
+    pane: DocPane,
+    pos: number | null,
+    call: (version: number, offset: number) => Promise<IpcResult<T>>,
+  ): Promise<T | null> {
+    // A holder: TypeScript cannot see the queued callback assigning it.
+    const box: { at: { version: number; offset: number } | null } = { at: null };
+    await this.enqueue(async () => {
+      await this.pushAll();
+      box.at = {
+        version: getSyncedVersion(this.hub),
+        offset: pos ?? pane.view.state.selection.main.head,
+      };
+    });
+    if (box.at === null) return null;
+    const result = await call(box.at.version, box.at.offset);
+    if (result.status === "error") {
+      if (result.error.kind === "cancelled") return null;
+      throw new BackendError(result.error);
+    }
+    return result.data;
+  }
+
   private setStatus(status: DocStatus): void {
     this.dirty = status.dirty;
     this.host.onStatus(this);
@@ -465,6 +539,7 @@ export class DocModel {
       this.setStatus({ version: doc.version, dirty: doc.dirty });
       this.scheduleHighlights();
       this.scheduleFolds(0);
+      this.scheduleDiagnostics(0);
     } catch (reloadError: unknown) {
       this.host.onError(this, `Reloading ${this.path} failed: ${errorMessage(reloadError)}`);
     }

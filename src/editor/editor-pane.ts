@@ -29,16 +29,26 @@ import {
   EditorView,
   highlightActiveLine,
   highlightActiveLineGutter,
+  hoverTooltip,
   type KeyBinding as CmKeyBinding,
   keymap,
   lineNumbers,
   runScopeHandlers,
 } from "@codemirror/view";
 
-import type { CaretInfo, FoldSpan, KeyAction, KeyBinding } from "../ipc/bindings";
+import type { CaretInfo, FoldSpan, KeyAction, KeyBinding, NavKind } from "../ipc/bindings";
+import { errorMessage } from "../ipc/result";
 import { type DocModel, type DocPane, mirrored } from "./doc-model";
 import { DoubleModifierGesture } from "./gesture";
 import { highlightField, setHighlights } from "./highlight";
+import {
+  diagnosticsAt,
+  diagnosticsField,
+  insightDom,
+  quickDocField,
+  setDiagnostics,
+  setQuickDoc,
+} from "./insight";
 
 /** Actions handled by the focused editor; all others are global. */
 export const EDITOR_ACTIONS: ReadonlySet<KeyAction> = new Set<KeyAction>([
@@ -55,12 +65,24 @@ export const EDITOR_ACTIONS: ReadonlySet<KeyAction> = new Set<KeyAction>([
   "foldCollapseAll",
   "foldExpandAll",
   "gotoMatchingBrace",
+  "quickDocumentation",
+  "gotoDeclaration",
+  "gotoTypeDeclaration",
+  "gotoImplementation",
 ]);
 
+/** Delay before the mouse hover asks for documentation. */
+const HOVER_DELAY_MS = 500;
+
 export interface PaneHost {
+  /** macOS (Cmd instead of Ctrl for Ctrl+Click). */
+  readonly mac: boolean;
   onFocus(pane: EditorPane): void;
   onCursor(pane: EditorPane): void;
   closePane(pane: EditorPane): void;
+  /** Go to Declaration and friends at `pos` (null: the caret). */
+  navigate(pane: EditorPane, kind: NavKind, pos: number | null): void;
+  notify(message: string): void;
 }
 
 // Folding ranges from Rust, mapped through edits until fresh ones arrive.
@@ -157,6 +179,10 @@ export class EditorPane implements DocPane {
     this.view.dispatch({ effects: setFoldRanges.of(ranges) });
   }
 
+  setDiagnostics(decorations: DecorationSet): void {
+    this.view.dispatch({ effects: setDiagnostics.of(decorations) });
+  }
+
   setCaretInfo(info: CaretInfo | null): void {
     const pair = info?.brackets;
     const decorations = pair
@@ -247,6 +273,35 @@ export class EditorPane implements DocPane {
     this.view.focus();
   }
 
+  /** Quick Documentation for the symbol at the caret, below it. */
+  async showQuickDoc(): Promise<void> {
+    const view = this.view;
+    const pos = view.state.selection.main.head;
+    const problems = diagnosticsAt(view.state.field(diagnosticsField), pos);
+    let html: string | null = null;
+    try {
+      html = (await this.doc.hover(this, pos))?.html ?? null;
+    } catch (error: unknown) {
+      this.host.notify(errorMessage(error));
+    }
+    if (view.state.selection.main.head !== pos) return;
+    if (html === null && problems.length === 0) {
+      this.host.notify("No documentation found.");
+      return;
+    }
+    view.dispatch({
+      effects: setQuickDoc.of({
+        pos,
+        above: false,
+        create: () => {
+          const dom = insightDom(problems, html);
+          dom.classList.add("quick-doc");
+          return { dom };
+        },
+      }),
+    });
+  }
+
   /** Jumps between a bracket and its match (from the syntax tree). */
   async gotoMatchingBrace(): Promise<void> {
     const info = await this.doc.caretInfoNow(this);
@@ -299,6 +354,18 @@ export class EditorPane implements DocPane {
       case "gotoMatchingBrace":
         void this.gotoMatchingBrace();
         return;
+      case "quickDocumentation":
+        void this.showQuickDoc();
+        return;
+      case "gotoDeclaration":
+        this.host.navigate(this, "definition", null);
+        return;
+      case "gotoTypeDeclaration":
+        this.host.navigate(this, "typeDefinition", null);
+        return;
+      case "gotoImplementation":
+        this.host.navigate(this, "implementation", null);
+        return;
       default:
         return;
     }
@@ -340,11 +407,28 @@ export class EditorPane implements DocPane {
           { key: "Enter", run: () => this.newLine() },
           { key: "Shift-Enter", run: () => this.newLine() },
           { key: "Tab", run: insertIndent(doc.indentUnit) },
+          { key: "Escape", run: closeQuickDoc },
           { key: "Escape", run: simplifySelection },
           ...closeBracketsKeymap,
           ...standardKeymap,
         ]),
         highlightField,
+        diagnosticsField,
+        quickDocField,
+        hoverTooltip(
+          async (view, pos) => {
+            const problems = diagnosticsAt(view.state.field(diagnosticsField), pos);
+            let html: string | null = null;
+            try {
+              html = (await this.doc.hover(this, pos))?.html ?? null;
+            } catch {
+              // Hover is best effort; the server may be starting or gone.
+            }
+            if (html === null && problems.length === 0) return null;
+            return { pos, above: true, create: () => ({ dom: insightDom(problems, html) }) };
+          },
+          { hoverTime: HOVER_DELAY_MS },
+        ),
         foldRangesField,
         rustFolds,
         bracketField,
@@ -393,6 +477,16 @@ export class EditorPane implements DocPane {
       // IntelliJ-style Alt+Shift+Click adds a caret. Handled here because
       // CodeMirror treats Shift+Click as "extend selection".
       mousedown: (event, view) => {
+        // Ctrl+Click (macOS: Cmd+Click) goes to the declaration.
+        const navigateKey = this.host.mac ? event.metaKey : event.ctrlKey;
+        if (event.button === 0 && navigateKey && !event.altKey && !event.shiftKey) {
+          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+          if (pos === null) return false;
+          event.preventDefault();
+          view.dispatch({ selection: { anchor: pos }, userEvent: "select.pointer" });
+          this.host.navigate(this, "definition", pos);
+          return true;
+        }
         if (event.button !== 0 || !event.altKey || !event.shiftKey) return false;
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
         if (pos === null) return false;
@@ -450,6 +544,13 @@ export class EditorPane implements DocPane {
     this.crumbsBar.replaceChildren(...items);
   }
 }
+
+/** Escape closes Quick Documentation first. */
+const closeQuickDoc: Command = (view) => {
+  if (!view.state.field(quickDocField, false)) return false;
+  view.dispatch({ effects: setQuickDoc.of(null) });
+  return true;
+};
 
 /** Tab inserts the document's indentation unit at every caret. */
 function insertIndent(unit: string): Command {

@@ -11,6 +11,8 @@
   --fr-selection: #2f4a6d;
   --fr-active-line: #1c1f26;
   --fr-danger: #e0645c;
+  --fr-warning: #d9a441;
+  --fr-info: #6aa8f0;
   --fr-font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
   --fr-font-code:
     ui-monospace, "SFMono-Regular", "Cascadia Code", "DejaVu Sans Mono", Menlo, Consolas, monospace;
@@ -46,6 +48,8 @@
     --fr-selection: #c7dbf5;
     --fr-active-line: #f1efe9;
     --fr-danger: #b3261e;
+    --fr-warning: #9a6200;
+    --fr-info: #2862b0;
 
     --tok-keyword: #b4235a;
     --tok-string: #2f7d5b;
@@ -201,6 +205,14 @@ button {
 }
 
 .main {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.editor-area {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   min-width: 0;
@@ -738,4 +750,220 @@ button {
 .tok-link {
   color: var(--tok-function);
   text-decoration: underline;
+}
+
+/* Diagnostics (M3a): squiggles from the language server. */
+.cm-diag {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: none;
+}
+.cm-diag-error {
+  text-decoration-color: var(--fr-danger);
+}
+.cm-diag-warning {
+  text-decoration-color: var(--fr-warning);
+}
+.cm-diag-information {
+  text-decoration-color: var(--fr-info);
+}
+.cm-diag-hint {
+  text-decoration-style: dotted;
+  text-decoration-color: var(--fr-text-muted);
+}
+.cm-diag-unnecessary {
+  opacity: 0.55;
+  text-decoration-line: none;
+}
+.cm-diag-deprecated {
+  text-decoration-line: line-through;
+  text-decoration-style: solid;
+}
+
+/* Hover and Quick Documentation. */
+.cm-tooltip:has(> .insight) {
+  border: 1px solid var(--fr-border);
+  border-radius: 6px;
+  background: var(--fr-surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 30%);
+}
+.insight {
+  max-width: min(640px, 70vw);
+  max-height: 50vh;
+  overflow: auto;
+  padding: 6px 10px;
+  color: var(--fr-text);
+  font-family: var(--fr-font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.insight-problem {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 2px 0;
+  white-space: pre-wrap;
+}
+.insight-problem.severity-error {
+  color: var(--fr-danger);
+}
+.insight-problem.severity-warning {
+  color: var(--fr-warning);
+}
+.insight-origin {
+  color: var(--fr-text-muted);
+  white-space: nowrap;
+}
+.insight-problem + .insight-doc {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--fr-border);
+}
+.insight-doc p,
+.insight-doc ul,
+.insight-doc ol {
+  margin: 4px 0;
+}
+.insight-doc code,
+.insight-doc pre {
+  font-family: var(--fr-font-code);
+  font-size: 12px;
+}
+.insight-doc pre {
+  margin: 4px 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--fr-bg);
+  white-space: pre-wrap;
+}
+.insight-doc .hover-plain {
+  white-space: pre-wrap;
+}
+.insight-doc a {
+  color: var(--tok-function);
+}
+.insight-doc table {
+  border-collapse: collapse;
+}
+.insight-doc td {
+  padding: 2px 6px;
+  border: 1px solid var(--fr-border);
+}
+
+/* Tool windows (Problems). */
+.tool-window {
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  min-height: 0;
+  border-top: 1px solid var(--fr-border);
+  background: var(--fr-surface);
+}
+.tool-window[hidden] {
+  display: none;
+}
+.tool-window:focus {
+  outline: none;
+}
+.tool-window-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 10px;
+  color: var(--fr-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.tool-window-close {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+.tool-window .vlist {
+  max-height: none;
+  min-height: 0;
+}
+.tool-window-empty {
+  padding: 8px 12px;
+  color: var(--fr-text-muted);
+}
+.tool-window-empty[hidden] {
+  display: none;
+}
+.problem-file,
+.problem-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 10px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.problem-file {
+  font-weight: 600;
+}
+.problem-item {
+  padding-left: 26px;
+}
+.problem-count,
+.problem-location {
+  color: var(--fr-text-muted);
+  font-weight: 400;
+}
+.problem-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.problem-item.severity-error .problem-icon {
+  color: var(--fr-danger);
+}
+.problem-item.severity-warning .problem-icon {
+  color: var(--fr-warning);
+}
+.problem-item.severity-information .problem-icon {
+  color: var(--fr-info);
+}
+
+/* Status bar: problems and language server. */
+.status-problems,
+.status-server {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+.status-problems[hidden],
+.status-server[hidden] {
+  display: none;
+}
+.status-count + .status-count {
+  margin-left: 8px;
+}
+.status-count.errors {
+  color: var(--fr-danger);
+}
+.status-count.warnings {
+  color: var(--fr-warning);
+}
+.status-server[data-state="error"],
+.status-server[data-state="notFound"] {
+  color: var(--fr-danger);
+}
+.status-server[data-state="starting"],
+.status-server[data-state="indexing"],
+.status-server[data-state="restarting"] {
+  color: var(--fr-warning);
+}
+
+/* Go to Declaration chooser. */
+.nav-chooser .nav-preview {
+  font-family: var(--fr-font-code);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

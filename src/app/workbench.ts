@@ -9,20 +9,26 @@ import {
   commands,
   events,
   type AppInfo,
+  type FileProblems,
   type FsChangeBatch,
   type IndexState,
   type KeyAction,
   type KeyBinding,
+  type NavKind,
+  type NavTarget,
   type ReplaceResult,
   type SearchTab,
+  type ServerStatus,
 } from "../ipc/bindings";
 import { errorMessage, unwrap } from "../ipc/result";
 import { FindInFiles } from "../popup/find-in-files";
+import { NavChooser } from "../popup/nav-chooser";
 import type { Popup } from "../popup/popup";
 import { SearchEverywhere } from "../popup/search-everywhere";
 import { GotoLine, RecentFiles } from "../popup/simple-popups";
 import { TreeView } from "../tree/tree-view";
 import { chordMatches, formatChord } from "../ui/keys";
+import { ProblemsPanel } from "./problems";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -63,7 +69,11 @@ export class Workbench implements PaneHost, DocHost {
   private readonly statusLanguage = el("span", "status-language", "status-language");
   private readonly statusState = el("span", "status-state", "status-state");
   private readonly statusIndex = el("span", "status-index", "status-index");
-  private readonly mac: boolean;
+  private readonly statusServer = el("button", "status-server", "status-server");
+  private readonly statusProblems = el("button", "status-problems", "status-problems");
+  private readonly problems: ProblemsPanel;
+  private serverStatus: ServerStatus | null = null;
+  readonly mac: boolean;
   private readonly doubleShift = new DoubleTapDetector("Shift");
   private popup: Popup | null = null;
   private hasProject = false;
@@ -103,18 +113,39 @@ export class Workbench implements PaneHost, DocHost {
 
     this.focusedGroup = this.createGroup();
     this.renderWelcome();
+    this.problems = new ProblemsPanel((path, line, column) => {
+      this.openLocation(path, line, column);
+    });
+    this.problems.onChange = () => {
+      this.renderProblemCounts();
+    };
+    const editorArea = el("div", "editor-area");
+    editorArea.append(this.groupsEl, this.welcome);
     const main = el("section", "main");
-    main.append(this.groupsEl, this.welcome);
+    main.append(editorArea, this.problems.element);
 
     const body = el("div", "body");
     body.append(sidebar, main);
 
     const status = el("footer", "status", "status-bar");
+    this.statusServer.type = "button";
+    this.statusServer.hidden = true;
+    this.statusServer.addEventListener("click", () => {
+      this.onServerStatusClick();
+    });
+    this.statusProblems.type = "button";
+    this.statusProblems.title = "Problems";
+    this.statusProblems.addEventListener("click", () => {
+      this.runAction("toggleProblems");
+    });
+    this.renderProblemCounts();
     status.append(
       this.statusPath,
       this.statusNotice,
+      this.statusProblems,
       this.statusPosition,
       this.statusIndex,
+      this.statusServer,
       this.statusLanguage,
       this.statusState,
     );
@@ -163,6 +194,12 @@ export class Workbench implements PaneHost, DocHost {
       });
       await events.indexStatus.listen((event) => {
         this.onIndexStatus(event.payload);
+      });
+      await events.serverStatusChanged.listen((event) => {
+        this.onServerStatus(event.payload);
+      });
+      await events.problemsChanged.listen((event) => {
+        this.onProblemsChanged(event.payload);
       });
     } catch (error: unknown) {
       this.notify(`Backend events unavailable: ${errorMessage(error)}`);
@@ -221,6 +258,13 @@ export class Workbench implements PaneHost, DocHost {
         return;
       case "splitRight":
         this.splitRight();
+        return;
+      case "toggleProblems":
+        if (this.requireProject()) this.problems.toggle();
+        if (!this.problems.visible) this.active?.view.focus();
+        return;
+      case "restartTypeScriptServer":
+        if (this.requireProject()) void this.restartServer();
         return;
       default:
         return;
@@ -327,6 +371,57 @@ export class Workbench implements PaneHost, DocHost {
     }
   }
 
+  private onProblemsChanged(file: FileProblems): void {
+    this.problems.update(file);
+    this.docs.get(file.path)?.scheduleDiagnostics(0);
+  }
+
+  private onServerStatus(status: ServerStatus): void {
+    this.serverStatus = status;
+    const shown = status.state !== "notStarted";
+    this.statusServer.hidden = !shown;
+    this.statusServer.textContent = status.message;
+    this.statusServer.title = status.detail;
+    this.statusServer.dataset.state = status.state;
+  }
+
+  private onServerStatusClick(): void {
+    const status = this.serverStatus;
+    if (!status) return;
+    if (status.state === "error" || status.state === "notFound" || status.state === "stopped") {
+      void this.restartServer();
+    } else {
+      this.notify(status.detail.split("\n")[0] ?? "");
+    }
+  }
+
+  private async restartServer(): Promise<void> {
+    try {
+      unwrap(await commands.restartLanguageServer());
+    } catch (error: unknown) {
+      this.notify(`Restarting the TypeScript server failed: ${errorMessage(error)}`);
+    }
+  }
+
+  private renderProblemCounts(): void {
+    const { errors, warnings, other } = this.problems.counts();
+    this.statusProblems.replaceChildren();
+    const part = (cls: string, icon: string, count: number) => {
+      const span = el("span", `status-count ${cls}`);
+      span.textContent = `${icon} ${String(count)}`;
+      return span;
+    };
+    this.statusProblems.append(part("errors", "✖", errors), part("warnings", "▲", warnings));
+    if (other > 0) this.statusProblems.append(part("other", "ℹ", other));
+    this.statusProblems.setAttribute(
+      "aria-label",
+      `Problems: ${String(errors)} errors, ${String(warnings)} warnings`,
+    );
+    this.statusProblems.dataset.errors = String(errors);
+    this.statusProblems.dataset.warnings = String(warnings);
+    this.statusProblems.hidden = !this.hasProject;
+  }
+
   private onIndexStatus(state: IndexState): void {
     this.statusIndex.textContent = state.indexing ? "Indexing…" : "";
     this.statusIndex.title = state.indexing
@@ -354,6 +449,10 @@ export class Workbench implements PaneHost, DocHost {
       this.tree.setRoot(unwrap(await commands.listDir("")));
       this.notify("");
       this.renderWelcome(project.name);
+      this.problems.setAll(unwrap(await commands.problems()));
+      const servers = unwrap(await commands.languageServers());
+      const server = servers[0];
+      if (server) this.onServerStatus(server);
     } catch (error: unknown) {
       this.notify(`Cannot open ${path}: ${errorMessage(error)}`);
     }
@@ -449,6 +548,9 @@ export class Workbench implements PaneHost, DocHost {
     for (const doc of this.docs.values()) doc.destroy();
     this.docs.clear();
     this.focusedGroup = this.createGroup();
+    this.problems.setAll([]);
+    this.serverStatus = null;
+    this.statusServer.hidden = true;
     this.updateChrome();
   }
 
@@ -474,6 +576,47 @@ export class Workbench implements PaneHost, DocHost {
 
   onError(doc: DocModel, message: string): void {
     this.notify(`${doc.name}: ${message}`);
+  }
+
+  navigate(pane: EditorPane, kind: NavKind, pos: number | null): void {
+    const label =
+      kind === "definition"
+        ? "declaration"
+        : kind === "typeDefinition"
+          ? "type declaration"
+          : "implementation";
+    void (async () => {
+      let targets: NavTarget[];
+      try {
+        targets = await pane.doc.navigate(pane, kind, pos);
+      } catch (error: unknown) {
+        this.notify(errorMessage(error));
+        return;
+      }
+      const [first] = targets;
+      if (!first) {
+        this.notify(`No ${label} found.`);
+        return;
+      }
+      if (targets.length === 1) {
+        this.openTarget(first);
+        return;
+      }
+      this.showPopup(
+        new NavChooser(`Choose ${label}`, targets, (target) => {
+          this.openTarget(target);
+        }),
+      );
+    })();
+  }
+
+  private openTarget(target: NavTarget): void {
+    if (!target.inProject) {
+      this.notify(`${target.path} is outside the project; opening it is not supported yet.`);
+      return;
+    }
+    this.notify("");
+    this.openLocation(target.path, target.line, target.column);
   }
 
   closePane(pane: EditorPane): void {
@@ -612,7 +755,7 @@ export class Workbench implements PaneHost, DocHost {
     this.welcome.replaceChildren(title, hint);
   }
 
-  private notify(message: string): void {
+  notify(message: string): void {
     this.statusNotice.textContent = message;
   }
 }
