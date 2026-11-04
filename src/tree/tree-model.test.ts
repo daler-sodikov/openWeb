@@ -7,11 +7,13 @@ const dir = (path: string): DirEntry => ({
   name: path.split("/").pop() ?? path,
   path,
   kind: "directory",
+  ignored: false,
 });
 const file = (path: string): DirEntry => ({
   name: path.split("/").pop() ?? path,
   path,
   kind: "file",
+  ignored: false,
 });
 
 describe("flattenTree", () => {

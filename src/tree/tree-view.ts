@@ -130,6 +130,10 @@ export class TreeView {
     const el = document.createElement("div");
     el.className = `tree-row tree-${entry.kind}`;
     if (entry.path === this.selected) el.classList.add("selected");
+    if (entry.ignored) {
+      el.classList.add("ignored");
+      el.dataset.ignored = "true";
+    }
     el.setAttribute("role", "treeitem");
     el.setAttribute("aria-level", String(row.depth + 1));
     el.setAttribute("aria-selected", String(entry.path === this.selected));

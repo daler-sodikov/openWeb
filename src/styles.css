@@ -616,3 +616,9 @@ button {
 .status-index {
   color: var(--fr-text-muted);
 }
+
+/* Ignored entries in the project tree */
+.tree-row.ignored .tree-label {
+  color: var(--fr-text-muted);
+  opacity: 0.7;
+}
