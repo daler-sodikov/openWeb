@@ -73,7 +73,7 @@ ferrule-app (src-tauri) ──► core ──► ipc
 | `lang-css`    | CSS/SCSS/LESS grammars, queries and in-process features.                                                                                                                                     | `syntax`                            |
 | `lang-html`   | HTML (later Vue/Svelte embedding) grammars, queries and in-process features.                                                                                                                 | `syntax`                            |
 | `indexer`     | Incremental project indexing: file list, symbols, on-disk cache, invalidation on file change.                                                                                                | `project`, `vfs`, `lang-*`          |
-| `search`      | Fuzzy matching for files/symbols/actions, regex text search and replace across files, Search Everywhere aggregation and ranking.                                                             | `indexer`, `vfs`                    |
+| `search`      | Fuzzy matching (camel humps, path segments) and regex text search/replace. Pure functions over caller-provided text, so unsaved buffers are searched like files.                             | none                                |
 | `lsp-client`  | Generic LSP client: process lifecycle, JSON-RPC framing, requests with cancellation, notifications, debounced `didChange`, capability negotiation. Knows nothing about specific servers.     | none                                |
 | `dap-client`  | Generic Debug Adapter Protocol client mirroring `lsp-client`, plus a Chrome DevTools Protocol client for browser/Node debugging.                                                             | none                                |
 | `git`         | Status, diff, blame, log, branches, commit, conflicts. Read paths via `gix`; write paths may shell out to the `git` binary.                                                                  | `vfs`                               |
@@ -137,28 +137,41 @@ Rules that follow from the graph:
 - `ipc::PROTOCOL_VERSION` is returned by `app_info`; the frontend refuses to
   run against a mismatched backend.
 
-### 3.4 Command surface (M1)
+### 3.4 Command surface (M1, M2)
 
-All commands are request/response. M1 needs no Rust → frontend push events:
-the view pulls highlights and receives Rust-originated edits (undo/redo) as
-command responses. Push events arrive with file watching in M2.
+Commands are request/response. Rust → frontend **events** (M2, tauri-specta
+typed): `fs-changed` (`FsChangeBatch`: paths created/changed/removed on disk)
+and `index-status` (`IndexState`). Every edit to a document is still
+initiated by the view through its serialized queue (4.2): an event only
+tells the view that something changed, and the view then asks Rust
+(`reload_document`, `disk_changed`). Per-request channels are not used yet:
+Search Everywhere and Find in Files are request/response, and a newer Find
+request cancels an older one in Rust (the headless test bridge has no
+channel transport; it serves events through a long-poll endpoint).
 
-| Command                                                                        | Returns                | Purpose                                                  |
-| ------------------------------------------------------------------------------ | ---------------------- | -------------------------------------------------------- |
-| `app_info`                                                                     | `AppInfo`              | Product name/version; protocol check.                    |
-| `report_frontend_ready(report)`                                                | `()`                   | Startup report; used by the smoke test (section 7).      |
-| `initial_project`                                                              | `string \| null`       | Folder passed on the command line (`ferrule <path>`).    |
-| `open_project(path)`                                                           | `ProjectInfo`          | Opens a folder (replaces the current one).               |
-| `list_dir(path)`                                                               | `DirEntry[]`           | Lazy tree listing; `path` is project-relative with `/`.  |
-| `open_document(path)`                                                          | `OpenedDocument`       | Text, version, language, dirty/restored flags.           |
-| `apply_changes(docId, baseVersion, transactions)`                              | `DocVersion`           | Local edits from the view (4.2).                         |
-| `undo` / `redo(docId, version)`                                                | `RemoteUpdate \| null` | Edits + selection computed by Rust.                      |
-| `add_carets(docId, version, selection, direction)`                             | `Selection`            | Clone carets above/below.                                |
-| `select_next_occurrence` / `select_all_occurrences(docId, version, selection)` | `Selection`            | Multi-cursor selection commands.                         |
-| `highlights(docId, from, to)`                                                  | `Highlights`           | Token spans for a range, for the current version.        |
-| `save_document(docId)`                                                         | `DocVersion`           | Atomic save; clears the recovery file.                   |
-| `close_document(docId)`                                                        | `()`                   | Closes the tab; unsaved text stays in the recovery file. |
-| `keymap`                                                                       | `KeyBinding[]`         | IntelliJ-style key bindings resolved in `settings`.      |
+| Command                                                                        | Returns                | Purpose                                                                       |
+| ------------------------------------------------------------------------------ | ---------------------- | ----------------------------------------------------------------------------- |
+| `app_info`                                                                     | `AppInfo`              | Product name/version; protocol check.                                         |
+| `report_frontend_ready(report)`                                                | `()`                   | Startup report; used by the smoke test (section 7).                           |
+| `initial_project`                                                              | `string \| null`       | Folder passed on the command line (`ferrule <path>`).                         |
+| `open_project(path)`                                                           | `ProjectInfo`          | Opens a folder (replaces the current one).                                    |
+| `list_dir(path)`                                                               | `DirEntry[]`           | Lazy tree listing; `path` is project-relative with `/`.                       |
+| `open_document(path)`                                                          | `OpenedDocument`       | Text, version, language, dirty/restored flags.                                |
+| `apply_changes(docId, baseVersion, transactions)`                              | `DocVersion`           | Local edits from the view (4.2).                                              |
+| `undo` / `redo(docId, version)`                                                | `RemoteUpdate \| null` | Edits + selection computed by Rust.                                           |
+| `add_carets(docId, version, selection, direction)`                             | `Selection`            | Clone carets above/below.                                                     |
+| `select_next_occurrence` / `select_all_occurrences(docId, version, selection)` | `Selection`            | Multi-cursor selection commands.                                              |
+| `highlights(docId, from, to)`                                                  | `Highlights`           | Token spans for a range, for the current version.                             |
+| `save_document(docId)`                                                         | `DocVersion`           | Atomic save; clears the recovery file.                                        |
+| `close_document(docId)`                                                        | `()`                   | Closes the tab; unsaved text stays in the recovery file.                      |
+| `keymap`                                                                       | `KeyBinding[]`         | IntelliJ-style key bindings resolved in `settings`.                           |
+| `new_line(docId, version, selection)`                                          | `RemoteUpdate`         | Enter: newline + language-aware indentation in Rust, recorded as typing (M2). |
+| `reload_document(docId, version)`                                              | `DocumentReload`       | Replace the buffer with the file on disk, one undoable step (M2).             |
+| `disk_changed(docId)`                                                          | `bool`                 | Whether the file differs from the last loaded/saved text (M2).                |
+| `search_everywhere(query, tab)`                                                | `SearchResults`        | Files, symbols, actions (M2).                                                 |
+| `recent_files`                                                                 | `string[]`             | Recently opened files, persisted per project (M2).                            |
+| `find_in_files(search)`                                                        | `FindResults`          | Text/regex search with optional replacement preview (M2).                     |
+| `replace_in_files(search, replacement)`                                        | `ReplaceResult`        | Rewrites closed files; returns edits for open documents (M2).                 |
 
 The native folder picker is a Tauri dialog plugin call made by the view; it
 only returns a path, which then goes through `open_project`.
@@ -253,20 +266,38 @@ is a **replica** that follows the authority model of `@codemirror/collab`
 
 ### 4.4 Search Everywhere (double Shift)
 
-1. The keymap is resolved in `settings` and sent to the view at startup as
-   an action table; double Shift maps to `search_everywhere`. Detecting the
-   double tap is input handling and lives in the view.
-2. Each keystroke in the popup calls
-   `search_everywhere(query, tab, channel)`. `core` cancels the previous
-   query's token, then runs providers in parallel: files (`indexer` file
-   list + `search` fuzzy matcher), symbols (`indexer`), actions (action
-   registry), settings, and later text matches.
-3. Each provider streams ranked batches over the channel as soon as it has
-   them (`SearchBatch { queryId, provider, items }`). The view drops
-   batches with a stale `queryId`. Files usually arrive within
-   milliseconds; slower providers fill in.
-4. The result list is virtualized. Choosing an item calls
-   `open_location(target)`, which goes through 4.2 and reveals the range.
+As built in M2:
+
+1. The keymap is resolved in `settings` and sent to the view at startup;
+   double Shift is a `DoubleTap(Shift)` stroke. Detecting the tap is input
+   handling in the view; global chords (Go to File, Find in Files, ...) are
+   matched in the view against the same keymap.
+2. Each keystroke calls `search_everywhere(query, tab)`. `core` ranks the
+   in-memory index with the `search` fuzzy matcher: files (file name first,
+   then path), symbols (from the grammars' tags queries), actions. The All
+   tab returns the top items of each kind; an empty query returns recent
+   files and all actions. The view drops responses of superseded keystrokes.
+3. Choosing an item opens the file (4.2) and moves the caret to the symbol;
+   actions run in the view (popups) or as Rust commands (editor actions).
+
+Indexing (`indexer`): after `open_project`, a blocking task walks the
+project honouring `.gitignore` (and always skipping `.git`/`node_modules`),
+reuses cached entries whose mtime and size are unchanged, parses the rest in
+parallel for symbols, saves the cache under the app data directory, and
+emits `index-status`. Searches before it finishes report `indexing: true`.
+
+### 4.5 Files changed on disk (M2)
+
+1. After indexing, `vfs::Watcher` watches every indexed directory
+   non-recursively (excluded trees never use OS watches) and delivers
+   debounced batches of paths.
+2. `core` updates the index (new directories get watched), saves the cache
+   and emits `fs-changed`.
+3. The view re-lists affected tree directories. For an open file: if the tab
+   is unmodified it calls `reload_document` (a no-op when the text is
+   unchanged, e.g. after our own save); if it is modified it calls
+   `disk_changed` and, only if the disk really differs from the last saved
+   text, shows **Reload** / **Keep my changes**.
 
 ## 5. Editor view layer: CodeMirror 6 as a view only
 
@@ -300,6 +331,9 @@ Costs we accept:
   read-only with Rust-driven paging.
 - The rebase path needs careful tests (golden tests for interleaved local
   and authority edits in M1).
+- Enter round-trips to Rust (M2) so indentation logic stays out of the
+  view. Keys pressed while it is in flight are deferred and replayed after
+  the newline is applied, so fast typing keeps its order.
 
 ## 6. Concurrency, cancellation and data safety
 
@@ -382,7 +416,7 @@ Detailed task lists live in [ROADMAP.md](ROADMAP.md).
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **M0** Foundation              | This document, workspace skeleton (all crates compile, empty), Tauri v2 + Vite + Bun shell, typed IPC pipeline, licenses and community docs, CI on Linux/macOS/Windows.                                           | All Rust and frontend checks pass with zero warnings; the app opens a window showing the product name and version fetched over typed IPC; the e2e smoke test passes.                   |
 | **M1** Editor core             | Window layout, project tree (virtualized, lazy), tabs, rope buffer with undo/redo and multi-cursor, CodeMirror replica protocol, tree-sitter highlighting for JS/TS/JSX/TSX/CSS/HTML/JSON, save + recovery files. | See the concrete checklist in [ROADMAP.md, M1](ROADMAP.md#m1-editor-core).                                                                                                             |
-| **M2** Navigation and search   | File/symbol index with on-disk cache, Search Everywhere, Go to File/Symbol/Line, Recent Files, Find/Replace in Files (regex), breadcrumbs, folding.                                                               | Double Shift finds files and symbols in `fixtures/` in under 50 ms on a warm index; Find in Files with regex and replace preview works; Playwright covers each popup.                  |
+| **M2** Search and navigation   | File/symbol index with on-disk cache, Search Everywhere, Go to File/Symbol/Line, Recent Files, Find/Replace in Files (regex), file watching, Rust indentation.                                                    | See [ROADMAP.md, M2](ROADMAP.md#m2-search-and-navigation). Breadcrumbs, folding and the rest moved to M2b.                                                                             |
 | **M3** TypeScript intelligence | `lsp-client`, vtsls integration, completion, parameter hints, quick docs, go to definition/type/implementation, find usages, rename, diagnostics, Alt+Enter quick fixes, auto-import, ESLint + Prettier.          | On `fixtures/react-ts`: completion, go to definition, cross-file rename and diagnostics work end to end; LSP client tests run against a fake server; refactor edits have golden tests. |
 | **M4** Terminal and Git        | Integrated terminal (PTY), Git status in tree, commit, diff, blame, branches, log.                                                                                                                                | A shell runs in the terminal tool window on all three OSes; a change can be committed and its diff and log entry viewed from the UI; Git tests use temporary repositories.             |
 | **M5** Run, debug, tests       | Run configurations (Node, npm scripts), Jest/Vitest/Playwright runners with gutter icons, debugger UI over DAP/CDP.                                                                                               | An npm script and a Vitest suite run from the gutter; a breakpoint in a Node script stops and shows variables.                                                                         |
