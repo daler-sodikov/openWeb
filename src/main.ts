@@ -1,7 +1,9 @@
 import "./styles.css";
 
-import { renderFatal, renderShell, renderedAppName } from "./app/shell";
+import { renderFatal, renderedAppName } from "./app/shell";
+import { Workbench } from "./app/workbench";
 import { PROTOCOL_VERSION, commands } from "./ipc/bindings";
+import { unwrap } from "./ipc/result";
 
 async function main(root: HTMLElement): Promise<void> {
   const info = await commands.appInfo();
@@ -12,16 +14,24 @@ async function main(root: HTMLElement): Promise<void> {
     );
     return;
   }
-  renderShell(root, info);
+  document.title = info.name;
+  const workbench = new Workbench(root, info, await commands.keymap());
 
-  const result = await commands.reportFrontendReady({
+  const report = await commands.reportFrontendReady({
     renderedAppName: renderedAppName(root),
     documentTitle: document.title,
     protocolVersion: PROTOCOL_VERSION,
   });
-  if (result.status === "error") {
-    renderFatal(root, result.error.message);
+  if (report.status === "error") {
+    renderFatal(root, report.error.message);
+    return;
   }
+
+  // `?project=<path>` is used by the UI tests (the browser has no folder
+  // dialog); the desktop app passes the command-line folder instead.
+  const fromUrl = new URLSearchParams(window.location.search).get("project");
+  const initial = fromUrl ?? unwrap(await commands.initialProject());
+  if (initial) await workbench.openProject(initial);
 }
 
 const root = document.getElementById("app");

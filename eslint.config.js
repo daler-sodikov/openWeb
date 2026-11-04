@@ -16,6 +16,7 @@ export default defineConfig(
       "src/ipc/bindings.ts",
       "test-results/",
       "playwright-report/",
+      "fixtures/",
     ],
   },
   js.configs.recommended,
@@ -25,8 +26,8 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         projectService: {
-          // Config files and e2e tests are typed by tsconfig.node.json.
-          allowDefaultProject: ["*.config.ts", "eslint.config.js", "e2e/*.ts"],
+          // Root config files are typed by tsconfig.node.json; e2e/ has its own tsconfig.
+          allowDefaultProject: ["*.config.ts", "eslint.config.js"],
           defaultProject: "tsconfig.node.json",
         },
         tsconfigRootDir: import.meta.dirname,

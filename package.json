@@ -12,13 +12,18 @@
     "lint": "bun run gen:ipc && eslint . --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "bun run gen:ipc && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "bun run gen:ipc && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p e2e",
     "test": "bun run gen:ipc && vitest run",
     "e2e": "playwright test",
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2"
+    "@codemirror/collab": "^6",
+    "@codemirror/commands": "^6",
+    "@codemirror/state": "^6",
+    "@codemirror/view": "^6",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

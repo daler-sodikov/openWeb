@@ -1,23 +1,68 @@
-/* Ferrule original theme tokens. Dark is the default; light follows the OS. */
+/* Ferrule original theme. Dark is the default; light follows the OS. */
 :root {
   color-scheme: dark light;
   --fr-bg: #16181d;
   --fr-surface: #1e2128;
+  --fr-surface-2: #252932;
+  --fr-border: #2e333d;
   --fr-text: #d9dde6;
   --fr-text-muted: #8a91a0;
   --fr-accent: #d08a3a;
+  --fr-selection: #2f4a6d;
+  --fr-active-line: #1c1f26;
   --fr-danger: #e0645c;
   --fr-font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  --fr-font-code:
+    ui-monospace, "SFMono-Regular", "Cascadia Code", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+
+  /* Syntax tokens (original palette). */
+  --tok-keyword: #e07a9a;
+  --tok-string: #7fc8a9;
+  --tok-string-special: #5fd0d0;
+  --tok-escape: #f0a35e;
+  --tok-number: #e6a96b;
+  --tok-constant: #d89be0;
+  --tok-comment: #7a8394;
+  --tok-function: #7fb4ff;
+  --tok-type: #5fd0d0;
+  --tok-variable-builtin: #d89be0;
+  --tok-parameter: #c4b5fd;
+  --tok-property: #a9c1e0;
+  --tok-operator: #9aa3b2;
+  --tok-punctuation: #7e8697;
+  --tok-tag: #e07a9a;
+  --tok-attribute: #e6a96b;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
     --fr-bg: #f6f5f2;
     --fr-surface: #ffffff;
+    --fr-surface-2: #eceae5;
+    --fr-border: #d9d6cf;
     --fr-text: #1f2329;
     --fr-text-muted: #5d6470;
     --fr-accent: #9a5a12;
+    --fr-selection: #c7dbf5;
+    --fr-active-line: #f1efe9;
     --fr-danger: #b3261e;
+
+    --tok-keyword: #b4235a;
+    --tok-string: #2f7d5b;
+    --tok-string-special: #007f86;
+    --tok-escape: #b45309;
+    --tok-number: #a35a00;
+    --tok-constant: #8a3fa0;
+    --tok-comment: #737b8c;
+    --tok-function: #1d5fbf;
+    --tok-type: #007f86;
+    --tok-variable-builtin: #8a3fa0;
+    --tok-parameter: #5b3fb0;
+    --tok-property: #345b88;
+    --tok-operator: #4b5563;
+    --tok-punctuation: #6b7280;
+    --tok-tag: #b4235a;
+    --tok-attribute: #a35a00;
   }
 }
 
@@ -37,33 +82,255 @@ body {
   color: var(--fr-text);
   font-family: var(--fr-font-ui);
   font-size: 13px;
+  overflow: hidden;
 }
 
-.shell-main {
-  display: flex;
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.workbench {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
   height: 100%;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
 }
 
-.shell-header {
+.toolbar {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--fr-border);
+  background: var(--fr-surface);
 }
 
-.shell-name {
-  margin: 0;
-  font-size: 28px;
+.toolbar-brand {
   font-weight: 600;
   color: var(--fr-accent);
 }
 
-.shell-version,
-.shell-status {
+.toolbar-button {
+  padding: 3px 10px;
+  border: 1px solid var(--fr-border);
+  border-radius: 4px;
+  background: var(--fr-surface-2);
+  cursor: pointer;
+}
+
+.toolbar-button:hover {
+  border-color: var(--fr-accent);
+}
+
+.toolbar-project {
   color: var(--fr-text-muted);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 0;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--fr-border);
+  background: var(--fr-surface);
+}
+
+.panel-title {
+  padding: 6px 10px;
+  color: var(--fr-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tree {
+  position: relative;
+  flex: 1;
+  overflow: auto;
+  outline: none;
+}
+
+.tree-spacer {
+  position: relative;
+  min-height: 100%;
+}
+
+.tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tree-row:hover {
+  background: var(--fr-surface-2);
+}
+
+.tree-row.selected {
+  background: var(--fr-selection);
+}
+
+.tree-twisty {
+  width: 12px;
+  flex: none;
+  text-align: center;
+  color: var(--fr-text-muted);
+}
+
+.tree-twisty.closed::before {
+  content: "▸";
+}
+
+.tree-twisty.open::before {
+  content: "▾";
+}
+
+.tree-directory .tree-label {
+  font-weight: 500;
+}
+
+.main {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.tabs {
+  display: flex;
+  overflow-x: auto;
+  background: var(--fr-surface);
+  border-bottom: 1px solid var(--fr-border);
+  min-height: 30px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 0 12px;
+  border-right: 1px solid var(--fr-border);
+  color: var(--fr-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab.active {
+  color: var(--fr-text);
+  background: var(--fr-bg);
+  box-shadow: inset 0 -2px 0 var(--fr-accent);
+}
+
+.tab-dirty {
+  color: var(--fr-accent);
+  font-size: 10px;
+}
+
+.tab-close {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  cursor: pointer;
+  color: var(--fr-text-muted);
+}
+
+.tab-close:hover {
+  color: var(--fr-text);
+}
+
+.editors {
+  position: relative;
+  min-height: 0;
+}
+
+.editor-host {
+  position: absolute;
+  inset: 0;
+}
+
+.editor-host[hidden] {
+  display: none;
+}
+
+.editor-host .cm-editor {
+  height: 100%;
+  font-family: var(--fr-font-code);
+  font-size: 13px;
+}
+
+.editor-host .cm-scroller {
+  font-family: var(--fr-font-code);
+  line-height: 1.5;
+}
+
+.cm-editor .cm-gutters {
+  background: var(--fr-bg);
+  color: var(--fr-text-muted);
+  border-right: 1px solid var(--fr-border);
+}
+
+.cm-editor .cm-activeLine,
+.cm-editor .cm-activeLineGutter {
+  background: var(--fr-active-line);
+}
+
+.cm-editor .cm-cursor {
+  border-left-color: var(--fr-text);
+}
+
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused .cm-selectionBackground {
+  background: var(--fr-selection);
+}
+
+.welcome {
+  position: absolute;
+  inset: 30px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--fr-text-muted);
+}
+
+.welcome[hidden] {
+  display: none;
+}
+
+.welcome-title {
+  margin: 0 0 6px;
+  font-size: 18px;
+  color: var(--fr-text);
+}
+
+.status {
+  display: flex;
+  gap: 16px;
+  padding: 3px 10px;
+  border-top: 1px solid var(--fr-border);
+  background: var(--fr-surface);
+  color: var(--fr-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.status-notice {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fr-accent);
 }
 
 .shell-fatal {
@@ -72,4 +339,55 @@ body {
   border-left: 3px solid var(--fr-danger);
   background: var(--fr-surface);
   white-space: pre-wrap;
+}
+
+/* Syntax tokens from tree-sitter (classes set by src/editor/highlight.ts). */
+.tok-keyword {
+  color: var(--tok-keyword);
+}
+.tok-string {
+  color: var(--tok-string);
+}
+.tok-stringSpecial {
+  color: var(--tok-string-special);
+}
+.tok-escape {
+  color: var(--tok-escape);
+}
+.tok-number {
+  color: var(--tok-number);
+}
+.tok-constant {
+  color: var(--tok-constant);
+}
+.tok-comment {
+  color: var(--tok-comment);
+  font-style: italic;
+}
+.tok-function {
+  color: var(--tok-function);
+}
+.tok-type {
+  color: var(--tok-type);
+}
+.tok-variableBuiltin {
+  color: var(--tok-variable-builtin);
+}
+.tok-parameter {
+  color: var(--tok-parameter);
+}
+.tok-property {
+  color: var(--tok-property);
+}
+.tok-operator {
+  color: var(--tok-operator);
+}
+.tok-punctuation {
+  color: var(--tok-punctuation);
+}
+.tok-tag {
+  color: var(--tok-tag);
+}
+.tok-attribute {
+  color: var(--tok-attribute);
 }

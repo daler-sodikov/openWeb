@@ -1,0 +1,36 @@
+// IntelliJ-style "double-tap a modifier, keep holding, press a key" gesture
+// (used for clone caret above/below). Pure input handling for the view.
+
+/** Maximum delay between releasing the modifier and pressing it again. */
+export const DOUBLE_TAP_MS = 400;
+
+export type GestureModifier = "Control" | "Alt";
+
+export class DoubleModifierGesture {
+  private lastRelease = new Map<string, number>();
+  private armed: string | null = null;
+  private dirty = false;
+
+  /** Feed every keydown. Returns true if `key` completes an armed gesture for `modifier`. */
+  keydown(key: string, now: number): string | null {
+    if (key === "Control" || key === "Alt") {
+      const released = this.lastRelease.get(key);
+      this.armed = released !== undefined && now - released <= DOUBLE_TAP_MS ? key : null;
+      this.dirty = false;
+      return null;
+    }
+    this.dirty = true;
+    return this.armed;
+  }
+
+  /** Feed every keyup. */
+  keyup(key: string, now: number): void {
+    if (key === "Control" || key === "Alt") {
+      // A modifier used in a chord (e.g. Ctrl+C) does not count as a tap.
+      if (this.dirty) this.lastRelease.delete(key);
+      else this.lastRelease.set(key, now);
+      if (this.armed === key) this.armed = null;
+      this.dirty = false;
+    }
+  }
+}
