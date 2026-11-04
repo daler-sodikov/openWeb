@@ -6,7 +6,44 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Added
+### Added (M1: editor core)
+
+- Project view: Open Folder (native dialog) or `ferrule <folder>`; lazy,
+  virtualized project tree (directories first, `.git` hidden) with keyboard
+  navigation.
+- Editor tabs with one CodeMirror 6 view each, used as a view-only replica of
+  the Rust buffer through a collab-style versioned protocol.
+- `ferrule-buffer`: rope buffer with UTF-16 transactions, versions, undo/redo
+  with typing groups, selection restore and multi-cursor commands (clone
+  caret, select next/all occurrences).
+- `ferrule-vfs`: UTF-8/BOM/CRLF-aware loading, atomic saves that keep line
+  endings and permissions, crash-recovery files (written 1 s after the last
+  edit, restored on reopen or after a crash).
+- `ferrule-syntax` + `lang-js`/`lang-css`/`lang-html`: incremental
+  tree-sitter highlighting for TS, TSX, JS/JSX, JSON, CSS and HTML, with
+  golden tests; original token color theme (dark and light).
+- `ferrule-settings`: IntelliJ-style key bindings (save, undo/redo, clone
+  caret via double-tap Ctrl/Option, Alt+J, Ctrl+Alt+Shift+J, close tab).
+- `ferrule-core` `Session` and 14 typed IPC commands.
+- Tests: Rust unit/integration tests for every crate above, Vitest for view
+  helpers, and Playwright `ui` tests (Chromium + Vite + `ferrule-headless`,
+  a mock-runtime build of the real command handler) on `fixtures/react-ts`.
+
+### Fixed
+
+- Windows CI: test binaries linking Tauri failed to start
+  (`STATUS_ENTRYPOINT_NOT_FOUND`); the Common Controls manifest is now
+  embedded into every binary of `ferrule-app`.
+- Production CSP blocked CodeMirror's injected styles (broken editor layout
+  in the real app); `style-src` now allows inline styles.
+
+### Changed
+
+- IPC protocol version 2. Repository URL and code-of-conduct contact set.
+- CI actions moved off the deprecated Node 20 versions; CI installs
+  Chromium for the `ui` tests and lints the `headless` feature.
+
+### Added (M0: foundation)
 
 - M0 foundation: architecture document (`docs/ARCHITECTURE.md`) and roadmap.
 - Cargo workspace with all domain crates (empty), `ferrule-ipc` DTOs and

@@ -220,7 +220,8 @@ Update this section at the end of every milestone.
 - [x] M0: docs/ARCHITECTURE.md, workspace skeleton, CI, licenses
       (2026-11-04; all checks pass locally on Linux, CI not yet run on GitHub;
       open follow-ups in docs/ROADMAP.md)
-- [ ] M1: window, project tree, tabs, rope buffer, highlighting
+- [x] M1: window, project tree, tabs, rope buffer, highlighting
+      (2026-11-04; checks pass locally on Linux; see docs/ROADMAP.md M1)
 - [ ] M2: search (files, symbols, text), Search Everywhere
 - [ ] M3: LSP client + TypeScript intelligence
 - [ ] M4: terminal, Git basics

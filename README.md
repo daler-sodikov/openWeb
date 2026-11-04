@@ -7,9 +7,10 @@ Rust core with a thin Tauri v2 + TypeScript view layer.
 
 **Not affiliated with JetBrains.**
 
-> Status: **Milestone 0 (foundation)**. The app opens a window and talks to
-> its Rust core over typed IPC. There is no editor yet. See
-> [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: **Milestone 1 (editor core)**. Open a folder, browse it, edit
+> files in tabs with tree-sitter highlighting, undo/redo and multi-cursor,
+> save, and recover unsaved text after a crash. No code intelligence yet.
+> See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Requirements
 
@@ -27,8 +28,9 @@ bun install
 bun tauri dev
 ```
 
-A window titled "Ferrule" opens and shows the product name and version that
-the frontend fetched from the Rust core.
+A window titled "Ferrule" opens. Click **Open Folder…** and pick a project
+(for example `fixtures/react-ts`), or pass a folder on the command line:
+`bun tauri dev -- -- /absolute/path/to/project`.
 
 ## Check
 
@@ -43,7 +45,8 @@ bun run format:check
 bun run typecheck
 bun run test
 
-bunx playwright test   # builds the app and runs the end-to-end smoke test
+bunx playwright install chromium   # once, for the UI tests
+bunx playwright test               # smoke test (real app) + UI tests (Chromium)
 ```
 
 On Linux without a display, run the end-to-end test under `xvfb-run -a`.
