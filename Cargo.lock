@@ -987,9 +987,12 @@ dependencies = [
  "ferrule-buffer",
  "ferrule-settings",
  "ferrule-vfs",
+ "globset",
  "ignore",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]
@@ -1014,6 +1017,8 @@ name = "ferrule-settings"
 version = "0.1.0"
 dependencies = [
  "globset",
+ "serde",
+ "serde_json",
  "tempfile",
  "tracing",
 ]

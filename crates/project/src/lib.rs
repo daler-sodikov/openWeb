@@ -7,8 +7,13 @@
 //!
 //! One root folder; `.git` is hidden, everything else is listed. Entries
 //! excluded by `.gitignore` files (at any level, the deepest decides) or
-//! inside `node_modules` are listed but marked as ignored. Workspaces and
-//! tsconfig discovery come later (`docs/ROADMAP.md`).
+//! inside `node_modules` are listed but marked as ignored.
+//! [`Project::detect_workspace`] finds `tsconfig`/`jsconfig` files and
+//! npm/yarn/pnpm/Bun workspace packages.
+
+mod workspace;
+
+pub use workspace::{PackageManager, Workspace};
 
 use std::cmp::Ordering;
 use std::fs;
