@@ -1,12 +1,15 @@
 //! Layered settings and keymap presets.
 //!
-//! Contents: the IntelliJ-style key bindings, and EditorConfig resolution
-//! ([`resolve_editorconfig`]). User/project settings files come later
+//! Contents: the IntelliJ-style key bindings, EditorConfig resolution
+//! ([`resolve_editorconfig`]) and the user settings file
+//! ([`load_user_settings`]). Project settings files come later
 //! (`docs/ROADMAP.md`).
 
 mod editorconfig;
+mod user;
 
 pub use editorconfig::{EditorConfig, EndOfLine, IndentStyle, resolve as resolve_editorconfig};
+pub use user::{UserSettings, load_user_settings};
 
 /// Editor actions that have key bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
