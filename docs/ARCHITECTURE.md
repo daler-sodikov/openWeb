@@ -590,18 +590,63 @@ paste, new tab) are handled by Ferrule; every other key reaches the shell.
 under the cell, which resolves it against the terminal's starting directory
 and the project root and only returns files that exist.
 
-**Git (M4b) data model and refresh.** `git` reads with `gix` (pure Rust:
-discovery, status of index vs HEAD and worktree vs index, diffs, blame,
-log) and runs the `git` executable for writes (commit, checkout, branch
-create/delete), so hooks, signing and the user's config behave as on the
-command line. Status is a map path → (index status, worktree status), with
-untracked, ignored, renamed and conflicted states, kept per repository in
-the project runtime. It is recomputed in the background (cancellable) after
-file-watcher batches, after Ferrule's own writes and when the window gains
-focus, debounced, and pushed as a `git-status` event; the tree and the
-editor gutter read from it. Nothing that needs the network or credentials
-(fetch, pull, push) runs without an explicit user action, and no
-credentials are stored.
+**Git (M4b): the `git` executable, not gix.** Every Git operation runs the
+user's `git` (found on `PATH`, setting `git.path`) with machine-readable
+output (`status --porcelain=v2 -z`, `blame --porcelain`, `for-each-ref`,
+`log` with separator bytes) and is parsed in `ferrule-git`. The M3 plan was
+gix for reads and `git` for writes; changed in M4b because:
+
+- exact parity with the command line for everything that shapes status and
+  commits: the user's config, `.gitattributes`, filters, LFS, hooks,
+  signing, `core.fsmonitor`, sparse checkouts;
+- one code path for reads and writes, so what Ferrule shows is what `git`
+  will act on;
+- gix and its ~60 crates were not available offline during M4 (see
+  ROADMAP, "M4 build workflow"), while `git` lets the whole crate be built
+  and tested against real repositories.
+
+Costs we accept: a process per request (status of a mid-size repository is
+tens of milliseconds; requests are debounced, run off the async workers and
+superseded ones are dropped), and `git` (≥ 2.25 for `switch`/`restore`)
+must be installed; without it the Git features say so and stay off.
+Commands run with `LC_ALL=C` (stable messages to classify errors),
+`GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0` for reads, and never with
+network-using subcommands: fetch, pull and push are not offered in M4b, and
+nothing reads or stores credentials.
+
+**Status model and refresh.** Status is a list of files (project-relative
+path, original path for renames, index and worktree change, and the derived
+kind: modified, added, deleted, renamed, untracked, ignored, conflicted) plus
+the folders containing changes and the ignored folders, and the branch
+(name or detached HEAD, upstream, ahead/behind). The project runtime keeps
+the latest one; it is recomputed after file-watcher batches, after
+Ferrule's own Git writes and saves, and when the window gains focus,
+debounced (200 ms), with a generation counter so a slower old run never
+overwrites a newer one; then it is pushed as the `git-status` event. The
+tree and the commit window read from it.
+
+**Line changes, rollback, diff, blame.** Line diffs are computed in Rust
+(Myers on interned lines; past a cap of differences the rest of a region
+becomes one hunk) between the open document's current text, unsaved edits
+included, and the index version of the file (`git show :path`, cached per
+status generation). Gutter markers are hunks (added, modified, deleted);
+rollback replaces a hunk with the index text as one edit to the document
+(one undo step). The diff viewer compares HEAD with the working tree and
+gets rows ready to draw from Rust (unified rows, or aligned side-by-side
+rows), with word-level ranges for modified lines. Blame runs
+`git blame --porcelain --contents -` on the document's current text, so
+lines match the editor.
+
+**Branches and commit.** Branches come from `for-each-ref` (local and
+remote). Checkout (`git switch`, `--track` for a remote branch) is refused
+while an open document has unsaved changes; `git` itself refuses when local
+changes would be overwritten, and that message is shown. Delete uses
+`branch -d` (refuses unmerged branches; the error says so). The commit window
+stages and unstages with `git add` / `git restore --staged` (`git rm
+--cached` before the first commit), saves dirty documents, then runs
+`git commit` (hooks run) with optional `--amend`. Missing
+`user.name`/`user.email`, failing hooks and empty commits are recognized and
+reported in plain words.
 
 **IPC (M4).** Terminal commands: `terminal_open(shell?)` →
 `TerminalInfo` (id, title, shell, cwd), `terminal_input(id, text)`,
@@ -610,8 +655,13 @@ credentials are stored.
 `terminal_select(id, from, to, kind)`, `terminal_selection_text(id)`,
 `terminal_link_at(id, row, col)`, `terminal_rename(id, title)`,
 `terminal_close(id)`, `terminal_ack(id, seq)`, `terminals()`. Events:
-`terminal-frame` (`TerminalFrame`) and `terminal-exited`. Git commands and
-the `git-status` event are specified with M4b.
+`terminal-frame-event` (`TerminalFrame`) and `terminal-exited-event`.
+Git commands: `git_status`, `git_refresh`, `git_line_changes(doc)`,
+`git_rollback_hunk(doc, version, hunk)`, `git_diff(path, mode)`,
+`git_blame(doc)`, `git_log(path?)`, `git_branches`, `git_checkout`,
+`git_create_branch`, `git_delete_branch`, `git_stage`, `git_unstage`,
+`git_commit(message, amend)`, `git_last_commit_message`. Event:
+`git-status-event` (`GitStatus`).
 
 ## 5. Editor view layer: CodeMirror 6 as a view only
 
