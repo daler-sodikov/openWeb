@@ -135,6 +135,13 @@ pub trait ClientHooks: Send + Sync + 'static {
     fn started(&self, generation: u64);
     /// A notification from the server (`$/progress` is also handled here).
     fn notification(&self, method: &str, params: &Value);
+    /// A request from the server the client wants to answer itself (e.g.
+    /// `workspace/applyEdit`); `None` falls back to the built-in answers.
+    /// Called on the reader task: must not block.
+    fn request(&self, method: &str, params: &Value) -> Option<Result<Value, ResponseError>> {
+        let _ = (method, params);
+        None
+    }
 }
 
 /// A supervised server. Cheap to clone; the server stops when the last
@@ -575,6 +582,9 @@ impl Incoming for Router {
         let Some(shared) = self.shared.upgrade() else {
             return Err(ResponseError::method_not_found(method));
         };
+        if let Some(answer) = shared.hooks.request(method, &params) {
+            return answer;
+        }
         match method {
             // No client-side settings yet: every item is "not set".
             "workspace/configuration" => {
@@ -589,10 +599,11 @@ impl Incoming for Router {
             | "window/workDoneProgress/create"
             | "window/showMessageRequest" => Ok(Value::Null),
             "workspace/workspaceFolders" => Ok(Value::Array(workspace_folders(&shared.config))),
-            // Workspace edits from the server arrive with M3b (rename, code actions).
+            // Only accepted while the client runs a command that asked for it
+            // (see ClientHooks::request).
             "workspace/applyEdit" => Ok(json!({
                 "applied": false,
-                "failureReason": "workspace edits are not supported yet"
+                "failureReason": "the editor did not expect a workspace edit now"
             })),
             _ => Err(ResponseError::method_not_found(method)),
         }
@@ -630,7 +641,13 @@ fn client_capabilities() -> Value {
         "workspace": {
             "workspaceFolders": true,
             "configuration": true,
-            "applyEdit": false,
+            "applyEdit": true,
+            "workspaceEdit": {
+                "documentChanges": true,
+                "resourceOperations": [],
+                "failureHandling": "abort"
+            },
+            "executeCommand": { "dynamicRegistration": false },
             "didChangeWatchedFiles": { "dynamicRegistration": true }
         },
         "textDocument": {
@@ -648,7 +665,45 @@ fn client_capabilities() -> Value {
             "hover": { "contentFormat": ["markdown", "plaintext"] },
             "definition": { "linkSupport": true },
             "typeDefinition": { "linkSupport": true },
-            "implementation": { "linkSupport": true }
+            "implementation": { "linkSupport": true },
+            "references": {},
+            "completion": {
+                "contextSupport": true,
+                "completionItem": {
+                    "snippetSupport": true,
+                    "deprecatedSupport": true,
+                    "tagSupport": { "valueSet": [1] },
+                    "labelDetailsSupport": true,
+                    "insertReplaceSupport": false,
+                    "documentationFormat": ["markdown", "plaintext"],
+                    "resolveSupport": {
+                        "properties": ["documentation", "detail", "additionalTextEdits"]
+                    }
+                }
+            },
+            "signatureHelp": {
+                "contextSupport": true,
+                "signatureInformation": {
+                    "documentationFormat": ["markdown", "plaintext"],
+                    "parameterInformation": { "labelOffsetSupport": true },
+                    "activeParameterSupport": true
+                }
+            },
+            "rename": { "prepareSupport": true },
+            "codeAction": {
+                "isPreferredSupport": true,
+                "disabledSupport": true,
+                "dataSupport": true,
+                "resolveSupport": { "properties": ["edit"] },
+                "codeActionLiteralSupport": {
+                    "codeActionKind": {
+                        "valueSet": ["quickfix", "refactor", "refactor.extract",
+                            "refactor.inline", "refactor.rewrite", "source",
+                            "source.organizeImports"]
+                    }
+                }
+            },
+            "formatting": {}
         }
     })
 }

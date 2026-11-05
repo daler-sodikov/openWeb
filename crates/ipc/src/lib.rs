@@ -10,7 +10,7 @@ use specta::Type;
 
 /// Version of the IPC protocol. Bump on any breaking change to a command,
 /// event or DTO so that a mismatched frontend refuses to run.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Operating system the backend runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -156,6 +156,8 @@ pub struct OpenedDocument {
     pub tab_width: u32,
     /// Pairs closed automatically when typing the opener (`"()"`, `"''"`).
     pub auto_close: Vec<String>,
+    /// Library code (outside the project or in `node_modules`): view only.
+    pub read_only: bool,
 }
 
 /// Replace the UTF-16 range `from..to` with `insert`.
@@ -332,6 +334,14 @@ pub enum KeyAction {
     GotoImplementation,
     ToggleProblems,
     RestartTypeScriptServer,
+    Completion,
+    ParameterInfo,
+    FindUsages,
+    Rename,
+    ShowIntentions,
+    OptimizeImports,
+    SortImports,
+    ReformatCode,
 }
 
 /// Modifier used in double-tap gestures.
@@ -793,6 +803,202 @@ pub struct TraceSample {
     pub stage: String,
     /// Milliseconds since the key event.
     pub ms: f64,
+}
+
+/// A UTF-16 range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TextRange {
+    /// Start offset.
+    pub from: u32,
+    /// End offset.
+    pub to: u32,
+}
+
+/// One completion item as shown in the popup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionItemView {
+    /// Index in the session (for details and accepting).
+    pub index: u32,
+    /// Label.
+    pub label: String,
+    /// Kind (`function`, `variable`, `class`, `keyword`, …).
+    pub kind: String,
+    /// Short detail or label description (`./utils/format`).
+    pub detail: Option<String>,
+    /// Character indices of the label that matched the typed prefix.
+    pub matched: Vec<u32>,
+    /// Deprecated symbol.
+    pub deprecated: bool,
+}
+
+/// A ranked page of completion items.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionList {
+    /// Session id (filtering, details and accepting refer to it).
+    pub session: u32,
+    /// Start of the text the completion replaces (the typed prefix).
+    pub from: u32,
+    /// Items matching the prefix, best first (at most one page).
+    pub items: Vec<CompletionItemView>,
+    /// How many items matched in total.
+    pub total: u32,
+}
+
+/// Details of one completion item, loaded lazily.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionDetails {
+    /// Detail (signature, "Auto import from …").
+    pub detail: Option<String>,
+    /// Documentation as sanitized HTML.
+    pub html: Option<String>,
+}
+
+/// Edits for one document version plus, for snippets, the tab stops in the
+/// text after the edits (each stop may have several linked ranges; the
+/// last one is the final caret position).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentEdit {
+    /// The version the edits apply to.
+    pub version: u32,
+    /// Sorted, non-overlapping edits.
+    pub edits: Vec<TextEdit>,
+    /// Snippet tab stops, in order; empty for plain text.
+    pub stops: Vec<Vec<TextRange>>,
+    /// Caret after the edit when there are no stops.
+    pub caret: Option<u32>,
+}
+
+/// Signature help at the caret.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SignatureView {
+    /// The signature, e.g. `formatPrice(value: number, currency?: string): string`.
+    pub label: String,
+    /// Each parameter's range in `label` (UTF-16).
+    pub parameters: Vec<TextRange>,
+    /// The parameter at the caret.
+    pub active_parameter: Option<u32>,
+    /// Which overload (0-based) of how many.
+    pub active_signature: u32,
+    /// Number of overloads.
+    pub signatures: u32,
+    /// Documentation of the signature or the active parameter (sanitized HTML).
+    pub html: Option<String>,
+}
+
+/// One usage of a symbol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Usage {
+    /// Zero-based line.
+    pub line: u32,
+    /// Zero-based UTF-16 column.
+    pub column: u32,
+    /// Length of the usage on its line (UTF-16).
+    pub length: u32,
+    /// The line's text, trimmed.
+    pub preview: String,
+}
+
+/// Usages in one file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageGroup {
+    /// Project-relative path, or absolute outside the project.
+    pub path: String,
+    /// Whether inside the project.
+    pub in_project: bool,
+    /// Usages in order.
+    pub usages: Vec<Usage>,
+}
+
+/// Find Usages result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageResults {
+    /// The symbol's name at the caret.
+    pub symbol: String,
+    /// Groups by file (project files first, sorted by path).
+    pub groups: Vec<UsageGroup>,
+}
+
+/// What Rename would change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameTarget {
+    /// Range of the symbol at the caret.
+    pub from: u32,
+    /// End of the range.
+    pub to: u32,
+    /// The current name.
+    pub placeholder: String,
+}
+
+/// One file in a refactoring preview.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewFile {
+    /// Project-relative path, or absolute outside the project.
+    pub path: String,
+    /// Edits in the file.
+    pub count: u32,
+    /// Library code: it will not be changed.
+    pub read_only: bool,
+}
+
+/// A computed refactoring, applied with `apply_refactoring(id)`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RefactoringPreview {
+    /// Id for applying it.
+    pub id: u32,
+    /// Files and edit counts.
+    pub files: Vec<PreviewFile>,
+    /// Total edits.
+    pub total: u32,
+}
+
+/// A file a workspace edit did not change, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedFile {
+    /// Path.
+    pub path: String,
+    /// Reason.
+    pub reason: String,
+}
+
+/// Result of applying a workspace edit (rename, code action, formatting).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceEditResult {
+    /// Edits for open documents: the view applies each as one undo step.
+    pub open_documents: Vec<DocumentReplace>,
+    /// Closed files rewritten on disk.
+    pub files_written: Vec<String>,
+    /// Files left unchanged.
+    pub skipped: Vec<SkippedFile>,
+}
+
+/// A code action at the caret.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeActionView {
+    /// Id for applying it.
+    pub id: u32,
+    /// Title.
+    pub title: String,
+    /// Kind (`quickfix`, `refactor.extract`, `source.organizeImports`).
+    pub kind: String,
+    /// The server's preferred fix.
+    pub preferred: bool,
+    /// Why it cannot be applied, if disabled.
+    pub disabled: Option<String>,
 }
 
 #[cfg(test)]

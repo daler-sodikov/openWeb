@@ -20,14 +20,16 @@ use ferrule_lsp_client::lsp_types::{
     TextDocumentContentChangeEvent,
 };
 use ferrule_lsp_client::{
-    ClientHooks, LspError, ServerCommand, ServerConfig, ServerState, Supervisor, find_in_dir,
-    find_on_path, is_executable, is_node_script, path_to_uri, uri_to_path,
+    ClientHooks, LspError, ResponseError, ServerCommand, ServerConfig, ServerState, Supervisor,
+    find_in_dir, find_on_path, is_executable, is_node_script, path_to_uri, uri_to_path,
 };
 use ferrule_project::{Project, Workspace};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use crate::completion::CompletionSession;
 use crate::convert::to_u32;
+use crate::edits::{Expect, FileEdits};
 use crate::events::{EventSink, SessionEvent};
 use crate::session::{DocHandle, DocState, Session};
 
@@ -45,6 +47,8 @@ pub(crate) struct LanguageService {
     diagnostics: Mutex<BTreeMap<String, Vec<lsp::Diagnostic>>>,
     hover_tokens: Mutex<HashMap<DocId, CancellationToken>>,
     nav_token: Mutex<Option<CancellationToken>>,
+    features: Mutex<FeatureState>,
+    pub(crate) command_lock: tokio::sync::Mutex<()>,
 }
 
 struct Inner {
@@ -54,6 +58,22 @@ struct Inner {
     program: Option<PathBuf>,
     workspace: Option<Workspace>,
     ts_version: Option<String>,
+}
+
+#[derive(Default)]
+struct FeatureState {
+    next_id: u32,
+    request_tokens: HashMap<(String, DocId), CancellationToken>,
+    completions: HashMap<u32, CompletionSession>,
+    refactorings: HashMap<u32, Refactoring>,
+    code_actions: HashMap<u32, lsp::CodeActionOrCommand>,
+    apply_edit_capture: Option<Vec<lsp::WorkspaceEdit>>,
+}
+
+pub(crate) struct Refactoring {
+    pub files: Vec<FileEdits>,
+    pub expected: HashMap<PathBuf, Expect>,
+    pub skipped: Vec<ipc::SkippedFile>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -118,6 +138,8 @@ impl LanguageService {
             diagnostics: Mutex::new(BTreeMap::new()),
             hover_tokens: Mutex::new(HashMap::new()),
             nav_token: Mutex::new(None),
+            features: Mutex::new(FeatureState::default()),
+            command_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -128,6 +150,95 @@ impl LanguageService {
 
     pub fn status(&self) -> ipc::ServerStatus {
         lock(&self.inner).status.clone()
+    }
+
+    pub fn capabilities(&self) -> Option<Arc<lsp::ServerCapabilities>> {
+        self.supervisor()?.1.capabilities()
+    }
+
+    pub fn running(&self) -> Option<Supervisor> {
+        self.supervisor().map(|(_, supervisor)| supervisor)
+    }
+
+    pub fn token(&self, kind: &str, doc: DocId) -> CancellationToken {
+        let token = CancellationToken::new();
+        if let Some(previous) = lock(&self.features)
+            .request_tokens
+            .insert((kind.to_owned(), doc), token.clone())
+        {
+            previous.cancel();
+        }
+        token
+    }
+
+    pub fn next_id(&self) -> u32 {
+        let mut features = lock(&self.features);
+        features.next_id = features.next_id.wrapping_add(1).max(1);
+        features.next_id
+    }
+
+    pub fn store_completion(&self, session: CompletionSession) {
+        let mut features = lock(&self.features);
+        features.completions.retain(|_, old| old.doc != session.doc);
+        features.completions.insert(session.id, session);
+    }
+
+    pub fn with_completion<T>(
+        &self,
+        id: u32,
+        f: impl FnOnce(&mut CompletionSession) -> T,
+    ) -> Option<T> {
+        let mut features = lock(&self.features);
+        features.completions.get_mut(&id).map(f)
+    }
+
+    pub fn store_refactoring(&self, id: u32, refactoring: Refactoring) {
+        lock(&self.features).refactorings.insert(id, refactoring);
+    }
+
+    pub fn take_refactoring(&self, id: u32) -> Option<Refactoring> {
+        lock(&self.features).refactorings.remove(&id)
+    }
+
+    pub fn store_code_action(&self, id: u32, action: lsp::CodeActionOrCommand) {
+        lock(&self.features).code_actions.insert(id, action);
+    }
+
+    pub fn take_code_action(&self, id: u32) -> Option<lsp::CodeActionOrCommand> {
+        lock(&self.features).code_actions.remove(&id)
+    }
+
+    pub fn begin_capture(&self) {
+        lock(&self.features).apply_edit_capture = Some(Vec::new());
+    }
+
+    pub fn end_capture(&self) -> Vec<lsp::WorkspaceEdit> {
+        lock(&self.features)
+            .apply_edit_capture
+            .take()
+            .unwrap_or_default()
+    }
+
+    fn capture_workspace_edit(&self, params: &Value) -> Result<Value, ResponseError> {
+        let edit = params
+            .get("edit")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<lsp::WorkspaceEdit>(value).ok());
+        let Some(edit) = edit else {
+            return Ok(json!({
+                "applied": false,
+                "failureReason": "the server sent an invalid workspace edit"
+            }));
+        };
+        let mut features = lock(&self.features);
+        let Some(capture) = &mut features.apply_edit_capture else {
+            return Ok(json!({
+                "applied": false,
+                "failureReason": "the editor did not expect a workspace edit now"
+            }));
+        };
+        capture.push(edit);
+        Ok(json!({ "applied": true }))
     }
 
     fn supervisor(&self) -> Option<(u64, Supervisor)> {
@@ -268,6 +379,8 @@ impl LanguageService {
                     );
                     config.workspace_folders =
                         workspace.packages.iter().map(|p| root.join(p)).collect();
+                    config.initialization_options =
+                        serde_json::from_str(self.def.initialization_options).ok();
                     inner.next_instance += 1;
                     let instance = inner.next_instance;
                     let hooks = Arc::new(Hooks {
@@ -342,6 +455,16 @@ impl LanguageService {
     /// `didClose` when the document was closed.
     pub fn closed(&self, doc: &DocHandle, state: &mut DocState) {
         lock(&self.hover_tokens).remove(&doc.id);
+        lock(&self.features)
+            .request_tokens
+            .retain(|(_, id), token| {
+                if *id == doc.id {
+                    token.cancel();
+                    false
+                } else {
+                    true
+                }
+            });
         if let (Some(uri), Some((instance, supervisor))) = (&doc.uri, self.supervisor())
             && let Some(generation) = supervisor.generation()
             && state.lsp_key == Some((instance, generation))
@@ -662,5 +785,21 @@ impl ClientHooks for Hooks {
             }
             _ => {}
         }
+    }
+
+    fn request(&self, method: &str, params: &Value) -> Option<Result<Value, ResponseError>> {
+        if method != "workspace/applyEdit" {
+            return None;
+        }
+        let response = self.service.upgrade().map_or_else(
+            || {
+                Ok(json!({
+                    "applied": false,
+                    "failureReason": "the language server session has ended"
+                }))
+            },
+            |service| service.capture_workspace_edit(params),
+        );
+        Some(response)
     }
 }

@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
 use std::sync::atomic::AtomicU64;
@@ -65,6 +65,14 @@ pub(crate) struct DocState {
 }
 
 impl DocState {
+    pub(crate) fn indent_unit(&self) -> &str {
+        &self.indent_unit
+    }
+
+    pub(crate) fn tab_width(&self) -> u32 {
+        self.tab_width
+    }
+
     pub fn dirty(&self) -> bool {
         // Comparing ropes is O(1) when the lengths differ (the usual case
         // while typing) and only walks the text when they are equal.
@@ -93,6 +101,8 @@ pub(crate) struct DocHandle {
     pub uri: Option<Uri>,
     /// LSP language id if the project's language server handles the file.
     pub lsp_language: Option<&'static str>,
+    /// Library code (outside the project or in `node_modules`): no edits.
+    pub read_only: bool,
     language: Option<String>,
     state: Mutex<DocState>,
     autosave: Mutex<Option<CancellationToken>>,
@@ -116,6 +126,7 @@ impl DocHandle {
             indent_unit: state.indent_unit.clone(),
             tab_width: state.tab_width,
             auto_close: state.auto_close.clone(),
+            read_only: self.read_only,
         })
     }
 
@@ -181,6 +192,7 @@ impl SessionConfig {
 /// The editing session. Cheap to share as `Arc<Session>`.
 pub struct Session {
     pub(crate) state: Mutex<State>,
+    self_weak: Weak<Session>,
     recovery: RecoveryStore,
     pub(crate) registry: Arc<LanguageRegistry>,
     autosave_delay: Duration,
@@ -263,10 +275,12 @@ impl Session {
             autosave_delay,
             typing_trace,
         } = config;
-        Ok(Arc::new(Self {
+        let registry = Arc::new(languages()?);
+        Ok(Arc::new_cyclic(move |weak| Self {
             state: Mutex::new(State::default()),
+            self_weak: weak.clone(),
             recovery: RecoveryStore::new(data_dir.join("recovery")),
-            registry: Arc::new(languages()?),
+            registry,
             autosave_delay,
             started: Instant::now(),
             data_dir,
@@ -297,6 +311,20 @@ impl Session {
         lock(&self.state)
             .map(|s| s.docs.values().cloned().collect())
             .unwrap_or_default()
+    }
+
+    pub(crate) fn open_doc_at(&self, path: &Path) -> Result<Option<Arc<DocHandle>>, IpcError> {
+        self.doc_by_path(path)
+    }
+
+    pub(crate) fn relative_path(&self, path: &Path) -> Option<String> {
+        self.runtime().ok()?.project.relativize(path)
+    }
+
+    pub(crate) fn self_arc(&self) -> Result<Arc<Self>, IpcError> {
+        self.self_weak
+            .upgrade()
+            .ok_or_else(|| IpcError::new(IpcErrorKind::Conflict, "the editing session has ended"))
     }
 
     /// Whether `service` belongs to the current project.
@@ -418,6 +446,35 @@ impl Session {
     pub async fn open_document(&self, path: String) -> Result<ipc::OpenedDocument, IpcError> {
         let runtime = self.runtime()?;
         let abs = runtime.project.resolve(&path).map_err(project_error)?;
+        // Packages are library code: shown read-only like files outside.
+        let read_only = path.split('/').any(|part| part == "node_modules");
+        self.open_path(runtime, abs, path, read_only).await
+    }
+
+    /// Opens a file outside the project (a definition in `lib.dom.d.ts`, a
+    /// global package) read-only, by absolute path.
+    pub async fn open_external(&self, path: String) -> Result<ipc::OpenedDocument, IpcError> {
+        let runtime = self.runtime()?;
+        let abs = PathBuf::from(&path);
+        if !abs.is_absolute() {
+            return Err(IpcError::new(
+                IpcErrorKind::InvalidArgument,
+                format!("{path} is not an absolute path"),
+            ));
+        }
+        if let Some(rel) = runtime.project.relativize(&abs) {
+            return self.open_document(rel).await;
+        }
+        self.open_path(runtime, abs, path, true).await
+    }
+
+    async fn open_path(
+        &self,
+        runtime: Arc<ProjectRuntime>,
+        abs: PathBuf,
+        path: String,
+        read_only: bool,
+    ) -> Result<ipc::OpenedDocument, IpcError> {
         if let Some(existing) = self.doc_by_path(&abs)? {
             return existing.opened();
         }
@@ -489,9 +546,11 @@ impl Session {
             ))
         })
         .await?;
-        let touch = runtime.clone();
-        // Best effort: a failed recent-files write is logged, not reported.
-        tokio::task::spawn_blocking(move || touch.touch_recent(&recent_path));
+        if !read_only {
+            let touch = runtime.clone();
+            // Best effort: a failed recent-files write is logged, not reported.
+            tokio::task::spawn_blocking(move || touch.touch_recent(&recent_path));
+        }
 
         let handle = {
             let mut s = lock(&self.state)?;
@@ -508,6 +567,7 @@ impl Session {
                 id,
                 uri: ferrule_lsp_client::path_to_uri(&abs),
                 lsp_language: runtime.lsp.language_id(&abs),
+                read_only,
                 path: abs.clone(),
                 rel_path: path,
                 language,
@@ -546,6 +606,7 @@ impl Session {
         transactions: Vec<ipc::ChangeTransaction>,
     ) -> Result<ipc::DocStatus, IpcError> {
         let handle = self.doc(doc_id)?;
+        refuse_read_only(&handle)?;
         let now = self.now_ms();
         let h = handle.clone();
         let lsp = self.lsp_for(&handle);
@@ -756,6 +817,7 @@ impl Session {
         selection: ipc::EditorSelection,
     ) -> Result<ipc::RemoteUpdate, IpcError> {
         let handle = self.doc(doc_id)?;
+        refuse_read_only(&handle)?;
         let now = self.now_ms();
         let h = handle.clone();
         let lsp = self.lsp_for(&handle);
@@ -862,6 +924,7 @@ impl Session {
     /// and deletes its recovery file.
     pub async fn save_document(&self, doc_id: DocId) -> Result<ipc::SaveResult, IpcError> {
         let handle = self.doc(doc_id)?;
+        refuse_read_only(&handle)?;
         handle.cancel_autosave();
         let recovery = self.recovery.clone();
         let now = self.now_ms();
@@ -1060,6 +1123,17 @@ impl Session {
                 }
             }
         });
+    }
+}
+
+fn refuse_read_only(doc: &DocHandle) -> Result<(), IpcError> {
+    if doc.read_only {
+        Err(IpcError::new(
+            IpcErrorKind::Conflict,
+            format!("{} is read-only (library code)", doc.rel_path),
+        ))
+    } else {
+        Ok(())
     }
 }
 

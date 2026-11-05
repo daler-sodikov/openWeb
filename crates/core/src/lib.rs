@@ -3,12 +3,15 @@
 //! [`Session`] holds the open project and documents. Every public method
 //! returns IPC DTOs and [`IpcError`]s, so `ferrule-app` only forwards calls.
 
+mod completion;
 mod convert;
+mod edits;
 mod events;
 mod hover_html;
 mod intel;
 mod lsp;
 mod project_runtime;
+mod refactor;
 mod search;
 mod session;
 mod trace;
