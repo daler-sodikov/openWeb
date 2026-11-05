@@ -450,6 +450,62 @@ Open M3b items:
 - [ ] Test runners (Jest, Vitest, Playwright) with gutter icons
 - [ ] `dap-client` + CDP: debugger UI (breakpoints, stepping, variables)
 
+## M6: UI design (not started)
+
+Spec: [M6-DESIGN.md](M6-DESIGN.md). Start only when the maintainer says
+"start M6"; Part 2 only after "continue with M6 part 2". Until then features
+are built functionally, using CSS variables where easy.
+
+**Done when** (from the spec):
+
+1. **Tokens.** All colors and sizes are CSS custom properties in
+   `src/styles/tokens.css` (dark values from the spec, a light theme with the
+   same structure and WCAG AA contrast); a 4px spacing scale, radii, shadows;
+   Inter and a permissive monospace bundled locally with their licenses. No
+   hardcoded colors or sizes in components.
+2. **Primitives.** Shared button, icon button, tab, tree row, list row,
+   popup/menu, tooltip, panel header, status bar item, input and dialog
+   (title, content, OK/Cancel/Apply, focus trap, Esc/Enter).
+3. **Layout.** Dark frame with rounded panels and gaps; left and bottom tool
+   window stripes; resizable panels with persisted sizes; minimum window
+   size; no clipped text at the window edge.
+4. **Top bar.** Main menu, project name with an initials badge, search and
+   settings icons; nothing for features that do not exist.
+5. **Project tree.** Root row with muted path, chevrons, folder and
+   file-type icons (Lucide, ISC, inline SVG, 16px; our own file-type
+   badges), indent guides, selected/hover states, greyed ignored entries,
+   "library root" next to `node_modules`.
+6. **Editor chrome.** Tabs with file icon, close on hover, modified dot,
+   overflow handling, a real split icon; gutter with fold chevrons,
+   current-line highlight, indent guides; inspection widget with LSP error and
+   warning counts; scrollbar diagnostic markers.
+7. **Status bar.** Breadcrumbs on the left (replacing the breadcrumb bar);
+   line:col, line separator, encoding, indent and TypeScript server state on
+   the right.
+8. **Empty editor.** Centered hint list with the real shortcuts.
+9. **Menus.** File, Edit, View, Navigate, Code, Refactor, Run, Tools, Git,
+   Window, Help with submenus, separators, shortcuts and mnemonics; only real
+   actions enabled, others hidden or disabled with a clear label.
+10. **Popups.** All popups and panels (Search Everywhere, Go to,
+    Find/Replace, hover and diagnostics, completion, signature help, rename,
+    usages, Alt+Enter, chooser, reload bar, M4 terminal and Git panels) use
+    the shared style.
+11. **Theme switch.** System / dark / light.
+12. **Performance (Part 3).** Typing latency re-measured after the redesign
+    (on a real display if possible), profiled, the biggest costs fixed, and
+    `perf/RESULTS.md` updated with before/after.
+13. **Verification.** Playwright screenshots of every key screen in dark and
+    light (Chromium against the headless backend), compared against the
+    references outside the repo (`~/Desktop/design-refs/`, never copied in),
+    differences listed and fixed; a Playwright check that fails on clipped or
+    overflowing text; Ferrule's own screenshots in `docs/media/`.
+14. **Legal.** No JetBrains/WebStorm/IntelliJ/"Islands" names, logos, icons,
+    assets or reference color values; every new license recorded in
+    `THIRD_PARTY_LICENSES.md`. All checks pass with zero warnings.
+
+Part 2 (settings dialog, notification toasts, welcome screen) is planned in
+the spec and gets its own done-when when it starts.
+
 ## After M5 (feature scope phases 3 and 4)
 
 - HTTP client (`.http` files), npm dependency panel, local history, TODO,

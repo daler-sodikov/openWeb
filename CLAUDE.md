@@ -165,6 +165,12 @@ Benchmarks live in `perf/`. Compare against WebStorm only by external
 measurement, using the same method for both. Never publish a number you did
 not measure.
 
+## Design system
+
+The full design rules live in `docs/M6-DESIGN.md`. Until M6 starts, do not
+polish visuals beyond what a feature needs to be usable; use CSS variables
+(not hardcoded colors or sizes) where that is easy.
+
 ## Legal and originality (strict)
 
 - Do NOT copy any JetBrains source code, icons, logos, fonts, themes or
@@ -238,3 +244,5 @@ Update this section at the end of every milestone.
       editor, some UI tests)
 - [ ] M4: terminal, Git basics
 - [ ] M5: run/debug, test runner
+- [ ] M6: UI design (see docs/M6-DESIGN.md; start only when the
+      maintainer says "start M6")
