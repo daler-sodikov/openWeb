@@ -19,3 +19,5 @@
 
 # Local IDE state (OpenIDEA)
 /.openidea/
+.idea/
+.junie/
