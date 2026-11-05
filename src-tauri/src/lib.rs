@@ -18,11 +18,13 @@ pub use events::{
 
 use ferrule_core::{Session, SessionConfig};
 use ferrule_ipc::{
-    AppInfo, CaretDirection, CaretInfo, ChangeTransaction, DirEntry, DocDiagnostics, DocId,
-    DocStatus, DocumentReload, EditorSelection, FileProblems, FindResults, FoldRanges,
-    FrontendReadyReport, Highlights, HoverResult, IpcError, KeyBinding, NavKind, NavTarget,
-    OpenedDocument, PROTOCOL_VERSION, ProjectInfo, RemoteUpdate, ReplaceResult, SaveResult,
-    SearchResults, SearchTab, ServerStatus, StartupTarget, TextSearch, TraceSample,
+    AppInfo, CaretDirection, CaretInfo, ChangeTransaction, CodeActionView, CompletionDetails,
+    CompletionList, DirEntry, DocDiagnostics, DocId, DocStatus, DocumentEdit, DocumentReload,
+    EditorSelection, FileProblems, FindResults, FoldRanges, FrontendReadyReport, Highlights,
+    HoverResult, IpcError, KeyBinding, NavKind, NavTarget, OpenedDocument, PROTOCOL_VERSION,
+    ProjectInfo, RefactoringPreview, RemoteUpdate, RenameTarget, ReplaceResult, SaveResult,
+    SearchResults, SearchTab, ServerStatus, SignatureView, StartupTarget, TextSearch, TraceSample,
+    UsageResults, WorkspaceEditResult,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -134,6 +136,16 @@ async fn open_document(
     path: String,
 ) -> Result<OpenedDocument, IpcError> {
     session.open_document(path).await
+}
+
+/// Opens a file outside the project read-only, by absolute path.
+#[tauri::command]
+#[specta::specta]
+async fn open_external(
+    session: SessionState<'_>,
+    path: String,
+) -> Result<OpenedDocument, IpcError> {
+    session.open_external(path).await
 }
 
 /// Applies view transactions.
@@ -353,6 +365,177 @@ async fn goto_definition(
     session.goto_definition(doc_id, version, offset, kind).await
 }
 
+/// Completions at the caret.
+#[tauri::command]
+#[specta::specta]
+async fn completion(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    offset: u32,
+    trigger: Option<String>,
+) -> Result<Option<CompletionList>, IpcError> {
+    session.completion(doc_id, version, offset, trigger).await
+}
+
+/// Filters the current completion session without another server request.
+#[tauri::command]
+#[specta::specta]
+async fn filter_completion(
+    session: SessionState<'_>,
+    completion_session: u32,
+    prefix: String,
+) -> Result<Option<CompletionList>, IpcError> {
+    session.filter_completion(completion_session, prefix).await
+}
+
+/// Loads completion documentation on demand.
+#[tauri::command]
+#[specta::specta]
+async fn completion_details(
+    session: SessionState<'_>,
+    completion_session: u32,
+    index: u32,
+) -> Result<CompletionDetails, IpcError> {
+    session.completion_details(completion_session, index).await
+}
+
+/// Prepares the edit for the selected completion.
+#[tauri::command]
+#[specta::specta]
+async fn accept_completion(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    completion_session: u32,
+    index: u32,
+    caret: u32,
+) -> Result<DocumentEdit, IpcError> {
+    session
+        .accept_completion(doc_id, version, completion_session, index, caret)
+        .await
+}
+
+/// Signature help at the caret.
+#[tauri::command]
+#[specta::specta]
+async fn signature_help(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    offset: u32,
+    trigger: Option<String>,
+) -> Result<Option<SignatureView>, IpcError> {
+    session
+        .signature_help(doc_id, version, offset, trigger)
+        .await
+}
+
+/// Finds references to the symbol at the caret.
+#[tauri::command]
+#[specta::specta]
+async fn find_usages(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    offset: u32,
+) -> Result<UsageResults, IpcError> {
+    session.find_usages(doc_id, version, offset).await
+}
+
+/// Finds the renameable range under the caret.
+#[tauri::command]
+#[specta::specta]
+async fn prepare_rename(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    offset: u32,
+) -> Result<Option<RenameTarget>, IpcError> {
+    session.prepare_rename(doc_id, version, offset).await
+}
+
+/// Previews a rename without changing files.
+#[tauri::command]
+#[specta::specta]
+async fn rename_preview(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    offset: u32,
+    new_name: String,
+) -> Result<RefactoringPreview, IpcError> {
+    session
+        .rename_preview(doc_id, version, offset, new_name)
+        .await
+}
+
+/// Applies a previously previewed rename or refactoring.
+#[tauri::command]
+#[specta::specta]
+async fn apply_refactoring(
+    session: SessionState<'_>,
+    id: u32,
+) -> Result<WorkspaceEditResult, IpcError> {
+    session.apply_refactoring(id).await
+}
+
+/// Lists quick fixes and refactorings for a range.
+#[tauri::command]
+#[specta::specta]
+async fn code_actions(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    from: u32,
+    to: u32,
+) -> Result<Vec<CodeActionView>, IpcError> {
+    session.code_actions(doc_id, version, from, to).await
+}
+
+/// Applies one quick fix or refactoring.
+#[tauri::command]
+#[specta::specta]
+async fn apply_code_action(
+    session: SessionState<'_>,
+    id: u32,
+) -> Result<WorkspaceEditResult, IpcError> {
+    session.apply_code_action(id).await
+}
+
+/// Organizes imports through the TypeScript language server.
+#[tauri::command]
+#[specta::specta]
+async fn organize_imports(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+) -> Result<WorkspaceEditResult, IpcError> {
+    session.organize_imports(doc_id, version).await
+}
+
+/// Sorts import declarations in the open document.
+#[tauri::command]
+#[specta::specta]
+async fn sort_imports(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+) -> Result<WorkspaceEditResult, IpcError> {
+    session.sort_imports(doc_id, version).await
+}
+
+/// Formats the open document through its language server.
+#[tauri::command]
+#[specta::specta]
+async fn format_document(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+) -> Result<WorkspaceEditResult, IpcError> {
+    session.format_document(doc_id, version).await
+}
+
 /// Diagnostics of an open document (UTF-16 offsets of its current text).
 #[tauri::command]
 #[specta::specta]
@@ -415,6 +598,7 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             open_project,
             list_dir,
             open_document,
+            open_external,
             apply_changes,
             undo,
             redo,
@@ -435,6 +619,20 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             replace_in_files,
             hover,
             goto_definition,
+            completion,
+            filter_completion,
+            completion_details,
+            accept_completion,
+            signature_help,
+            find_usages,
+            prepare_rename,
+            rename_preview,
+            apply_refactoring,
+            code_actions,
+            apply_code_action,
+            organize_imports,
+            sort_imports,
+            format_document,
             doc_diagnostics,
             problems,
             language_servers,

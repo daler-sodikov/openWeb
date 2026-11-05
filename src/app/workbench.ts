@@ -2,7 +2,7 @@
 // status bar.
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { DocModel, type DocHost } from "../editor/doc-model";
+import { DocModel, type DocHost, openDocumentAt } from "../editor/doc-model";
 import { EDITOR_ACTIONS, EditorPane, type PaneHost } from "../editor/editor-pane";
 import { DoubleTapDetector } from "../editor/gesture";
 import {
@@ -19,13 +19,17 @@ import {
   type ReplaceResult,
   type SearchTab,
   type ServerStatus,
+  type WorkspaceEditResult,
 } from "../ipc/bindings";
 import { errorMessage, unwrap } from "../ipc/result";
+import { CodeActionsPopup } from "../popup/code-actions";
 import { FindInFiles } from "../popup/find-in-files";
 import { NavChooser } from "../popup/nav-chooser";
 import type { Popup } from "../popup/popup";
+import { RenamePopup } from "../popup/rename";
 import { SearchEverywhere } from "../popup/search-everywhere";
 import { GotoLine, RecentFiles } from "../popup/simple-popups";
+import { UsagesPopup } from "../popup/usages";
 import { TreeView } from "../tree/tree-view";
 import { chordMatches, formatChord } from "../ui/keys";
 import { ProblemsPanel } from "./problems";
@@ -334,7 +338,7 @@ export class Workbench implements PaneHost, DocHost {
     await Promise.all([...this.docs.values()].map((d) => d.flush()));
   }
 
-  async applyReplace(result: ReplaceResult): Promise<string[]> {
+  async applyReplace(result: Pick<ReplaceResult, "openDocuments">): Promise<string[]> {
     const failures: string[] = [];
     for (const replace of result.openDocuments) {
       const doc = [...this.docs.values()].find((d) => d.docId === replace.docId);
@@ -486,7 +490,7 @@ export class Workbench implements PaneHost, DocHost {
     if (pending) return pending;
     const task = (async () => {
       try {
-        const opened = unwrap(await commands.openDocument(path));
+        const opened = unwrap(await openDocumentAt(path));
         const doc = new DocModel(opened, this);
         this.docs.set(path, doc);
         this.notify(opened.restored ? `Restored unsaved changes in ${doc.name}` : "");
@@ -610,11 +614,114 @@ export class Workbench implements PaneHost, DocHost {
     })();
   }
 
-  private openTarget(target: NavTarget): void {
-    if (!target.inProject) {
-      this.notify(`${target.path} is outside the project; opening it is not supported yet.`);
+  refactor(pane: EditorPane, action: KeyAction): void {
+    const changes = action !== "findUsages" && action !== "showIntentions";
+    if (changes && pane.doc.readOnly) {
+      this.notify("This file is read-only.");
       return;
     }
+    this.runRefactor(pane, action).catch((error: unknown) => {
+      this.notify(errorMessage(error));
+    });
+  }
+
+  private async runRefactor(pane: EditorPane, action: KeyAction): Promise<void> {
+    const doc = pane.doc;
+    switch (action) {
+      case "findUsages": {
+        const results = await doc.requestAt(pane, null, (version, offset) =>
+          commands.findUsages(doc.docId, version, offset),
+        );
+        if (!results || results.groups.length === 0) {
+          this.notify("No usages found.");
+          return;
+        }
+        this.notify("");
+        this.showPopup(
+          new UsagesPopup(results, (path, line, column) => {
+            this.openLocation(path, line, column);
+          }),
+        );
+        return;
+      }
+      case "rename": {
+        const target = await doc.requestAt(pane, null, (version, offset) =>
+          commands.prepareRename(doc.docId, version, offset),
+        );
+        if (!target) {
+          this.notify("Cannot rename this element.");
+          return;
+        }
+        this.notify("");
+        this.showPopup(
+          new RenamePopup(
+            target.placeholder,
+            async (name) => {
+              const preview = await doc.requestAt(pane, target.from, (version, offset) =>
+                commands.renamePreview(doc.docId, version, offset, name),
+              );
+              if (!preview) throw new Error("The preview was cancelled.");
+              return preview;
+            },
+            async (id) => {
+              await this.applyEditResult(unwrap(await commands.applyRefactoring(id)));
+            },
+          ),
+        );
+        return;
+      }
+      case "showIntentions": {
+        const { from, to } = pane.view.state.selection.main;
+        const actions = await doc.requestAt(pane, null, (version) =>
+          commands.codeActions(doc.docId, version, from, to),
+        );
+        if (!actions || actions.length === 0) {
+          this.notify("No intentions available.");
+          return;
+        }
+        this.notify("");
+        this.showPopup(
+          new CodeActionsPopup(actions, (id) => {
+            void (async () => {
+              try {
+                await this.applyEditResult(unwrap(await commands.applyCodeAction(id)));
+              } catch (error: unknown) {
+                this.notify(errorMessage(error));
+              }
+            })();
+          }),
+        );
+        return;
+      }
+      case "optimizeImports":
+      case "sortImports":
+      case "reformatCode": {
+        const call =
+          action === "optimizeImports"
+            ? commands.organizeImports
+            : action === "sortImports"
+              ? commands.sortImports
+              : commands.formatDocument;
+        const result = await doc.requestAt(pane, null, (version) => call(doc.docId, version));
+        if (result) await this.applyEditResult(result);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /** Applies a workspace edit: open tabs here, closed files were written by Rust. */
+  private async applyEditResult(result: WorkspaceEditResult): Promise<void> {
+    const failures = await this.applyReplace(result);
+    const problems = [...failures, ...result.skipped.map((s) => `${s.path} (${s.reason})`)];
+    this.notify(problems.length > 0 ? `Not changed: ${problems.join("; ")}` : "");
+    this.active?.view.focus();
+  }
+
+  private openTarget(target: NavTarget): void {
+    // Targets outside the project come with an absolute path and open
+    // read-only (library code).
     this.notify("");
     this.openLocation(target.path, target.line, target.column);
   }
@@ -677,8 +784,18 @@ export class Workbench implements PaneHost, DocHost {
         item.title = pane.path;
         if (pane === group.active) item.classList.add("active");
         if (doc.dirty) item.classList.add("dirty");
+        if (doc.readOnly) {
+          item.classList.add("read-only");
+          item.title = `${pane.path} (read-only)`;
+        }
         const label = el("span", "tab-label", "tab-label");
         label.textContent = pane.name;
+        if (doc.readOnly) {
+          const lock = el("span", "tab-read-only", "tab-read-only");
+          lock.textContent = "RO";
+          lock.setAttribute("aria-label", "read-only");
+          label.append(lock);
+        }
         const marker = el("span", "tab-dirty", "tab-dirty");
         marker.textContent = doc.dirty ? "●" : "";
         marker.setAttribute("aria-label", doc.dirty ? "modified" : "");

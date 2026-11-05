@@ -12,6 +12,7 @@ import {
   type CaretInfo,
   type DocId,
   type DocStatus,
+  type DocumentEdit_Serialize as DocumentEdit,
   type EditorSelection as IpcSelection,
   type FoldSpan,
   type HoverResult,
@@ -46,6 +47,7 @@ export interface DocPane {
   setDiagnostics(decorations: DecorationSet): void;
   setCaretInfo(info: CaretInfo | null): void;
   showExternalChange(show: boolean): void;
+  applyDocumentEdit(edit: DocumentEdit): void;
   /** Keys typed while an Enter was in flight; replayed afterwards. */
   replayDeferredKeys(): void;
 }
@@ -74,6 +76,8 @@ export class DocModel {
   readonly indentUnit: string;
   readonly tabWidth: number;
   readonly autoClose: readonly string[];
+  /** Library code (outside the project or in node_modules): view only. */
+  readonly readOnly: boolean;
   dirty: boolean;
   readonly panes = new Set<DocPane>();
   private hub: EditorState;
@@ -98,6 +102,7 @@ export class DocModel {
     this.indentUnit = doc.indentUnit;
     this.tabWidth = doc.tabWidth;
     this.autoClose = doc.autoClose;
+    this.readOnly = doc.readOnly;
     this.dirty = doc.dirty;
     this.hub = this.createHub(doc.text, doc.version);
   }
@@ -109,6 +114,10 @@ export class DocModel {
   /** Current text (all panes show the same). */
   get text(): string {
     return this.hub.doc.toString();
+  }
+
+  get version(): number {
+    return getSyncedVersion(this.hub);
   }
 
   attach(pane: DocPane): void {
@@ -284,6 +293,20 @@ export class DocModel {
         changes: edits.map((e) => ({ from: e.from, to: e.to, insert: e.insert })),
         userEvent: "input.replace",
       });
+      await this.pushAll();
+    });
+  }
+
+  /** Applies a completion edit as one undoable view transaction. */
+  applyDocumentEdit(edit: DocumentEdit): Promise<void> {
+    return this.enqueue(async () => {
+      await this.pushAll();
+      if (this.version !== edit.version) {
+        throw new Error(`${this.name} changed while accepting completion`);
+      }
+      const pane = this.panes.values().next().value;
+      if (!pane) throw new Error(`${this.name} is not shown`);
+      pane.applyDocumentEdit(edit);
       await this.pushAll();
     });
   }
@@ -499,6 +522,15 @@ export class DocModel {
     );
   }
 
+  /** Sends a language server request after flushing edits to Rust. */
+  requestAt<T>(
+    pane: DocPane,
+    pos: number | null,
+    call: (version: number, offset: number) => Promise<IpcResult<T>>,
+  ): Promise<T | null> {
+    return this.insightRequest(pane, pos, call);
+  }
+
   /**
    * Pushes pending edits through the queue, then sends `call` outside it so
    * typing never waits for the language server. `Cancelled` (a newer
@@ -541,7 +573,7 @@ export class DocModel {
     this.host.onError(this, errorMessage(error));
     if (!(error instanceof BackendError)) return;
     try {
-      const doc = unwrap(await commands.openDocument(this.path));
+      const doc = unwrap(await openDocumentAt(this.path));
       this.hub = this.createHub(doc.text, doc.version);
       for (const pane of this.panes) pane.reset(doc.text);
       this.setStatus({ version: doc.version, dirty: doc.dirty });
@@ -552,4 +584,14 @@ export class DocModel {
       this.host.onError(this, `Reloading ${this.path} failed: ${errorMessage(reloadError)}`);
     }
   }
+}
+
+/** Whether `path` is absolute (a file outside the project). */
+export function isAbsolutePath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+/** Opens a project-relative path, or an absolute one read-only. */
+export function openDocumentAt(path: string): ReturnType<typeof commands.openDocument> {
+  return isAbsolutePath(path) ? commands.openExternal(path) : commands.openDocument(path);
 }

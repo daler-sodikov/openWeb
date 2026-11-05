@@ -1,7 +1,15 @@
 // One visible editor: a CodeMirror view mirroring a DocModel, inside an
 // editor group. Several panes (in different groups) can show the same
 // document. Folding ranges, bracket pairs and breadcrumbs come from Rust.
-import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  pickedCompletion,
+  startCompletion,
+  type Completion,
+  type CompletionContext,
+} from "@codemirror/autocomplete";
 import { simplifySelection, standardKeymap } from "@codemirror/commands";
 import {
   codeFolding,
@@ -36,8 +44,18 @@ import {
   runScopeHandlers,
 } from "@codemirror/view";
 
-import type { CaretInfo, FoldSpan, KeyAction, KeyBinding, NavKind } from "../ipc/bindings";
-import { errorMessage } from "../ipc/result";
+import {
+  commands,
+  type CaretInfo,
+  type CompletionList_Serialize as CompletionList,
+  type DocumentEdit_Serialize as DocumentEdit,
+  type FoldSpan,
+  type KeyAction,
+  type KeyBinding,
+  type NavKind,
+  type SignatureView_Serialize as SignatureView,
+} from "../ipc/bindings";
+import { errorMessage, unwrap } from "../ipc/result";
 import { keyPressed, mark, markNextFrame, takeKey } from "../perf/typing-trace";
 import { type DocModel, type DocPane, mirrored } from "./doc-model";
 import { DoubleModifierGesture } from "./gesture";
@@ -70,6 +88,14 @@ export const EDITOR_ACTIONS: ReadonlySet<KeyAction> = new Set<KeyAction>([
   "gotoDeclaration",
   "gotoTypeDeclaration",
   "gotoImplementation",
+  "completion",
+  "parameterInfo",
+  "findUsages",
+  "rename",
+  "showIntentions",
+  "optimizeImports",
+  "sortImports",
+  "reformatCode",
 ]);
 
 /** Delay before the mouse hover asks for documentation. */
@@ -83,6 +109,8 @@ export interface PaneHost {
   closePane(pane: EditorPane): void;
   /** Go to Declaration and friends at `pos` (null: the caret). */
   navigate(pane: EditorPane, kind: NavKind, pos: number | null): void;
+  /** Find Usages, Rename, Alt+Enter, import actions and Reformat Code. */
+  refactor(pane: EditorPane, action: KeyAction): void;
   notify(message: string): void;
 }
 
@@ -124,6 +152,9 @@ export class EditorPane implements DocPane {
   private readonly gesture = new DoubleModifierGesture();
   /** Keys pressed while an Enter is waiting for Rust; replayed afterwards. */
   private deferredKeys: KeyboardEvent[] | null = null;
+  private completionSession: { id: number; from: number } | null = null;
+  private snippetStops: DocumentEdit["stops"] = [];
+  private snippetIndex = 0;
 
   constructor(
     readonly doc: DocModel,
@@ -281,6 +312,27 @@ export class EditorPane implements DocPane {
     this.view.focus();
   }
 
+  startCompletion(): void {
+    startCompletion(this.view);
+  }
+
+  applyDocumentEdit(edit: DocumentEdit): void {
+    this.snippetStops = [];
+    const first = edit.stops[0];
+    const selection = first?.length
+      ? EditorSelection.create(first.map((range) => EditorSelection.range(range.from, range.to)))
+      : edit.caret === null
+        ? undefined
+        : EditorSelection.cursor(edit.caret);
+    this.view.dispatch({
+      changes: edit.edits.map((e) => ({ from: e.from, to: e.to, insert: e.insert })),
+      selection,
+      userEvent: "input.complete",
+    });
+    this.snippetStops = edit.stops;
+    this.snippetIndex = 0;
+  }
+
   /** Quick Documentation for the symbol at the caret, below it. */
   async showQuickDoc(): Promise<void> {
     const view = this.view;
@@ -304,6 +356,63 @@ export class EditorPane implements DocPane {
         create: () => {
           const dom = insightDom(problems, html);
           dom.classList.add("quick-doc");
+          return { dom };
+        },
+      }),
+    });
+  }
+
+  /** Parameter info for the call at the caret, above it. */
+  async showSignature(): Promise<void> {
+    const view = this.view;
+    const pos = view.state.selection.main.head;
+    let signature: SignatureView | null;
+    try {
+      signature = await this.doc.requestAt(this, pos, (version, offset) =>
+        commands.signatureHelp(this.doc.docId, version, offset, null),
+      );
+    } catch (error: unknown) {
+      this.host.notify(errorMessage(error));
+      return;
+    }
+    if (view.state.selection.main.head !== pos) return;
+    if (!signature) {
+      this.host.notify("No parameter info available.");
+      return;
+    }
+    const shown = signature;
+    view.dispatch({
+      effects: setQuickDoc.of({
+        pos,
+        above: true,
+        create: () => {
+          const dom = document.createElement("div");
+          dom.className = "quick-doc signature-help";
+          dom.dataset.testid = "signature-help";
+          const label = document.createElement("div");
+          label.className = "signature-label";
+          const active =
+            shown.activeParameter === null ? undefined : shown.parameters[shown.activeParameter];
+          if (active) {
+            const bold = document.createElement("b");
+            bold.textContent = shown.label.slice(active.from, active.to);
+            label.append(shown.label.slice(0, active.from), bold, shown.label.slice(active.to));
+          } else {
+            label.textContent = shown.label;
+          }
+          dom.append(label);
+          if (shown.signatures > 1) {
+            const overloads = document.createElement("div");
+            overloads.className = "signature-overloads";
+            overloads.textContent = `${String(shown.activeSignature + 1)} of ${String(shown.signatures)}`;
+            dom.append(overloads);
+          }
+          if (shown.html) {
+            const docs = document.createElement("div");
+            docs.className = "signature-docs";
+            docs.innerHTML = shown.html;
+            dom.append(docs);
+          }
           return { dom };
         },
       }),
@@ -374,6 +483,20 @@ export class EditorPane implements DocPane {
       case "gotoImplementation":
         this.host.navigate(this, "implementation", null);
         return;
+      case "completion":
+        this.startCompletion();
+        return;
+      case "parameterInfo":
+        void this.showSignature();
+        return;
+      case "findUsages":
+      case "rename":
+      case "showIntentions":
+      case "optimizeImports":
+      case "sortImports":
+      case "reformatCode":
+        this.host.refactor(this, action);
+        return;
       default:
         return;
     }
@@ -406,6 +529,7 @@ export class EditorPane implements DocPane {
         drawSelection(),
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
+        EditorState.readOnly.of(doc.readOnly),
         EditorState.tabSize.of(doc.tabWidth),
         EditorState.languageData.of(() => [{ closeBrackets: { brackets: openers } }]),
         closeBrackets(),
@@ -441,7 +565,23 @@ export class EditorPane implements DocPane {
         rustFolds,
         bracketField,
         EditorView.contentAttributes.of({ "aria-label": `Editor for ${doc.path}` }),
+        autocompletion({
+          override: [(context) => this.completions(context)],
+          activateOnTyping: true,
+          maxRenderedOptions: 200,
+        }),
         EditorView.updateListener.of((update) => {
+          if (update.docChanged && this.snippetStops.length > 0) {
+            for (const tr of update.transactions) {
+              if (!tr.docChanged) continue;
+              this.snippetStops = this.snippetStops.map((group) =>
+                group.map((range) => ({
+                  from: tr.changes.mapPos(range.from, -1),
+                  to: tr.changes.mapPos(range.to, 1),
+                })),
+              );
+            }
+          }
           if (update.viewportChanged) doc.scheduleHighlights();
           if (update.selectionSet || update.docChanged) {
             this.host.onCursor(this);
@@ -516,6 +656,10 @@ export class EditorPane implements DocPane {
           event.preventDefault();
           return true;
         }
+        if (event.key === "Tab" && this.advanceSnippet(event.shiftKey)) {
+          event.preventDefault();
+          return true;
+        }
         const armed = this.gesture.keydown(event.key, event.timeStamp);
         const match = gestures.find((g) => g.modifier === armed && g.key === event.key);
         if (!match) return false;
@@ -527,6 +671,102 @@ export class EditorPane implements DocPane {
         this.gesture.keyup(event.key, event.timeStamp);
         return false;
       },
+    });
+  }
+
+  private async completions(context: CompletionContext) {
+    const match = context.matchBefore(/[\w$]*$/);
+    if (!context.explicit && (!match || match.from === match.to)) return null;
+    const prefix = match?.text ?? "";
+    const previous = this.completionSession;
+    try {
+      let result: CompletionList | null = null;
+      if (previous && match?.from === previous.from) {
+        result = unwrap(await commands.filterCompletion(previous.id, prefix));
+      }
+      result ??= await this.doc.requestAt(this, context.pos, (version, offset) =>
+        commands.completion(this.doc.docId, version, offset, null),
+      );
+      if (context.aborted || !result) return null;
+      this.completionSession = { id: result.session, from: result.from };
+      const positions = new Map<Completion, readonly number[]>();
+      const options = result.items.map((item) => {
+        const option = this.completionOption(result, item);
+        positions.set(option, item.matched);
+        return option;
+      });
+      return {
+        from: result.from,
+        options,
+        filter: false,
+        getMatch: (completion: Completion) =>
+          matchRanges(completion.label, positions.get(completion) ?? []),
+      };
+    } catch {
+      if (!context.aborted) this.completionSession = null;
+      return null;
+    }
+  }
+
+  private completionOption(
+    result: CompletionList,
+    item: CompletionList["items"][number],
+  ): Completion {
+    return {
+      label: item.label,
+      type: item.kind,
+      ...(item.detail ? { detail: item.detail } : {}),
+      info: async () => {
+        try {
+          const details = unwrap(await commands.completionDetails(result.session, item.index));
+          if (!details.html && !details.detail) return null;
+          const content = document.createElement("div");
+          content.className = "cm-completionInfo-content";
+          if (details.html) content.innerHTML = details.html;
+          else content.textContent = details.detail ?? "";
+          return content;
+        } catch {
+          return null;
+        }
+      },
+      apply: (view, completion, _from, to) => {
+        view.dispatch({ annotations: pickedCompletion.of(completion) });
+        void this.doc
+          .requestAt(this, to, (version, caret) =>
+            commands.acceptCompletion(this.doc.docId, version, result.session, item.index, caret),
+          )
+          .then((edit) => (edit ? this.doc.applyDocumentEdit(edit) : undefined))
+          .catch((error: unknown) => {
+            this.host.notify(errorMessage(error));
+          });
+      },
+    };
+  }
+
+  private advanceSnippet(backward: boolean): boolean {
+    if (this.snippetStops.length === 0) return false;
+    const next = this.snippetIndex + (backward ? -1 : 1);
+    if (next < 0) {
+      this.selectSnippet(this.snippetIndex);
+      return true;
+    }
+    if (next >= this.snippetStops.length) {
+      this.snippetStops = [];
+      return false;
+    }
+    this.snippetIndex = next;
+    this.selectSnippet(next);
+    return true;
+  }
+
+  private selectSnippet(index: number): void {
+    const ranges = this.snippetStops[index];
+    if (!ranges?.length) return;
+    this.view.dispatch({
+      selection: EditorSelection.create(
+        ranges.map((range) => EditorSelection.range(range.from, range.to)),
+      ),
+      userEvent: "select.snippet",
     });
   }
 
@@ -552,6 +792,25 @@ export class EditorPane implements DocPane {
     });
     this.crumbsBar.replaceChildren(...items);
   }
+}
+
+function matchRanges(label: string, positions: readonly number[]): number[] {
+  const wanted = new Set(positions);
+  const ranges: number[] = [];
+  let charIndex = 0;
+  let offset = 0;
+  let start: number | null = null;
+  for (const char of label) {
+    const matches = wanted.has(charIndex++);
+    if (matches && start === null) start = offset;
+    if (!matches && start !== null) {
+      ranges.push(start, offset);
+      start = null;
+    }
+    offset += char.length;
+  }
+  if (start !== null) ranges.push(start, offset);
+  return ranges;
 }
 
 /** Escape closes Quick Documentation first. */

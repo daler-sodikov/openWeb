@@ -967,3 +967,14 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Read-only library files (M3b). */
+.tab-read-only {
+  margin-left: 6px;
+  padding: 0 3px;
+  border: 1px solid var(--fr-border);
+  border-radius: 3px;
+  color: var(--fr-text-muted);
+  font-size: 9px;
+  vertical-align: 1px;
+}
