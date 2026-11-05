@@ -1,5 +1,6 @@
 // Shared setup for UI tests: a fresh copy of fixtures/react-ts per test and a
 // `window.__TAURI_INTERNALS__` shim forwarding IPC to the headless backend.
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -91,6 +92,26 @@ export async function backend(cmd: string, args: unknown): Promise<unknown> {
   const body = (await response.json()) as { ok?: unknown; err?: unknown };
   if ("err" in body) throw new Error(JSON.stringify(body.err));
   return body.ok;
+}
+
+/** Runs `git` in `cwd` (local commands only) and returns its output. */
+export function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8" });
+}
+
+/**
+ * Makes `project` a repository with one commit, independent of the user's
+ * global config where it matters (identity, signing, hooks, line endings).
+ */
+export function initGitRepo(project: string): void {
+  git(project, "init", "-q", "-b", "main");
+  git(project, "config", "user.name", "Test User");
+  git(project, "config", "user.email", "test@example.com");
+  git(project, "config", "commit.gpgsign", "false");
+  git(project, "config", "core.hooksPath", ".git/hooks");
+  git(project, "config", "core.autocrlf", "false");
+  git(project, "add", ".");
+  git(project, "commit", "-q", "-m", "Initial commit");
 }
 
 /** Waits until the project index is built. */

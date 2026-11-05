@@ -1,7 +1,8 @@
 // Readability in both themes: WCAG AA contrast (4.5:1) of text against the
 // background it is painted on, for the editor selection, the completion
 // list (rows, selected row, documentation panel), parameter info, hover,
-// and every popup, panel, bar and input. Also checks that the completion
+// and every popup, panel, bar and input, the Git surfaces (tree colors,
+// commit window, diff, branches, blame). Also checks that the completion
 // popup is not clipped and stays inside the window, and saves screenshots
 // of the selection and the completion popup.
 import fs from "node:fs";
@@ -14,12 +15,15 @@ import {
   clickWord,
   editor,
   expect,
+  initGitRepo,
+  isMac,
   keys,
   openApp,
   openFile,
   projectLoaded,
   recordServerStatus,
   test,
+  treeRow,
   tsServerMissing,
 } from "./harness";
 
@@ -222,6 +226,56 @@ async function shot(
 for (const scheme of ["dark", "light"] as const) {
   test.describe(`${scheme} theme`, () => {
     test.use({ colorScheme: scheme });
+
+    test("Git colors, commit window, diff, branches and blame are readable", async ({
+      page,
+      project,
+    }) => {
+      initGitRepo(project);
+      fs.appendFileSync(path.join(project, "src", "App.tsx"), "// changed\n");
+      fs.writeFileSync(path.join(project, "src", "new-file.ts"), "export {};\n");
+      fs.rmSync(path.join(project, "src", "main.tsx"));
+      fs.writeFileSync(path.join(project, "debug.log"), "");
+      fs.appendFileSync(path.join(project, ".gitignore"), "*.log\n");
+      await openApp(page, project);
+      await expect(page.getByTestId("status-branch")).toBeVisible({ timeout: 15_000 });
+      await treeRow(page, "src").click();
+      await expect(treeRow(page, "src/new-file.ts")).toHaveAttribute("data-git", "untracked");
+      await expectReadable(page, '[data-testid="project-tree"]', "tree with Git colors");
+      // A selected changed file.
+      await openFile(page, "src/App.tsx");
+      await expectReadable(page, '[data-testid="project-tree"]', "selected changed file");
+      await expectReadable(page, '[data-testid="status-bar"]', "status bar with branch");
+
+      await page.keyboard.press(isMac ? "Meta+0" : "Alt+0");
+      await expect(page.getByTestId("commit-file").first()).toBeVisible();
+      await page.getByTestId("commit-files").focus();
+      await page.keyboard.press("ArrowDown");
+      await expectReadable(page, '[data-testid="commit"]', "commit window");
+      await page.getByTestId("commit-button").click();
+      await expect(page.getByTestId("commit-error")).toBeVisible();
+      await expectReadable(page, '[data-testid="commit-error"]', "commit error");
+
+      await page.locator('[data-testid="commit-file"][data-path="src/App.tsx"]').dblclick();
+      await expect(page.getByTestId("diff-row").first()).toBeVisible();
+      await expectReadable(page, '[data-testid="diff-view"]', "side-by-side diff");
+      await page.getByTestId("diff-mode").click();
+      await expect(page.locator('[data-testid="diff-row"][data-kind="added"]')).toBeVisible();
+      await expectReadable(page, '[data-testid="diff-view"]', "unified diff");
+      await page.keyboard.press("Escape");
+
+      await page.getByTestId("status-branch").click();
+      await expect(page.getByTestId("branch-item").nth(1)).toBeVisible();
+      await expectReadable(page, '[data-testid="branches"]', "branches popup");
+      await page.keyboard.press("Escape");
+
+      await page.keyboard.press(keys.gotoAction);
+      await page.getByTestId("se-input").fill("Annotate with Git Blame");
+      await expect(page.locator('[data-type="action"]').first()).toContainText("Annotate");
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("git-blame").first()).toBeVisible();
+      await expectReadable(page, ".editor-host:not([hidden]) .cm-blame-gutter", "blame");
+    });
 
     test("selection, completion, documentation and parameter info are readable", async ({
       page,
