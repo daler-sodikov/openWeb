@@ -206,3 +206,83 @@ export function tsServerMissing(): string | null {
     ? null
     : `${missing.join(" and ")} not on PATH; install with \`bun add -g typescript-language-server typescript\``;
 }
+
+/**
+ * Records every text the server status shows (call before opening a file),
+ * so a short "indexing" phase is not missed between polls.
+ */
+export async function recordServerStatus(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="status-server"]');
+    const seen: string[] = [];
+    Object.assign(window, { serverStatusSeen: seen });
+    if (!el) return;
+    new MutationObserver(() => {
+      seen.push(el.textContent);
+    }).observe(el, { childList: true, characterData: true, subtree: true });
+  });
+}
+
+/**
+ * Waits until the server has loaded the project: it reported indexing and
+ * is ready again. (While loading, typescript-language-server answers some
+ * requests from syntax only, e.g. definitions stop at imports.)
+ */
+export async function projectLoaded(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const seen =
+            (window as unknown as { serverStatusSeen?: string[] }).serverStatusSeen ?? [];
+          const indexed = seen.indexOf("TypeScript: indexing");
+          return indexed >= 0 && seen.slice(indexed).includes("TypeScript: ready");
+        }),
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+  await expect(page.getByTestId("status-server")).toHaveText("TypeScript: ready");
+}
+
+/**
+ * Clicks the middle of `word` in the first editor line containing `line`
+ * (exact text position, independent of how the line is highlighted).
+ */
+export async function clickWord(
+  page: Page,
+  line: string,
+  word: string,
+  modifier?: string,
+): Promise<void> {
+  const point = await page.evaluate(
+    ({ lineText, target }) => {
+      const lines = document.querySelectorAll(".editor-host:not([hidden]) .cm-line");
+      const row = [...lines].find((el) => el.textContent.includes(lineText));
+      if (!row) return null;
+      const start = row.textContent.indexOf(target, row.textContent.indexOf(lineText));
+      // Walk the text nodes to the character offset of `target`.
+      const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+      let offset = 0;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const length = node.textContent?.length ?? 0;
+        if (start < offset + length) {
+          const range = document.createRange();
+          const at = start - offset + Math.floor(target.length / 2);
+          range.setStart(node, Math.min(at, length - 1));
+          range.setEnd(node, Math.min(at + 1, length));
+          const rect = range.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        }
+        offset += length;
+      }
+      return null;
+    },
+    { lineText: line, target: word },
+  );
+  if (!point) throw new Error(`"${word}" not found in a line containing "${line}"`);
+  if (modifier) await page.keyboard.down(modifier);
+  await page.mouse.click(point.x, point.y);
+  if (modifier) await page.keyboard.up(modifier);
+  // Move away so the mouse hover tooltip does not open over the word.
+  await page.mouse.move(0, 0);
+}
