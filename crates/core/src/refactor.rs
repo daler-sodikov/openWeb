@@ -22,7 +22,7 @@ use ferrule_lsp_client::lsp_types::{
     SignatureHelpParams, SignatureHelpTriggerKind, TextDocumentIdentifier,
     TextDocumentPositionParams, Uri, WorkDoneProgressParams, WorkspaceEdit,
 };
-use ferrule_lsp_client::{PendingRequest, Supervisor, uri_to_path};
+use ferrule_lsp_client::{LspError, PendingRequest, Supervisor, uri_to_path};
 use tokio_util::sync::CancellationToken;
 
 use crate::completion::{CompletionSession, accept_edit, rank};
@@ -31,6 +31,10 @@ use crate::edits::{self, Expect, FileEdits, is_library};
 use crate::hover_html::{plain_text_html, render_markdown};
 use crate::lsp::{LanguageService, Refactoring, lsp_error};
 use crate::session::{DocHandle, DocState, Session, blocking};
+
+/// Retries of `completionItem/resolve` the server cancelled (project loading).
+const RESOLVE_RETRIES: u32 = 5;
+const RESOLVE_RETRY_DELAY: Duration = Duration::from_millis(200);
 
 /// Longest wait for a command the server runs for a code action.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -296,10 +300,32 @@ impl Session {
         let Some(supervisor) = service.running().filter(|_| supports) else {
             return Ok(item);
         };
-        let resolved = supervisor
-            .request::<ResolveCompletionItem>(item.clone(), &CancellationToken::new())
-            .await
-            .unwrap_or(item);
+        // While the server loads the project it may answer ContentModified
+        // (mapped to Cancelled); retry briefly. A failed resolve is never
+        // cached, so accepting retries it and keeps the auto-import edits.
+        let mut attempt = 0;
+        let resolved = loop {
+            match supervisor
+                .request::<ResolveCompletionItem>(item.clone(), &CancellationToken::new())
+                .await
+            {
+                Ok(resolved) => break resolved,
+                Err(LspError::Cancelled) if attempt < RESOLVE_RETRIES => {
+                    attempt += 1;
+                    tokio::time::sleep(RESOLVE_RETRY_DELAY).await;
+                }
+                Err(err) => {
+                    tracing::debug!(%err, "completionItem/resolve failed");
+                    return Ok(item);
+                }
+            }
+        };
+        // While the project loads, typescript-language-server answers from
+        // syntax only (no details, no auto-import edits): use the answer but
+        // resolve again later instead of caching it.
+        if service.status().state != ipc::ServerStateKind::Ready {
+            return Ok(resolved);
+        }
         service.with_completion(session, |s| {
             if let Some(slot) = s.items.get_mut(index as usize) {
                 *slot = resolved.clone();
@@ -824,7 +850,7 @@ impl Session {
     ) -> Result<ipc::WorkspaceEditResult, IpcError> {
         let supervisor = service
             .running()
-            .ok_or_else(|| lsp_error(ferrule_lsp_client::LspError::NotRunning))?;
+            .ok_or_else(|| lsp_error(LspError::NotRunning))?;
         let (mut edit, command) = match action {
             CodeActionOrCommand::Command(cmd) => (None, Some(cmd)),
             CodeActionOrCommand::CodeAction(mut action) => {
