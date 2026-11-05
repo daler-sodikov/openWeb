@@ -58,6 +58,11 @@ export class TerminalWindow {
     add.textContent = "+";
     add.title = "New Terminal Tab";
     add.setAttribute("aria-label", "New terminal tab");
+    // Keep the focus in the terminal (keys typed right after a click must
+    // not land on the button).
+    add.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+    });
     add.addEventListener("click", () => {
       void this.newTab();
     });
@@ -121,19 +126,21 @@ export class TerminalWindow {
   }
 
   private async open(): Promise<void> {
-    const list = await commands.terminals();
-    if (list.status === "ok" && list.data.unavailable) {
-      this.unavailable.textContent = list.data.unavailable;
-      this.unavailable.hidden = false;
-      return;
-    }
+    // The view exists and has the focus before any await: typing starts
+    // now and the view holds the input until the shell runs.
     const view = new TerminalView(this.host);
     view.element.hidden = false;
     this.views.append(view.element);
     for (const tab of this.tabs) tab.view.element.hidden = true;
-    // Typing starts now; the view holds the input until the shell runs.
     view.focus();
     const size = view.measure() ?? { cols: 80, rows: 24 };
+    const list = await commands.terminals();
+    if (list.status === "ok" && list.data.unavailable) {
+      view.dispose();
+      this.unavailable.textContent = list.data.unavailable;
+      this.unavailable.hidden = false;
+      return;
+    }
     let info: TerminalInfo;
     try {
       info = unwrap(await commands.openTerminal(size));
