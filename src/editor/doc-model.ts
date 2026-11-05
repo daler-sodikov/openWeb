@@ -187,6 +187,8 @@ export class DocModel {
     if (sendableUpdates(this.hub).length > 0) this.schedulePush();
     this.scheduleHighlights();
     this.scheduleFolds(FOLD_DEBOUNCE_MS);
+    // In-process results (oxc unused imports) follow edits without the server.
+    this.scheduleDiagnostics(FOLD_DEBOUNCE_MS);
   }
 
   // Commands (all go through the queue)

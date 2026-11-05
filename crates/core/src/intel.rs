@@ -256,9 +256,14 @@ impl Session {
         blocking(move || {
             let diagnostics = service.diagnostics_for(&handle.rel_path);
             let state = handle.lock()?;
+            let mut items = diagnostic_spans(&state.doc, &diagnostics);
+            if handle.lsp_language.is_some() && !handle.read_only {
+                items.extend(unused_import_spans(&state.doc, &handle.path, &items));
+                items.sort_by_key(|d| (d.from, d.to));
+            }
             Ok(ipc::DocDiagnostics {
                 version: state.doc.version(),
-                items: diagnostic_spans(&state.doc, &diagnostics),
+                items,
             })
         })
         .await
@@ -293,4 +298,41 @@ fn line_text(rope: &Rope, line: u32) -> String {
     }
     let text: String = rope.line(line).chars().take(300).collect();
     text.trim().to_owned()
+}
+
+/// Unused imports found in-process with oxc (`docs/ARCHITECTURE.md`, 4.8),
+/// shown faded right after an edit without waiting for the server. Imports
+/// the server already marks as unnecessary are not repeated.
+fn unused_import_spans(
+    doc: &ferrule_buffer::Document,
+    path: &std::path::Path,
+    server: &[ipc::DiagnosticSpan],
+) -> Vec<ipc::DiagnosticSpan> {
+    ferrule_lang_js::unused_imports(&doc.text(), path)
+        .into_iter()
+        .filter_map(|unused| {
+            let from = to_u32(doc.byte_to_utf16(unused.start));
+            let to = to_u32(doc.byte_to_utf16(unused.end));
+            let known = server
+                .iter()
+                .any(|d| d.unnecessary && d.from < to && from < d.to);
+            if known {
+                return None;
+            }
+            let message = match unused.names.as_slice() {
+                [name] => format!("Unused import '{name}'"),
+                names => format!("Unused imports: {}", names.join(", ")),
+            };
+            Some(ipc::DiagnosticSpan {
+                from,
+                to,
+                severity: ipc::Severity::Hint,
+                message,
+                source: Some("oxc".into()),
+                code: None,
+                unnecessary: true,
+                deprecated: false,
+            })
+        })
+        .collect()
 }

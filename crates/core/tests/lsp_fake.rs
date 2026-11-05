@@ -341,3 +341,49 @@ async fn a_missing_server_is_reported_and_editing_still_works() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn unused_imports_show_without_any_server() {
+    let missing = std::env::temp_dir().join("ferrule-no-such-server");
+    let text = "import { a, b } from \"./lib\";\nimport * as unused from \"./other\";\nexport const x = a;\n";
+    let f = fixture(&missing, &[("u.ts", text)]).await;
+    let doc = f.session.open_document("u.ts".into()).await.unwrap();
+    let items = f.session.doc_diagnostics(doc.doc_id).await.unwrap().items;
+    let oxc: Vec<(u32, u32, &str)> = items
+        .iter()
+        .filter(|d| d.source.as_deref() == Some("oxc"))
+        .map(|d| (d.from, d.to, d.message.as_str()))
+        .collect();
+    let second = utf16("import { a, b } from \"./lib\";\n");
+    assert_eq!(
+        oxc,
+        [
+            (12, 13, "Unused import 'b'"),
+            (
+                second,
+                second + utf16("import * as unused from \"./other\";"),
+                "Unused import 'unused'"
+            ),
+        ]
+    );
+    assert!(
+        items
+            .iter()
+            .all(|d| d.unnecessary && d.severity == Severity::Hint)
+    );
+    // Using `b` removes its hint at once (no server involved).
+    let end = utf16(text);
+    let changed = f
+        .session
+        .apply_changes(
+            doc.doc_id,
+            doc.version,
+            vec![typed(end, end, "export const y = b;\n")],
+        )
+        .await
+        .unwrap();
+    let items = f.session.doc_diagnostics(doc.doc_id).await.unwrap();
+    assert_eq!(items.version, changed.version);
+    assert_eq!(items.items.len(), 1);
+    assert_eq!(items.items[0].message, "Unused import 'unused'");
+}
