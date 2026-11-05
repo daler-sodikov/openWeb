@@ -7,6 +7,7 @@ mod completion;
 mod convert;
 mod edits;
 mod events;
+mod git;
 mod hover_html;
 mod intel;
 mod lsp;

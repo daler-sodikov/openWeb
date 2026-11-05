@@ -13,20 +13,22 @@ use std::time::Duration;
 mod events;
 
 pub use events::{
-    FsChanged, IndexStatus, ProblemsChanged, ServerStatusChanged, TauriSink, TerminalExitedEvent,
-    TerminalFrameEvent, encode as encode_event,
+    FsChanged, GitStatusEvent, IndexStatus, ProblemsChanged, ServerStatusChanged, TauriSink,
+    TerminalExitedEvent, TerminalFrameEvent, encode as encode_event,
 };
 
 use ferrule_core::{Session, SessionConfig};
 use ferrule_ipc::{
     AppInfo, CaretDirection, CaretInfo, ChangeTransaction, CodeActionView, CompletionDetails,
     CompletionList, DirEntry, DocDiagnostics, DocId, DocStatus, DocumentEdit, DocumentReload,
-    EditorSelection, FileProblems, FindResults, FoldRanges, FrontendReadyReport, Highlights,
-    HoverResult, IpcError, KeyBinding, NavKind, NavTarget, OpenedDocument, PROTOCOL_VERSION,
-    ProjectInfo, RefactoringPreview, RemoteUpdate, RenameTarget, ReplaceResult, SaveResult,
-    SearchResults, SearchTab, ServerStatus, SignatureView, StartupTarget, TERMINAL_FLAGS,
-    TerminalCell, TerminalInfo, TerminalKey, TerminalLink, TerminalList, TerminalSelectionKind,
-    TerminalSize, TextSearch, TraceSample, UsageResults, WorkspaceEditResult,
+    DocumentReplace, EditorSelection, FileProblems, FindResults, FoldRanges, FrontendReadyReport,
+    GitBlame, GitBranch, GitCommit, GitDeleteResult, GitDiff, GitDiffMode, GitLineChanges,
+    GitStatus, Highlights, HoverResult, IpcError, KeyBinding, NavKind, NavTarget, OpenedDocument,
+    PROTOCOL_VERSION, ProjectInfo, RefactoringPreview, RemoteUpdate, RenameTarget, ReplaceResult,
+    SaveResult, SearchResults, SearchTab, ServerStatus, SignatureView, StartupTarget,
+    TERMINAL_FLAGS, TerminalCell, TerminalInfo, TerminalKey, TerminalLink, TerminalList,
+    TerminalSelectionKind, TerminalSize, TextSearch, TraceSample, UsageResults,
+    WorkspaceEditResult,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -712,6 +714,146 @@ async fn terminal_ack(session: SessionState<'_>, id: u32, seq: u32) -> Result<()
     session.terminal_ack(id, seq).await
 }
 
+/// The latest Git status of the project.
+#[tauri::command]
+#[specta::specta]
+async fn git_status(session: SessionState<'_>) -> Result<GitStatus, IpcError> {
+    session.git_status().await
+}
+
+/// Asks for a Git status refresh (the result arrives as an event).
+#[tauri::command]
+#[specta::specta]
+async fn git_refresh(session: SessionState<'_>) -> Result<(), IpcError> {
+    session.git_refresh().await
+}
+
+/// Lines of a document that differ from the Git index.
+#[tauri::command]
+#[specta::specta]
+async fn git_line_changes(
+    session: SessionState<'_>,
+    doc_id: DocId,
+) -> Result<GitLineChanges, IpcError> {
+    session.git_line_changes(doc_id).await
+}
+
+/// The edit that rolls a changed region back to the index text.
+#[tauri::command]
+#[specta::specta]
+async fn git_rollback_hunk(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    version: u32,
+    line: u32,
+    lines: u32,
+) -> Result<DocumentReplace, IpcError> {
+    session
+        .git_rollback_hunk(doc_id, version, line, lines)
+        .await
+}
+
+/// A project file against HEAD.
+#[tauri::command]
+#[specta::specta]
+async fn git_diff(
+    session: SessionState<'_>,
+    path: String,
+    mode: GitDiffMode,
+) -> Result<GitDiff, IpcError> {
+    session.git_diff(path, mode).await
+}
+
+/// Who last changed each line of a document.
+#[tauri::command]
+#[specta::specta]
+async fn git_blame(session: SessionState<'_>, doc_id: DocId) -> Result<GitBlame, IpcError> {
+    session.git_blame(doc_id).await
+}
+
+/// Commits of the current branch, or of one file.
+#[tauri::command]
+#[specta::specta]
+async fn git_log(
+    session: SessionState<'_>,
+    path: Option<String>,
+) -> Result<Vec<GitCommit>, IpcError> {
+    session.git_log(path).await
+}
+
+/// Local and remote branches.
+#[tauri::command]
+#[specta::specta]
+async fn git_branches(session: SessionState<'_>) -> Result<Vec<GitBranch>, IpcError> {
+    session.git_branches().await
+}
+
+/// Checks out a branch.
+#[tauri::command]
+#[specta::specta]
+async fn git_checkout(
+    session: SessionState<'_>,
+    name: String,
+    remote: bool,
+) -> Result<(), IpcError> {
+    session.git_checkout(name, remote).await
+}
+
+/// Creates a branch.
+#[tauri::command]
+#[specta::specta]
+async fn git_create_branch(
+    session: SessionState<'_>,
+    name: String,
+    checkout: bool,
+) -> Result<(), IpcError> {
+    session.git_create_branch(name, checkout).await
+}
+
+/// Deletes a local branch.
+#[tauri::command]
+#[specta::specta]
+async fn git_delete_branch(
+    session: SessionState<'_>,
+    name: String,
+    force: bool,
+) -> Result<GitDeleteResult, IpcError> {
+    session.git_delete_branch(name, force).await
+}
+
+/// Stages files.
+#[tauri::command]
+#[specta::specta]
+async fn git_stage(session: SessionState<'_>, paths: Vec<String>) -> Result<(), IpcError> {
+    session.git_stage(paths).await
+}
+
+/// Unstages files.
+#[tauri::command]
+#[specta::specta]
+async fn git_unstage(session: SessionState<'_>, paths: Vec<String>) -> Result<(), IpcError> {
+    session.git_unstage(paths).await
+}
+
+/// Saves, stages the checked files and commits.
+#[tauri::command]
+#[specta::specta]
+async fn git_commit(
+    session: SessionState<'_>,
+    message: String,
+    amend: bool,
+    paths: Vec<String>,
+) -> Result<String, IpcError> {
+    session.git_commit(message, amend, paths).await
+}
+
+/// The last commit's message (for Amend).
+#[tauri::command]
+#[specta::specta]
+async fn git_last_commit_message(session: SessionState<'_>) -> Result<Option<String>, IpcError> {
+    session.git_last_commit_message().await
+}
+
 /// Builds the tauri-specta registry of every IPC command and constant.
 ///
 /// The same builder serves the runtime invoke handler and the TypeScript
@@ -781,6 +923,21 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             rename_terminal,
             close_terminal,
             terminal_ack,
+            git_status,
+            git_refresh,
+            git_line_changes,
+            git_rollback_hunk,
+            git_diff,
+            git_blame,
+            git_log,
+            git_branches,
+            git_checkout,
+            git_create_branch,
+            git_delete_branch,
+            git_stage,
+            git_unstage,
+            git_commit,
+            git_last_commit_message,
         ])
         .events(tauri_specta::collect_events![
             FsChanged,
@@ -788,7 +945,8 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             ServerStatusChanged,
             ProblemsChanged,
             TerminalFrameEvent,
-            TerminalExitedEvent
+            TerminalExitedEvent,
+            GitStatusEvent
         ])
         .constant("PROTOCOL_VERSION", PROTOCOL_VERSION)
         .constant("TERMINAL_FLAGS", TERMINAL_FLAGS)

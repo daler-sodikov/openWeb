@@ -10,7 +10,7 @@ use specta::Type;
 
 /// Version of the IPC protocol. Bump on any breaking change to a command,
 /// event or DTO so that a mismatched frontend refuses to run.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Operating system the backend runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -343,6 +343,12 @@ pub enum KeyAction {
     SortImports,
     ReformatCode,
     ToggleTerminal,
+    ToggleCommit,
+    ToggleGitLog,
+    GitBranches,
+    ShowDiff,
+    ToggleBlame,
+    RollbackHunk,
 }
 
 /// Modifier used in double-tap gestures.
@@ -1178,6 +1184,238 @@ pub enum TerminalSelectionKind {
     Word,
     /// By line (triple click).
     Line,
+}
+
+// Git (docs/ARCHITECTURE.md, 4.9)
+
+/// How a file shows in the tree and the commit window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum GitFileKind {
+    Conflicted,
+    Modified,
+    Added,
+    Deleted,
+    Renamed,
+    Untracked,
+    Ignored,
+}
+
+/// A changed, untracked or ignored file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFile {
+    /// Project-relative path.
+    pub path: String,
+    /// Path before a rename.
+    pub orig_path: Option<String>,
+    /// Kind.
+    pub kind: GitFileKind,
+    /// Has changes staged in the index.
+    pub staged: bool,
+    /// Has changes not staged (untracked files count as unstaged).
+    pub unstaged: bool,
+}
+
+/// The repository state (`git-status-event`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatus {
+    /// Why Git features are off (no repository, git not installed), if so.
+    pub unavailable: Option<String>,
+    /// Current branch; `None` when detached or unavailable.
+    pub branch: Option<String>,
+    /// Abbreviated HEAD commit; `None` before the first commit.
+    pub head: Option<String>,
+    /// Upstream branch.
+    pub upstream: Option<String>,
+    /// Commits ahead of the upstream.
+    pub ahead: u32,
+    /// Commits behind it.
+    pub behind: u32,
+    /// Changed, untracked and ignored files inside the project.
+    pub files: Vec<GitFile>,
+    /// Folders containing changed or untracked files.
+    pub changed_dirs: Vec<String>,
+    /// Ignored folders (everything below is ignored).
+    pub ignored_dirs: Vec<String>,
+    /// Increases with every refresh.
+    pub generation: u32,
+}
+
+/// A gutter hunk: lines of the document that differ from the index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHunk {
+    /// Added, modified or deleted.
+    pub kind: GitHunkKind,
+    /// First document line (zero-based; for a deletion, the line after it).
+    pub line: u32,
+    /// Number of document lines (0 for a deletion).
+    pub lines: u32,
+    /// The index text of the lines it replaces.
+    pub old_text: String,
+}
+
+/// Kind of a [`GitHunk`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum GitHunkKind {
+    Added,
+    Modified,
+    Deleted,
+}
+
+/// Gutter hunks of a document version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLineChanges {
+    /// Document version they belong to.
+    pub version: u32,
+    /// Whether the file is tracked (untracked files have no markers).
+    pub tracked: bool,
+    /// Hunks in document order.
+    pub hunks: Vec<GitHunk>,
+}
+
+/// Unified or side-by-side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum GitDiffMode {
+    Unified,
+    SideBySide,
+}
+
+/// Kind of a diff line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum GitLineKind {
+    Context,
+    Added,
+    Deleted,
+}
+
+/// One line of a diff.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDiffLine {
+    /// One-based line in the old version.
+    pub old_line: Option<u32>,
+    /// One-based line in the new version.
+    pub new_line: Option<u32>,
+    /// Kind.
+    pub kind: GitLineKind,
+    /// Text.
+    pub text: String,
+    /// Changed words: `[from, to]` UTF-16 pairs, flattened.
+    pub words: Vec<u32>,
+}
+
+/// A row of the side-by-side view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitSplitRow {
+    /// Old side.
+    pub left: Option<GitDiffLine>,
+    /// New side.
+    pub right: Option<GitDiffLine>,
+}
+
+/// A file's changes against HEAD, ready to draw.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDiff {
+    /// Project-relative path.
+    pub path: String,
+    /// Label of the old side (`HEAD (abc123)`).
+    pub old_label: String,
+    /// Label of the new side.
+    pub new_label: String,
+    /// Rows for the unified mode (empty in side-by-side mode).
+    pub unified: Vec<GitDiffLine>,
+    /// Rows for the side-by-side mode (empty in unified mode).
+    pub split: Vec<GitSplitRow>,
+    /// Number of changed regions.
+    pub hunks: u32,
+}
+
+/// Who last changed a line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBlameLine {
+    /// Abbreviated commit (empty for uncommitted lines).
+    pub commit: String,
+    /// Author.
+    pub author: String,
+    /// Author email.
+    pub email: String,
+    /// Author time, seconds since the epoch.
+    pub time: u32,
+    /// Commit subject.
+    pub summary: String,
+    /// Whether the line is committed.
+    pub committed: bool,
+}
+
+/// Blame of a document version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBlame {
+    /// Document version.
+    pub version: u32,
+    /// One entry per document line.
+    pub lines: Vec<GitBlameLine>,
+}
+
+/// A commit in a history list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommit {
+    /// Full id.
+    pub id: String,
+    /// Abbreviated id.
+    pub short_id: String,
+    /// Author.
+    pub author: String,
+    /// Author email.
+    pub email: String,
+    /// Author time, seconds since the epoch.
+    pub time: u32,
+    /// Subject.
+    pub subject: String,
+    /// Number of parents (2+ for merges).
+    pub parents: u32,
+}
+
+/// A branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    /// Short name.
+    pub name: String,
+    /// Remote-tracking branch.
+    pub remote: bool,
+    /// Checked out.
+    pub current: bool,
+    /// Upstream of a local branch.
+    pub upstream: Option<String>,
+    /// Subject of its commit.
+    pub subject: String,
+}
+
+/// Result of deleting a branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum GitDeleteResult {
+    /// Deleted.
+    Deleted,
+    /// Not deleted: not merged into the current branch (delete with force
+    /// to drop its commits).
+    NotMerged,
 }
 
 #[cfg(test)]

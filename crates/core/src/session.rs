@@ -409,6 +409,12 @@ impl Session {
         let project = runtime.project.clone();
         tracing::info!(root = ?project.root(), "project opened");
 
+        // Find the Git repository in the background.
+        let git = runtime.git.clone();
+        let root = project.root().to_path_buf();
+        let program = self.git_program();
+        tokio::task::spawn_blocking(move || git.start(&root, program));
+
         // Index in the background; the tree is usable immediately.
         self.sink
             .emit(SessionEvent::IndexStatus(runtime.index_state()));
@@ -951,7 +957,7 @@ impl Session {
         let recovery = self.recovery.clone();
         let now = self.now_ms();
         let lsp = self.lsp_for(&handle);
-        blocking(move || {
+        let result = blocking(move || {
             let mut guard = handle.lock()?;
             let state = &mut *guard;
             // EditorConfig: whitespace and final newline as one undoable step.
@@ -1005,7 +1011,13 @@ impl Session {
                 status: state.status(),
             })
         })
-        .await
+        .await;
+        if result.is_ok()
+            && let Ok(runtime) = self.runtime()
+        {
+            runtime.git.request_refresh();
+        }
+        result
     }
 
     /// Breadcrumbs and the bracket pair at a UTF-16 offset.

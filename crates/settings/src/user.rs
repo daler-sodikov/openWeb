@@ -6,7 +6,8 @@
 //! ```json
 //! {
 //!   "typescript": { "serverPath": "/opt/tools/typescript-language-server" },
-//!   "terminal": { "shellPath": "/bin/bash", "shellArgs": ["-l"] }
+//!   "terminal": { "shellPath": "/bin/bash", "shellArgs": ["-l"] },
+//!   "git": { "path": "/usr/local/bin/git" }
 //! }
 //! ```
 
@@ -22,6 +23,8 @@ pub struct UserSettings {
     /// `terminal.shellPath` and `terminal.shellArgs`: the shell new
     /// terminals start (default: detected from the environment).
     pub terminal_shell: Option<(PathBuf, Vec<String>)>,
+    /// `git.path`: the git executable (default: `git` on `PATH`).
+    pub git_path: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Default)]
@@ -29,6 +32,13 @@ pub struct UserSettings {
 struct File {
     typescript: TypeScript,
     terminal: Terminal,
+    git: GitSettings,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GitSettings {
+    path: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -67,6 +77,11 @@ pub fn load_user_settings(path: &Path) -> Result<UserSettings, String> {
             .shell_path
             .filter(|p| !p.trim().is_empty())
             .map(|p| (PathBuf::from(p), file.terminal.shell_args)),
+        git_path: file
+            .git
+            .path
+            .filter(|p| !p.trim().is_empty())
+            .map(PathBuf::from),
     })
 }
 

@@ -90,6 +90,19 @@ pub enum Action {
     ReformatCode,
     /// Show or hide the Terminal tool window.
     ToggleTerminal,
+    /// Show or hide the Commit tool window.
+    ToggleCommit,
+    /// Show or hide the Git log tool window.
+    ToggleGitLog,
+    /// Branches popup (no default key; also the status bar branch).
+    GitBranches,
+    /// Diff of the current file against HEAD (no default key; Ctrl/Cmd+D
+    /// in the commit window).
+    ShowDiff,
+    /// Show or hide blame in the gutter (no default key).
+    ToggleBlame,
+    /// Roll back the change at the caret (to the index).
+    RollbackHunk,
 }
 
 /// Modifier used in double-tap gestures.
@@ -173,11 +186,17 @@ pub fn action_name(action: Action) -> &'static str {
         Action::SortImports => "Sort Imports",
         Action::ReformatCode => "Reformat Code",
         Action::ToggleTerminal => "Terminal",
+        Action::ToggleCommit => "Commit",
+        Action::ToggleGitLog => "Git Log",
+        Action::GitBranches => "Branches…",
+        Action::ShowDiff => "Show Diff",
+        Action::ToggleBlame => "Annotate with Git Blame",
+        Action::RollbackHunk => "Rollback Lines",
     }
 }
 
 /// Every action, in display order.
-pub const ALL_ACTIONS: [Action; 38] = [
+pub const ALL_ACTIONS: [Action; 44] = [
     Action::GotoFile,
     Action::GotoSymbol,
     Action::GotoLine,
@@ -216,6 +235,12 @@ pub const ALL_ACTIONS: [Action; 38] = [
     Action::SortImports,
     Action::ReformatCode,
     Action::ToggleTerminal,
+    Action::ToggleCommit,
+    Action::ToggleGitLog,
+    Action::GitBranches,
+    Action::ShowDiff,
+    Action::ToggleBlame,
+    Action::RollbackHunk,
 ];
 
 /// IntelliJ-style default bindings (from the publicly documented default
@@ -294,6 +319,9 @@ pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
             Chord(if mac { "Mod-6" } else { "Alt-6" }),
         ),
         bind(A::ToggleTerminal, Chord("Alt-F12")),
+        bind(A::ToggleCommit, Chord(if mac { "Mod-0" } else { "Alt-0" })),
+        bind(A::ToggleGitLog, Chord(if mac { "Mod-9" } else { "Alt-9" })),
+        bind(A::RollbackHunk, Chord("Mod-Alt-z")),
     ]
 }
 
@@ -331,6 +359,9 @@ mod tests {
                 Action::SortImports,
                 Action::ReformatCode,
                 Action::ToggleTerminal,
+                Action::ToggleCommit,
+                Action::ToggleGitLog,
+                Action::RollbackHunk,
             ] {
                 assert_eq!(
                     keymap.iter().filter(|b| b.action == action).count(),

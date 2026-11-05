@@ -44,6 +44,8 @@ pub(crate) struct ProjectRuntime {
     pub lsp: Arc<LanguageService>,
     /// The project's terminals.
     pub terminals: ferrule_terminal::Terminals,
+    /// The Git repository containing the project.
+    pub git: Arc<crate::git::GitState>,
 }
 
 impl Drop for ProjectRuntime {
@@ -72,6 +74,7 @@ impl ProjectRuntime {
             .unwrap_or_default();
         let project = Arc::new(project);
         let terminals = crate::terminal::project_terminals(terminal_backend, sink.clone());
+        let git = Arc::new(crate::git::GitState::new(sink.clone()));
         let lsp = Arc::new(LanguageService::new(
             ferrule_lang_js::typescript_server(),
             project.clone(),
@@ -89,6 +92,7 @@ impl ProjectRuntime {
             project_file,
             recent: Mutex::new(recent),
             terminals,
+            git,
         }
     }
 
@@ -270,4 +274,5 @@ fn on_fs_change(
     }
     sink.emit(SessionEvent::FsChanged(FsChangeBatch { changes }));
     sink.emit(SessionEvent::IndexStatus(runtime.index_state()));
+    runtime.git.request_refresh();
 }

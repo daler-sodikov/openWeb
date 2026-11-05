@@ -163,6 +163,12 @@ pub(crate) fn action_to_ipc(action: ferrule_settings::Action) -> ipc::KeyAction 
         A::SortImports => K::SortImports,
         A::ReformatCode => K::ReformatCode,
         A::ToggleTerminal => K::ToggleTerminal,
+        A::ToggleCommit => K::ToggleCommit,
+        A::ToggleGitLog => K::ToggleGitLog,
+        A::GitBranches => K::GitBranches,
+        A::ShowDiff => K::ShowDiff,
+        A::ToggleBlame => K::ToggleBlame,
+        A::RollbackHunk => K::RollbackHunk,
     }
 }
 

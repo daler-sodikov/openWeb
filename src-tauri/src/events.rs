@@ -2,7 +2,7 @@
 
 use ferrule_core::{EventSink, SessionEvent};
 use ferrule_ipc::{
-    FileProblems, FsChangeBatch, IndexState, ServerStatus, TerminalExited, TerminalFrame,
+    FileProblems, FsChangeBatch, GitStatus, IndexState, ServerStatus, TerminalExited, TerminalFrame,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -33,6 +33,10 @@ pub struct TerminalFrameEvent(pub TerminalFrame);
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct TerminalExitedEvent(pub TerminalExited);
 
+/// The repository status changed (`git-status-event`).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct GitStatusEvent(pub GitStatus);
+
 /// Event name and JSON payload of a session event, for transports other
 /// than Tauri events (the headless test backend).
 pub fn encode(event: &SessionEvent) -> (&'static str, serde_json::Value) {
@@ -51,6 +55,7 @@ pub fn encode(event: &SessionEvent) -> (&'static str, serde_json::Value) {
         SessionEvent::TerminalExited(exited) => {
             (TerminalExitedEvent::NAME, serde_json::to_value(exited))
         }
+        SessionEvent::GitStatus(status) => (GitStatusEvent::NAME, serde_json::to_value(status)),
     };
     (name, payload.unwrap_or(serde_json::Value::Null))
 }
@@ -67,6 +72,7 @@ impl<R: Runtime> EventSink for TauriSink<R> {
             SessionEvent::ProblemsChanged(problems) => ProblemsChanged(problems).emit(&self.0),
             SessionEvent::TerminalFrame(frame) => TerminalFrameEvent(frame).emit(&self.0),
             SessionEvent::TerminalExited(exited) => TerminalExitedEvent(exited).emit(&self.0),
+            SessionEvent::GitStatus(status) => GitStatusEvent(status).emit(&self.0),
         };
         if let Err(err) = result {
             tracing::warn!(%err, "emitting an event failed");
