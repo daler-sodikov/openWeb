@@ -8,12 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added (M3b: completion, refactoring, code actions)
 
-- Completion popup: triggered by typing `.`, `"`, `'`, `/`, `@`, `<` or
-  Ctrl+Space; fuzzy-filtered and ranked in Rust while typing; lazy detail
+- Completion popup: opened by typing a word or Ctrl+Space (not yet by
+  trigger characters such as `.`); fuzzy-filtered and ranked in Rust; lazy detail
   loading (`completionItem/resolve`); snippet expansion with tab stops and
   `additionalTextEdits` (auto-import) as one undoable step.
-- Parameter hints (Ctrl+P, macOS Cmd+P): signature popup with the active
-  parameter highlighted; also triggered by typing `(` or `,`.
+- Parameter hints (Ctrl+P on every OS): signature popup with the active
+  parameter highlighted (not yet opened by typing `(` or `,`).
 - Find Usages (Alt+F7): references panel grouped by file; click to navigate.
 - Rename (Shift+F6): preview dialog showing affected files and occurrence
   counts; open documents edited as one undo step, closed files rewritten
@@ -21,8 +21,10 @@ All notable changes to this project are documented here. The format follows
 - Code Actions (Alt+Enter): quick fixes and refactorings at the caret,
   including "Add missing import" and "Organize Imports".
 - Reformat Code (Ctrl+Alt+L, macOS Cmd+Option+L) via the language server.
-- Optimize Imports (Ctrl+Alt+O) and Sort Imports (Ctrl+Alt+Shift+O) using
-  `oxc` for instant in-process import sorting.
+- Optimize Imports (Ctrl+Alt+O, the server's organize imports) and Sort
+  Imports (Ctrl+Alt+Shift+O, in-process with `oxc`).
+- Typing-path timing spans (`FERRULE_TYPING_TRACE`) and a before/after
+  measurement in `perf/RESULTS.md`.
 - Read-only tabs for files outside the project (`lib.dom.d.ts`,
   `node_modules`): lock marker in the tab, typing disabled, hover and
   navigation still work.
@@ -34,6 +36,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed (M3b)
 
 - Completion ranking prefers exact label matches over fuzzy matches.
+- A completion item whose resolve failed or was answered while the server
+  was loading was cached unresolved, so accepting it lost its auto-import.
 
 ### Added (M3a: language server, diagnostics, hover, navigation)
 

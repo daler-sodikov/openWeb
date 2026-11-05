@@ -392,16 +392,46 @@ Known gaps found in M3a (tracked here):
     workspace edits, import sorting); real-server integration tests;
     Playwright `ui` tests for 1–8; all checks pass with zero warnings.
 
-Status: points 1–11 verified on 2026-11-05 on Linux, with
-typescript-language-server 6.0.3 and TypeScript 6.0.3. All cargo tests pass
-(146 Rust tests), 28 Vitest tests pass, and 32 Playwright UI tests pass
-including the rename/find-usages/completion test. Not yet confirmed on
-macOS/Windows CI.
+Status (re-checked 2026-11-05 on Linux, typescript-language-server 6.0.3):
+**partly done.** Verified against the real server in
+`crates/core/tests/lsp_real_m3b.rs` and, where noted, by the Playwright UI
+test "Find Usages, Rename with preview and completion".
 
-Known gaps found in M3b (tracked here):
+- Point 1, completion: Ctrl+Space and typing a word open the popup (UI test);
+  ranking and filtering in Rust, lazy details, auto-import on accept (real
+  server); snippet parsing and tab-stop positions (unit tests). **Not done:**
+  typing a trigger character (`.`, `"`, `'`, `/`, `@`, `<`) does not open the
+  popup; the view never sends the trigger (the backend handles one, tested
+  with `.`).
+- Point 2, parameter hints: Ctrl+P works (backend verified, UI not tested).
+  **Not done:** opening on typing `(` or `,`; the binding is Ctrl+P on macOS
+  too (plan: Cmd+P).
+- Points 3 and 4, Find Usages and Rename: done (real server and UI test),
+  including the skip of a closed file changed after the preview and one undo
+  step per open document (real server).
+- Point 5, code actions: Alt+Enter, a server-command quick fix ("Update
+  import" through `workspace/applyEdit`) and Organize Imports verified on the
+  real server; the Alt+Enter popup has no UI test.
+- Point 6, formatting: verified on the real server; no UI test.
+- Point 7, oxc: Sort Imports done (golden tests, real session). **Not done:**
+  oxc unused-import results are not shown in the editor (unused imports are
+  faded only through the server's "unnecessary" hints).
+- Point 8, read-only library files: `lib.dom.d.ts` opens read-only, refuses
+  edits, navigation works inside it (real server); the RO tab marker has no
+  UI test.
+- Point 9, typing latency: measured before and after, no measurable
+  regression (`perf/RESULTS.md`); the 8 ms budget is still missed on Xvfb.
+- Point 10, fixture types: done; `tsc` reports no errors on the fixture.
+- Point 11, tests: 155 Rust tests, 28 Vitest tests, 34 Playwright tests
+  (33 `ui`, 1 smoke) pass. Missing: UI tests for signature help, Alt+Enter,
+  formatting and read-only tabs; mock-server tests for completion and rename.
 
-- [ ] oxc unused imports shown as faded diagnostics (doc_diagnostics) —
-      the analysis runs but results are not yet displayed as squiggles
+Open M3b items:
+
+- [ ] Completion opens on trigger characters
+- [ ] Parameter hints open on `(` and `,`; Cmd+P on macOS
+- [ ] oxc unused imports shown in the editor
+- [ ] UI tests for signature help, Alt+Enter, formatting, read-only tabs
 - [ ] macOS/Windows CI confirmation (needs a push)
 
 ### Later in the TypeScript track
