@@ -65,6 +65,7 @@ import {
   colorSchemeFlag,
   editorChrome,
   onColorSchemeChange,
+  positionCompletionInfo,
   prefersDark,
 } from "./theme";
 import {
@@ -593,6 +594,7 @@ export class EditorPane implements DocPane {
         autocompletion({
           override: [(context) => this.completions(context)],
           activateOnTyping: true,
+          positionInfo: positionCompletionInfo,
           maxRenderedOptions: 200,
         }),
         EditorView.updateListener.of((update) => {

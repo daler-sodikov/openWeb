@@ -2,6 +2,7 @@
 // for selection, tooltips and the completion list use the dark variants)
 // and styles those parts through the CSS variables in styles.css. Colors
 // live only in styles.css; this file maps CodeMirror's parts to them.
+import type { autocompletion } from "@codemirror/autocomplete";
 import { Compartment, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
@@ -88,8 +89,33 @@ export const editorChrome: Extension = EditorView.theme({
   ".cm-tooltip.cm-completionInfo": {
     ...popup,
     padding: "6px 10px",
-    maxWidth: "min(420px, 45vw)",
-    maxHeight: "min(320px, 60vh)",
+    // Width and height limits are set per position (positionCompletionInfo).
     overflowY: "auto",
   },
 });
+
+/** Largest size of the completion documentation panel (also in the theme). */
+const INFO_WIDTH = 420;
+const INFO_HEIGHT = 320;
+const INFO_GAP = 4;
+
+/**
+ * Places the completion documentation panel next to the list and inside the
+ * window. Its content loads after it opens and can grow, so it is placed as
+ * if it already had its largest height, and its height is capped to the room
+ * below it (it scrolls inside rather than leaving the window).
+ */
+type PositionInfo = NonNullable<NonNullable<Parameters<typeof autocompletion>[0]>["positionInfo"]>;
+
+export const positionCompletionInfo: PositionInfo = (_view, list, option, _info, space) => {
+  const roomRight = space.right - list.right;
+  const roomLeft = list.left - space.left;
+  const left = roomRight < INFO_WIDTH && roomLeft > roomRight;
+  const width = Math.max(0, Math.min(INFO_WIDTH, (left ? roomLeft : roomRight) - INFO_GAP));
+  const top = Math.max(space.top, Math.min(option.top, space.bottom - INFO_HEIGHT));
+  const height = Math.max(0, Math.min(INFO_HEIGHT, space.bottom - top - INFO_GAP));
+  return {
+    style: `top: ${String(top - list.top)}px; max-width: ${String(width)}px; max-height: ${String(height)}px`,
+    class: left ? "cm-completionInfo-left" : "cm-completionInfo-right",
+  };
+};
