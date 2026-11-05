@@ -184,7 +184,7 @@ function selectionContrast(): { plain: number; lowestToken: number; token: strin
     const r = ratio(parse(getComputedStyle(span).color), bg);
     if (r < lowestToken) {
       lowestToken = r;
-      token = `${span.className} "${span.textContent ?? ""}"`;
+      token = `${span.className} "${span.textContent}"`;
     }
   }
   return {
@@ -249,7 +249,6 @@ for (const scheme of ["dark", "light"] as const) {
         type: `${scheme} selection`,
         description: `plain text ${String(focused?.plain)}:1, lowest token ${String(focused?.lowestToken)}:1 (${focused?.token ?? ""})`,
       });
-      console.log(`[${scheme}] focused selection`, JSON.stringify(focused));
       const selectionShot = await shot(
         page,
         info,
@@ -264,7 +263,10 @@ for (const scheme of ["dark", "light"] as const) {
       await expect(layer.first()).toBeAttached();
       const unfocused = await page.evaluate(selectionContrast);
       expect(unfocused?.plain, "text on the unfocused selection").toBeGreaterThanOrEqual(AA);
-      console.log(`[${scheme}] unfocused selection`, JSON.stringify(unfocused), selectionShot);
+      info.annotations.push({
+        type: `${scheme} unfocused selection`,
+        description: `plain text ${String(unfocused?.plain)}:1, lowest token ${String(unfocused?.lowestToken)}:1; screenshot ${selectionShot}`,
+      });
 
       // Completion list and documentation panel.
       await openFile(page, "src/App.tsx");
@@ -328,7 +330,10 @@ for (const scheme of ["dark", "light"] as const) {
         [".cm-tooltip-autocomplete", ".cm-tooltip.cm-completionInfo"],
         `${scheme}-completion`,
       );
-      console.log(`[${scheme}] completion screenshot`, completionShot);
+      info.annotations.push({
+        type: `${scheme} completion screenshot`,
+        description: completionShot,
+      });
       await page.keyboard.press("Escape");
 
       // Parameter info.
