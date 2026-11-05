@@ -20,7 +20,8 @@
   --fr-scrollbar: #4a4e57;
   /* Translucent so the selection (drawn behind the text) shows through. */
   --fr-active-line: rgb(255 255 255 / 3.5%);
-  --fr-danger: #e0645c;
+  /* Bright enough for 4.5:1 on popups and hovered rows. */
+  --fr-danger: #ec7a72;
   --fr-warning: #d9a441;
   --fr-info: #6aa8f0;
   --fr-font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
@@ -70,18 +71,18 @@
 
     --tok-keyword: #b4235a;
     --tok-string: #2f7d5b;
-    --tok-string-special: #007f86;
+    --tok-string-special: #00777d;
     --tok-escape: #b45309;
     --tok-number: #a35a00;
     --tok-constant: #8a3fa0;
-    --tok-comment: #737b8c;
+    --tok-comment: #5f6675;
     --tok-function: #1d5fbf;
-    --tok-type: #007f86;
+    --tok-type: #00777d;
     --tok-variable-builtin: #8a3fa0;
     --tok-parameter: #5b3fb0;
     --tok-property: #345b88;
     --tok-operator: #4b5563;
-    --tok-punctuation: #6b7280;
+    --tok-punctuation: #5f6672;
     --tok-tag: #b4235a;
     --tok-attribute: #a35a00;
   }
@@ -548,7 +549,7 @@ button {
 }
 
 .vlist-row:hover {
-  background: var(--fr-surface-2);
+  background: var(--fr-hover-bg);
 }
 
 .vlist-row.selected {
@@ -559,6 +560,13 @@ button {
   background: none;
   color: var(--fr-accent);
   font-weight: 600;
+}
+
+/* On the selected row, muted and accent text cannot reach 4.5:1 against the
+   selection color: everything uses the text color (matches stay bold). */
+.vlist-row.selected,
+.vlist-row.selected * {
+  color: var(--fr-text);
 }
 
 .se-kind {
@@ -714,7 +722,7 @@ button {
 }
 
 .crumb-sep {
-  opacity: 0.6;
+  color: var(--fr-text-muted);
 }
 
 /* Folding and brackets */
@@ -742,7 +750,6 @@ button {
 /* Ignored entries in the project tree */
 .tree-row.ignored .tree-label {
   color: var(--fr-text-muted);
-  opacity: 0.7;
 }
 
 /* Token classes added in M2b */
