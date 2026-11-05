@@ -7,6 +7,9 @@ const ci = !!process.env.CI;
 // (for machines that do not have the terminal crates); terminal tests then
 // skip themselves. CI always builds the full backend.
 const native = process.env.FERRULE_E2E_NO_NATIVE === "1" ? " --no-default-features" : "";
+// FERRULE_E2E_FAKE_TERMINAL=1: terminals use the in-memory backend (echoes
+// input) so the terminal UI is tested without real shells.
+const fakeTerminals = process.env.FERRULE_E2E_FAKE_TERMINAL === "1" ? " --fake-terminals" : "";
 // Optional local override: path to an already installed Chromium/Chrome
 // binary, for machines where `bunx playwright install chromium` is not
 // possible. CI does not set it.
@@ -46,7 +49,7 @@ export default defineConfig({
       timeout: 600_000,
     },
     {
-      command: `cargo run --quiet -p ferrule-app${native} --features headless --bin ferrule-headless -- --port ${String(BACKEND_PORT)} --data-dir "${BACKEND_DATA}"`,
+      command: `cargo run --quiet -p ferrule-app${native} --features headless --bin ferrule-headless -- --port ${String(BACKEND_PORT)} --data-dir "${BACKEND_DATA}"${fakeTerminals}`,
       url: `${BACKEND_URL}/health`,
       reuseExistingServer: false,
       timeout: 900_000,

@@ -47,6 +47,8 @@ struct Pipe {
     tx: Mutex<Option<SyncSender<Vec<u8>>>>,
     stop: AtomicBool,
     exit: Mutex<Option<Option<i32>>>,
+    /// The line typed so far (`exit` + Enter ends the "shell").
+    line: Mutex<String>,
     log: Arc<FakeLog>,
 }
 
@@ -85,8 +87,18 @@ impl Write for EchoWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         lock(&self.0.log.written).extend_from_slice(buf);
         let text = String::from_utf8_lossy(buf);
-        if text.contains("exit\r") {
-            *lock(&self.0.exit) = Some(Some(0));
+        {
+            let mut line = lock(&self.0.line);
+            for c in text.chars() {
+                if c == '\r' {
+                    if line.trim() == "exit" {
+                        *lock(&self.0.exit) = Some(Some(0));
+                    }
+                    line.clear();
+                } else {
+                    line.push(c);
+                }
+            }
         }
         self.0.send(text.replace('\r', "\r\n").into_bytes());
         Ok(buf.len())
@@ -132,6 +144,7 @@ impl Backend for FakeBackend {
             tx: Mutex::new(Some(tx.clone())),
             stop: AtomicBool::new(false),
             exit: Mutex::new(None),
+            line: Mutex::new(String::new()),
             log: self.log.clone(),
         });
         pipe.send(b"$ ".to_vec());

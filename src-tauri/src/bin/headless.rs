@@ -9,7 +9,10 @@
 //!   waiting up to 20 s for new events (long poll); `after=latest` returns
 //!   the current position immediately
 //!
-//! Usage: `ferrule-headless --port 1431 --data-dir <dir>`. Test-only: built
+//! Usage: `ferrule-headless --port 1431 --data-dir <dir> [--fake-terminals]`.
+//! `--fake-terminals` replaces real shells by the in-memory backend from
+//! `ferrule-terminal` (its shells echo what is typed), so the terminal UI
+//! can be tested on machines without the native backend. Test-only: built
 //! only with the `headless` feature, never bundled.
 
 use std::path::PathBuf;
@@ -74,20 +77,27 @@ impl EventQueue {
 struct Args {
     port: u16,
     data_dir: PathBuf,
+    fake_terminals: bool,
 }
 
 fn parse_args() -> anyhow::Result<Args> {
     let mut port = 1431;
     let mut data_dir = std::env::temp_dir().join("ferrule-headless");
+    let mut fake_terminals = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--port" => port = args.next().context("--port needs a value")?.parse()?,
             "--data-dir" => data_dir = args.next().context("--data-dir needs a value")?.into(),
+            "--fake-terminals" => fake_terminals = true,
             other => bail!("unknown argument {other:?}"),
         }
     }
-    Ok(Args { port, data_dir })
+    Ok(Args {
+        port,
+        data_dir,
+        fake_terminals,
+    })
 }
 
 fn main() -> anyhow::Result<()> {
@@ -95,7 +105,12 @@ fn main() -> anyhow::Result<()> {
     let args = parse_args()?;
     let events = Arc::new(EventQueue::default());
     let mut config = SessionConfig::new(args.data_dir);
-    config.terminal_backend = terminal_backend();
+    config.terminal_backend = if args.fake_terminals {
+        tracing::info!("terminals use the in-memory test backend");
+        Some(Arc::new(ferrule_terminal::fake::FakeBackend::default()))
+    } else {
+        terminal_backend()
+    };
     let session = Session::with_config(config, events.clone())?;
     let app = configure(mock_builder(), InitialProject(None), SmokeMode::new(false))
         .build(mock_context(noop_assets()))
