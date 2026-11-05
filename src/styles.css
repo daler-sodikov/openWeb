@@ -5,11 +5,21 @@
   --fr-surface: #1e2128;
   --fr-surface-2: #252932;
   --fr-border: #2e333d;
-  --fr-text: #d9dde6;
-  --fr-text-muted: #8a91a0;
+  --fr-text: #d4d6dc;
+  /* M6's text_muted (#7b7f87) is below 4.5:1 on popups; this one passes. */
+  --fr-text-muted: #9aa0ab;
   --fr-accent: #d08a3a;
-  --fr-selection: #2f4a6d;
-  --fr-active-line: #1c1f26;
+  --fr-link: #5fa0f0;
+  /* Selection and popups: values from docs/M6-DESIGN.md. */
+  --fr-selection: #34406b;
+  --fr-selection-inactive: #2b3247;
+  --fr-selection-match: #2b3247;
+  --fr-popup-bg: #2a2c31;
+  --fr-popup-border: #3a3d44;
+  --fr-hover-bg: #2d3036;
+  --fr-scrollbar: #4a4e57;
+  /* Translucent so the selection (drawn behind the text) shows through. */
+  --fr-active-line: rgb(255 255 255 / 3.5%);
   --fr-danger: #e0645c;
   --fr-warning: #d9a441;
   --fr-info: #6aa8f0;
@@ -45,8 +55,15 @@
     --fr-text: #1f2329;
     --fr-text-muted: #5d6470;
     --fr-accent: #9a5a12;
+    --fr-link: #1d5fbf;
     --fr-selection: #c7dbf5;
-    --fr-active-line: #f1efe9;
+    --fr-selection-inactive: #dfe5ee;
+    --fr-selection-match: #e4e9f1;
+    --fr-popup-bg: #ffffff;
+    --fr-popup-border: #d9d6cf;
+    --fr-hover-bg: #eceae5;
+    --fr-scrollbar: #c4c1b9;
+    --fr-active-line: rgb(0 0 0 / 3.5%);
     --fr-danger: #b3261e;
     --fr-warning: #9a6200;
     --fr-info: #2862b0;
@@ -300,11 +317,6 @@ button {
 
 .cm-editor .cm-cursor {
   border-left-color: var(--fr-text);
-}
-
-.cm-editor .cm-selectionBackground,
-.cm-editor.cm-focused .cm-selectionBackground {
-  background: var(--fr-selection);
 }
 
 .welcome {
@@ -977,4 +989,29 @@ button {
   color: var(--fr-text-muted);
   font-size: 9px;
   vertical-align: 1px;
+}
+
+/* Scrollbars follow the theme everywhere (popups, lists, editor). */
+* {
+  scrollbar-color: var(--fr-scrollbar) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 5px;
+  background: var(--fr-scrollbar) padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Browser autofill must not paint light fields in the dark theme. */
+input:-webkit-autofill {
+  -webkit-text-fill-color: var(--fr-text);
+  box-shadow: 0 0 0 100px var(--fr-surface) inset;
+  caret-color: var(--fr-text);
 }

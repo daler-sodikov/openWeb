@@ -61,6 +61,13 @@ import { type DocModel, type DocPane, mirrored } from "./doc-model";
 import { DoubleModifierGesture } from "./gesture";
 import { highlightField, setHighlights } from "./highlight";
 import {
+  colorScheme,
+  colorSchemeFlag,
+  editorChrome,
+  onColorSchemeChange,
+  prefersDark,
+} from "./theme";
+import {
   diagnosticsAt,
   diagnosticsField,
   insightDom,
@@ -150,6 +157,7 @@ export class EditorPane implements DocPane {
   private readonly crumbsBar: HTMLElement;
   private externalBar: HTMLElement | null = null;
   private readonly gesture = new DoubleModifierGesture();
+  private readonly stopFollowingScheme: () => void;
   /** Keys pressed while an Enter is waiting for Rust; replayed afterwards. */
   private deferredKeys: KeyboardEvent[] | null = null;
   private completionSession: { id: number; from: number } | null = null;
@@ -193,6 +201,10 @@ export class EditorPane implements DocPane {
     this.view.contentDOM.addEventListener("focus", () => {
       this.host.onFocus(this);
     });
+    // CodeMirror's dark/light base styles follow the OS theme.
+    this.stopFollowingScheme = onColorSchemeChange(() => {
+      this.view.dispatch({ effects: colorScheme.reconfigure(colorSchemeFlag(prefersDark())) });
+    });
     doc.attach(this);
   }
 
@@ -205,6 +217,7 @@ export class EditorPane implements DocPane {
   }
 
   destroy(): void {
+    this.stopFollowingScheme();
     this.doc.detach(this);
     this.view.destroy();
     this.container.remove();
@@ -526,6 +539,8 @@ export class EditorPane implements DocPane {
     return EditorState.create({
       doc: text,
       extensions: [
+        colorScheme.of(colorSchemeFlag(prefersDark())),
+        editorChrome,
         lineNumbers(),
         // Rebuild the markers when fresh ranges arrive from Rust (not only on
         // document or viewport changes).
