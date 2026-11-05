@@ -22,6 +22,8 @@ export class BranchesPopup extends Popup {
   private readonly list: VirtualList<Item>;
   private readonly footer = document.createElement("div");
   private branches: GitBranch[] = [];
+  /** Resolves once the branches are listed (Enter waits for it). */
+  private loaded: Promise<void> = Promise.resolve();
   /** Creating a branch: the field holds the new name. */
   private creating = false;
 
@@ -56,7 +58,10 @@ export class BranchesPopup extends Popup {
         if (!this.creating) this.list.move(delta);
       },
       activateSelected: () => {
-        if (!this.creating) this.list.activateSelected();
+        // Typed quickly, Enter can come before the list: act on the list.
+        void this.loaded.then(() => {
+          if (!this.creating) this.list.activateSelected();
+        });
       },
     });
   }
@@ -64,7 +69,7 @@ export class BranchesPopup extends Popup {
   override open(): void {
     super.open();
     this.field.focus();
-    void this.load();
+    this.loaded = this.load();
   }
 
   private async load(): Promise<void> {
