@@ -278,7 +278,7 @@ pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
         bind(A::GotoTypeDeclaration, Chord("Mod-Shift-b")),
         bind(A::GotoImplementation, Chord("Mod-Alt-b")),
         bind(A::Completion, Chord("Ctrl-Space")),
-        bind(A::ParameterInfo, Chord("Ctrl-p")),
+        bind(A::ParameterInfo, Chord("Mod-p")),
         bind(A::FindUsages, Chord("Alt-F7")),
         bind(A::Rename, Chord("Shift-F6")),
         bind(A::ShowIntentions, Chord("Alt-Enter")),

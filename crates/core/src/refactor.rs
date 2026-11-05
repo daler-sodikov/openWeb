@@ -191,7 +191,20 @@ impl Session {
         offset: u32,
         trigger: Option<String>,
     ) -> Result<Option<ipc::CompletionList>, IpcError> {
-        let token = self.runtime()?.lsp.token("completion", doc_id);
+        let service = self.runtime()?.lsp.clone();
+        // A typed character only opens completion if the server lists it as
+        // a trigger (`.` in TypeScript, not `;`); answered without a request.
+        if let Some(c) = &trigger {
+            let triggers = service
+                .capabilities()
+                .and_then(|caps| caps.completion_provider.clone())
+                .and_then(|p| p.trigger_characters)
+                .unwrap_or_default();
+            if !triggers.contains(c) {
+                return Ok(None);
+            }
+        }
+        let token = service.token("completion", doc_id);
         let from_box = Arc::new(std::sync::Mutex::new((0_usize, String::new())));
         let from_out = from_box.clone();
         let Some(prepared) = self
@@ -388,7 +401,25 @@ impl Session {
         offset: u32,
         trigger: Option<String>,
     ) -> Result<Option<ipc::SignatureView>, IpcError> {
-        let token = self.runtime()?.lsp.token("signature", doc_id);
+        let service = self.runtime()?.lsp.clone();
+        // A typed character only opens parameter info if the server lists it
+        // (`(` and `,` in TypeScript); answered without a request otherwise.
+        if let Some(c) = &trigger {
+            let provider = service
+                .capabilities()
+                .and_then(|caps| caps.signature_help_provider.clone());
+            let listed = provider.is_some_and(|p| {
+                p.trigger_characters
+                    .into_iter()
+                    .chain(p.retrigger_characters)
+                    .flatten()
+                    .any(|t| t == *c)
+            });
+            if !listed {
+                return Ok(None);
+            }
+        }
+        let token = service.token("signature", doc_id);
         let Some(prepared) = self
             .prepare(doc_id, Some(version), move |supervisor, state, uri| {
                 let params = SignatureHelpParams {

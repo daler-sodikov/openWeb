@@ -253,6 +253,13 @@ async fn m3b_features_against_typescript_language_server() {
         members.items.iter().any(|i| i.label == "max"),
         "Math members"
     );
+    // A typed character the server does not list opens nothing.
+    assert!(
+        s.completion(comp, comp_v, dot, Some(";".into()))
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     // Signature help inside `helper(1, |)`: second parameter active.
     let (sig, sig_v, _) = current(&f, "src/sig.ts").await;
@@ -268,6 +275,19 @@ async fn m3b_features_against_typescript_language_server() {
     assert_eq!(help.active_parameter, Some(1));
     let b = help.parameters[1];
     assert_eq!(&help.label[b.from as usize..b.to as usize], "b: string");
+    // `(` is a trigger character; a letter is not.
+    let opened = s
+        .signature_help(sig, sig_v, at(SIG, "1, )", 0), Some("(".into()))
+        .await
+        .unwrap()
+        .expect("signature help on `(`");
+    assert_eq!(opened.active_parameter, Some(0));
+    assert!(
+        s.signature_help(sig, sig_v, at(SIG, "1, )", 0), Some("x".into()))
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     // Find Usages of `helper` from its declaration: closed files included.
     let usages = s

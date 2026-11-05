@@ -181,6 +181,12 @@ export class EditorPane implements DocPane {
             this.doc.applyLocal(tr, this, trace);
           }
         }
+        // Parameter info on a typed character the server lists as a trigger
+        // (`(`, `,`); Rust decides, the view only reports what was typed.
+        if (trs.some((tr) => tr.docChanged && tr.isUserEvent("input.type"))) {
+          const typed = typedTrigger(view.state);
+          if (typed !== null) void this.showSignature(typed);
+        }
       },
     });
     this.container.append(this.view.dom, this.crumbsBar);
@@ -362,22 +368,26 @@ export class EditorPane implements DocPane {
     });
   }
 
-  /** Parameter info for the call at the caret, above it. */
-  async showSignature(): Promise<void> {
+  /**
+   * Parameter info for the call at the caret, above it. With `trigger` (a
+   * typed character) it opens only if the server lists that character, and
+   * stays silent otherwise.
+   */
+  async showSignature(trigger: string | null = null): Promise<void> {
     const view = this.view;
     const pos = view.state.selection.main.head;
     let signature: SignatureView | null;
     try {
       signature = await this.doc.requestAt(this, pos, (version, offset) =>
-        commands.signatureHelp(this.doc.docId, version, offset, null),
+        commands.signatureHelp(this.doc.docId, version, offset, trigger),
       );
     } catch (error: unknown) {
-      this.host.notify(errorMessage(error));
+      if (trigger === null) this.host.notify(errorMessage(error));
       return;
     }
     if (view.state.selection.main.head !== pos) return;
     if (!signature) {
-      this.host.notify("No parameter info available.");
+      if (trigger === null) this.host.notify("No parameter info available.");
       return;
     }
     const shown = signature;
@@ -676,8 +686,14 @@ export class EditorPane implements DocPane {
 
   private async completions(context: CompletionContext) {
     const match = context.matchBefore(/[\w$]*$/);
-    if (!context.explicit && (!match || match.from === match.to)) return null;
     const prefix = match?.text ?? "";
+    // Typing with no word before the caret: report the typed character as
+    // a trigger; Rust asks the server only if it is one (`.`, `"`, `/` …).
+    let trigger: string | null = null;
+    if (!context.explicit && prefix === "") {
+      trigger = typedTrigger(context.state);
+      if (trigger === null) return null;
+    }
     const previous = this.completionSession;
     try {
       let result: CompletionList | null = null;
@@ -685,7 +701,7 @@ export class EditorPane implements DocPane {
         result = unwrap(await commands.filterCompletion(previous.id, prefix));
       }
       result ??= await this.doc.requestAt(this, context.pos, (version, offset) =>
-        commands.completion(this.doc.docId, version, offset, null),
+        commands.completion(this.doc.docId, version, offset, trigger),
       );
       if (context.aborted || !result) return null;
       this.completionSession = { id: result.session, from: result.from };
@@ -811,6 +827,13 @@ function matchRanges(label: string, positions: readonly number[]): number[] {
   }
   if (start !== null) ranges.push(start, offset);
   return ranges;
+}
+
+/** The character before the main caret if it is punctuation (a possible trigger). */
+function typedTrigger(state: EditorState): string | null {
+  const head = state.selection.main.head;
+  const before = state.sliceDoc(Math.max(0, head - 1), head);
+  return before === "" || /[\w$\s]/.test(before) ? null : before;
 }
 
 /** Escape closes Quick Documentation first. */
