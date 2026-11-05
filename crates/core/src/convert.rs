@@ -154,6 +154,14 @@ pub(crate) fn action_to_ipc(action: ferrule_settings::Action) -> ipc::KeyAction 
         A::GotoImplementation => K::GotoImplementation,
         A::ToggleProblems => K::ToggleProblems,
         A::RestartTypeScriptServer => K::RestartTypeScriptServer,
+        A::Completion => K::Completion,
+        A::ParameterInfo => K::ParameterInfo,
+        A::FindUsages => K::FindUsages,
+        A::Rename => K::Rename,
+        A::ShowIntentions => K::ShowIntentions,
+        A::OptimizeImports => K::OptimizeImports,
+        A::SortImports => K::SortImports,
+        A::ReformatCode => K::ReformatCode,
     }
 }
 

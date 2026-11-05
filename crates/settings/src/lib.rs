@@ -72,6 +72,22 @@ pub enum Action {
     ToggleProblems,
     /// Restart the TypeScript language server (no default key).
     RestartTypeScriptServer,
+    /// Show code completion.
+    Completion,
+    /// Show parameter information.
+    ParameterInfo,
+    /// Find usages of the symbol at the caret.
+    FindUsages,
+    /// Rename the symbol at the caret.
+    Rename,
+    /// Show quick fixes and refactorings.
+    ShowIntentions,
+    /// Optimize imports.
+    OptimizeImports,
+    /// Sort imports.
+    SortImports,
+    /// Reformat the current document.
+    ReformatCode,
 }
 
 /// Modifier used in double-tap gestures.
@@ -146,11 +162,19 @@ pub fn action_name(action: Action) -> &'static str {
         Action::GotoImplementation => "Go to Implementation",
         Action::ToggleProblems => "Problems",
         Action::RestartTypeScriptServer => "Restart TypeScript Server",
+        Action::Completion => "Code Completion",
+        Action::ParameterInfo => "Parameter Info",
+        Action::FindUsages => "Find Usages",
+        Action::Rename => "Rename",
+        Action::ShowIntentions => "Show Intentions",
+        Action::OptimizeImports => "Optimize Imports",
+        Action::SortImports => "Sort Imports",
+        Action::ReformatCode => "Reformat Code",
     }
 }
 
 /// Every action, in display order.
-pub const ALL_ACTIONS: [Action; 29] = [
+pub const ALL_ACTIONS: [Action; 37] = [
     Action::GotoFile,
     Action::GotoSymbol,
     Action::GotoLine,
@@ -180,6 +204,14 @@ pub const ALL_ACTIONS: [Action; 29] = [
     Action::GotoImplementation,
     Action::ToggleProblems,
     Action::RestartTypeScriptServer,
+    Action::Completion,
+    Action::ParameterInfo,
+    Action::FindUsages,
+    Action::Rename,
+    Action::ShowIntentions,
+    Action::OptimizeImports,
+    Action::SortImports,
+    Action::ReformatCode,
 ];
 
 /// IntelliJ-style default bindings (from the publicly documented default
@@ -245,6 +277,14 @@ pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
         bind(A::GotoDeclaration, Chord("Mod-b")),
         bind(A::GotoTypeDeclaration, Chord("Mod-Shift-b")),
         bind(A::GotoImplementation, Chord("Mod-Alt-b")),
+        bind(A::Completion, Chord("Ctrl-Space")),
+        bind(A::ParameterInfo, Chord("Ctrl-p")),
+        bind(A::FindUsages, Chord("Alt-F7")),
+        bind(A::Rename, Chord("Shift-F6")),
+        bind(A::ShowIntentions, Chord("Alt-Enter")),
+        bind(A::OptimizeImports, Chord("Ctrl-Alt-o")),
+        bind(A::SortImports, Chord("Ctrl-Alt-Shift-o")),
+        bind(A::ReformatCode, Chord("Mod-Alt-l")),
         bind(
             A::ToggleProblems,
             Chord(if mac { "Mod-6" } else { "Alt-6" }),
@@ -277,6 +317,14 @@ mod tests {
                 Action::RecentFiles,
                 Action::FindInFiles,
                 Action::ReplaceInFiles,
+                Action::Completion,
+                Action::ParameterInfo,
+                Action::FindUsages,
+                Action::Rename,
+                Action::ShowIntentions,
+                Action::OptimizeImports,
+                Action::SortImports,
+                Action::ReformatCode,
             ] {
                 assert_eq!(
                     keymap.iter().filter(|b| b.action == action).count(),
