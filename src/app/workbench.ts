@@ -30,6 +30,7 @@ import { RenamePopup } from "../popup/rename";
 import { SearchEverywhere } from "../popup/search-everywhere";
 import { GotoLine, RecentFiles } from "../popup/simple-popups";
 import { UsagesPopup } from "../popup/usages";
+import { TerminalWindow } from "../terminal/window";
 import { TreeView } from "../tree/tree-view";
 import { chordMatches, formatChord } from "../ui/keys";
 import { ProblemsPanel } from "./problems";
@@ -76,6 +77,7 @@ export class Workbench implements PaneHost, DocHost {
   private readonly statusServer = el("button", "status-server", "status-server");
   private readonly statusProblems = el("button", "status-problems", "status-problems");
   private readonly problems: ProblemsPanel;
+  private readonly terminal: TerminalWindow;
   private serverStatus: ServerStatus | null = null;
   readonly mac: boolean;
   private readonly doubleShift = new DoubleTapDetector("Shift");
@@ -126,7 +128,20 @@ export class Workbench implements PaneHost, DocHost {
     const editorArea = el("div", "editor-area");
     editorArea.append(this.groupsEl, this.welcome);
     const main = el("section", "main");
-    main.append(editorArea, this.problems.element);
+    this.terminal = new TerminalWindow({
+      mac: this.mac,
+      notify: (message) => {
+        this.notify(message);
+      },
+      openLink: (target) => {
+        if (target.inProject) this.openLocation(target.path, target.line, target.column);
+        else this.notify(`${target.path} is outside the project.`);
+      },
+    });
+    this.terminal.onHide = () => {
+      this.active?.view.focus();
+    };
+    main.append(editorArea, this.problems.element, this.terminal.element);
 
     const body = el("div", "body");
     body.append(sidebar, main);
@@ -170,8 +185,12 @@ export class Workbench implements PaneHost, DocHost {
       "keydown",
       (event) => {
         this.doubleShift.keydown(event.key);
+        // Keys typed in the terminal belong to the shell, except the one
+        // that hides it.
+        const inTerminal = this.terminal.hasFocus();
         for (const binding of this.keymap) {
           if (EDITOR_ACTIONS.has(binding.action) || binding.stroke.type !== "chord") continue;
+          if (inTerminal && binding.action !== "toggleTerminal") continue;
           if (chordMatches(event, binding.stroke.keys, this.mac)) {
             event.preventDefault();
             event.stopPropagation();
@@ -204,6 +223,12 @@ export class Workbench implements PaneHost, DocHost {
       });
       await events.problemsChanged.listen((event) => {
         this.onProblemsChanged(event.payload);
+      });
+      await events.terminalFrameEvent.listen((event) => {
+        this.terminal.onFrame(event.payload);
+      });
+      await events.terminalExitedEvent.listen((event) => {
+        this.terminal.onExited(event.payload);
       });
     } catch (error: unknown) {
       this.notify(`Backend events unavailable: ${errorMessage(error)}`);
@@ -264,8 +289,22 @@ export class Workbench implements PaneHost, DocHost {
         this.splitRight();
         return;
       case "toggleProblems":
-        if (this.requireProject()) this.problems.toggle();
+        if (this.requireProject()) {
+          if (!this.problems.visible) this.terminal.element.hidden = true;
+          this.problems.toggle();
+        }
         if (!this.problems.visible) this.active?.view.focus();
+        return;
+      case "toggleTerminal":
+        if (!this.requireProject()) return;
+        // Like other tool windows: shows and focuses it, or hides it when
+        // it already has focus.
+        if (this.terminal.visible && this.terminal.hasFocus()) {
+          this.terminal.hide();
+        } else {
+          this.problems.toggle(false);
+          void this.terminal.show();
+        }
         return;
       case "restartTypeScriptServer":
         if (this.requireProject()) void this.restartServer();
@@ -553,6 +592,7 @@ export class Workbench implements PaneHost, DocHost {
     this.docs.clear();
     this.focusedGroup = this.createGroup();
     this.problems.setAll([]);
+    this.terminal.reset();
     this.serverStatus = null;
     this.statusServer.hidden = true;
     this.updateChrome();
