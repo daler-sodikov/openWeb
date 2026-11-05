@@ -5,6 +5,10 @@
 //! language server ([`typescript_server`]). `oxc`-based in-process features
 //! arrive with M3b (`docs/ROADMAP.md`).
 
+mod imports;
+
+pub use imports::{ImportEdit, UnusedImport, sort_imports, unused_imports};
+
 use ferrule_syntax::{LanguageDef, Precedence};
 
 /// Ours: symbols the bundled tags queries do not cover (type aliases, enums).
@@ -131,6 +135,8 @@ pub struct LanguageServerDef {
     pub install_hint: &'static str,
     /// File extension (lowercase) → LSP language id.
     pub languages: &'static [(&'static str, &'static str)],
+    /// `initializationOptions` as JSON.
+    pub initialization_options: &'static str,
 }
 
 impl LanguageServerDef {
@@ -164,6 +170,19 @@ pub fn typescript_server() -> LanguageServerDef {
             ("cjs", "javascript"),
             ("jsx", "javascriptreact"),
         ],
+        // Completions for symbols of other modules (inserting the import),
+        // and snippet-style insert text where the server offers it.
+        initialization_options: r#"{
+            "hostInfo": "ferrule",
+            "preferences": {
+                "includeCompletionsForModuleExports": true,
+                "includeCompletionsWithInsertText": true,
+                "includeCompletionsWithSnippetText": true,
+                "includeAutomaticOptionalChainCompletions": true,
+                "importModuleSpecifierPreference": "shortest",
+                "quotePreference": "auto"
+            }
+        }"#,
     }
 }
 
