@@ -442,6 +442,22 @@ Before M4: Windows CI had failed since M3a (EPERM deleting the UI tests'
 temp projects that the backend still held open); fixed in the test harness,
 confirmed only after a push.
 
+**Blocked on downloads (2026-11-05).** New Rust crates cannot be
+downloaded from this machine right now (`cargo fetch` stalls; the
+maintainer stopped it). M4 work resumes only after they are fetched; the
+first step before continuing M4a, and before starting M4b, is to add them
+and run `cargo fetch`, then `cargo check --offline --workspace` to prove
+everything is local:
+
+- M4a: `portable-pty` 0.9 (MIT), `alacritty_terminal` 0.26 (Apache-2.0),
+  `libc` 0.2 (Unix), `windows-sys` 0.61 with `Win32_Foundation`,
+  `Win32_System_JobObjects`, `Win32_System_Threading`, `Win32_Security`
+  (Windows). Their own crates are cached; dependencies such as `nix` 0.28
+  are not.
+- M4b: `gix` 0.90 (MIT OR Apache-2.0; its crate is cached, its
+  dependencies are not), plus `imara-diff` for word-level diffs if gix's
+  diff is not enough.
+
 ### M4a: Terminal
 
 **Done when:**
