@@ -7,10 +7,10 @@ Rust core with a thin Tauri v2 + TypeScript view layer.
 
 **Not affiliated with JetBrains.**
 
-> Status: **Milestone 1 (editor core)**. Open a folder, browse it, edit
-> files in tabs with tree-sitter highlighting, undo/redo and multi-cursor,
-> save, and recover unsaved text after a crash. No code intelligence yet.
-> See [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: **Milestone 3b (TypeScript intelligence)**. Language server-powered
+> completion, parameter hints, find usages, rename with preview, Alt+Enter quick
+> fixes, formatting, and organize imports. Diagnostics, hover, and navigation
+> (Go to Definition/Type/Implementation) from M3a. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Requirements
 

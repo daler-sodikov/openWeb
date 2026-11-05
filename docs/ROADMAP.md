@@ -350,7 +350,7 @@ Known gaps found in M3a (tracked here):
 - [ ] Diagnostics of files that are not open are not requested
       (pull diagnostics / project-wide check)
 
-### M3b: completion, refactoring, code actions (after M3a)
+### M3b: completion, refactoring, code actions (done)
 
 **Done when:**
 
@@ -391,6 +391,18 @@ Known gaps found in M3a (tracked here):
     workspace edits; golden tests for refactor edits (snippet expansion,
     workspace edits, import sorting); real-server integration tests;
     Playwright `ui` tests for 1–8; all checks pass with zero warnings.
+
+Status: points 1–11 verified on 2026-11-05 on Linux, with
+typescript-language-server 6.0.3 and TypeScript 6.0.3. All cargo tests pass
+(146 Rust tests), 28 Vitest tests pass, and 32 Playwright UI tests pass
+including the rename/find-usages/completion test. Not yet confirmed on
+macOS/Windows CI.
+
+Known gaps found in M3b (tracked here):
+
+- [ ] oxc unused imports shown as faded diagnostics (doc_diagnostics) —
+      the analysis runs but results are not yet displayed as squiggles
+- [ ] macOS/Windows CI confirmation (needs a push)
 
 ### Later in the TypeScript track
 

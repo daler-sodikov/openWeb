@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M3b: completion, refactoring, code actions)
+
+- Completion popup: triggered by typing `.`, `"`, `'`, `/`, `@`, `<` or
+  Ctrl+Space; fuzzy-filtered and ranked in Rust while typing; lazy detail
+  loading (`completionItem/resolve`); snippet expansion with tab stops and
+  `additionalTextEdits` (auto-import) as one undoable step.
+- Parameter hints (Ctrl+P, macOS Cmd+P): signature popup with the active
+  parameter highlighted; also triggered by typing `(` or `,`.
+- Find Usages (Alt+F7): references panel grouped by file; click to navigate.
+- Rename (Shift+F6): preview dialog showing affected files and occurrence
+  counts; open documents edited as one undo step, closed files rewritten
+  atomically; files changed on disk since the preview are skipped.
+- Code Actions (Alt+Enter): quick fixes and refactorings at the caret,
+  including "Add missing import" and "Organize Imports".
+- Reformat Code (Ctrl+Alt+L, macOS Cmd+Option+L) via the language server.
+- Optimize Imports (Ctrl+Alt+O) and Sort Imports (Ctrl+Alt+Shift+O) using
+  `oxc` for instant in-process import sorting.
+- Read-only tabs for files outside the project (`lib.dom.d.ts`,
+  `node_modules`): lock marker in the tab, typing disabled, hover and
+  navigation still work.
+- LSP infrastructure: token cancellation per feature, completion/refactoring
+  and code action stores, `workspace/applyEdit` capture mode for server
+  edits during commands, `FileEdits` with snapshot/preview/apply and skipped
+  file tracking.
+
+### Fixed (M3b)
+
+- Completion ranking prefers exact label matches over fuzzy matches.
+
 ### Added (M3a: language server, diagnostics, hover, navigation)
 
 - TypeScript/JavaScript intelligence through `typescript-language-server`,
