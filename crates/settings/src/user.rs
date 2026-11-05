@@ -4,7 +4,10 @@
 //! can grow without breaking older builds:
 //!
 //! ```json
-//! { "typescript": { "serverPath": "/opt/tools/typescript-language-server" } }
+//! {
+//!   "typescript": { "serverPath": "/opt/tools/typescript-language-server" },
+//!   "terminal": { "shellPath": "/bin/bash", "shellArgs": ["-l"] }
+//! }
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -16,18 +19,29 @@ use serde::Deserialize;
 pub struct UserSettings {
     /// `typescript.serverPath`: the TypeScript language server executable.
     pub typescript_server_path: Option<PathBuf>,
+    /// `terminal.shellPath` and `terminal.shellArgs`: the shell new
+    /// terminals start (default: detected from the environment).
+    pub terminal_shell: Option<(PathBuf, Vec<String>)>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct File {
     typescript: TypeScript,
+    terminal: Terminal,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 struct TypeScript {
     server_path: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct Terminal {
+    shell_path: Option<String>,
+    shell_args: Vec<String>,
 }
 
 /// Reads the settings file. A missing file gives the defaults; an unreadable
@@ -48,6 +62,11 @@ pub fn load_user_settings(path: &Path) -> Result<UserSettings, String> {
             .server_path
             .filter(|p| !p.trim().is_empty())
             .map(PathBuf::from),
+        terminal_shell: file
+            .terminal
+            .shell_path
+            .filter(|p| !p.trim().is_empty())
+            .map(|p| (PathBuf::from(p), file.terminal.shell_args)),
     })
 }
 
@@ -74,6 +93,23 @@ mod tests {
             load_user_settings(&path).unwrap().typescript_server_path,
             None
         );
+    }
+
+    #[test]
+    fn reads_the_terminal_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{ "terminal": { "shellPath": "/bin/bash", "shellArgs": ["-l", "-i"] } }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            load_user_settings(&path).unwrap().terminal_shell,
+            Some((PathBuf::from("/bin/bash"), vec!["-l".into(), "-i".into()]))
+        );
+        std::fs::write(&path, r#"{ "terminal": { "shellArgs": ["-l"] } }"#).unwrap();
+        assert_eq!(load_user_settings(&path).unwrap().terminal_shell, None);
     }
 
     #[test]

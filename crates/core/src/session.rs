@@ -162,8 +162,8 @@ pub(crate) struct State {
     next_id: u32,
 }
 
-/// Where a session keeps its files.
-#[derive(Debug, Clone)]
+/// Where a session keeps its files, and its platform services.
+#[derive(Clone)]
 pub struct SessionConfig {
     /// Recovery files, index caches and project data.
     pub data_dir: PathBuf,
@@ -173,6 +173,21 @@ pub struct SessionConfig {
     pub autosave_delay: Duration,
     /// Typing-path timing file (`FERRULE_TYPING_TRACE`), off when `None`.
     pub typing_trace: Option<PathBuf>,
+    /// PTY and terminal emulator; `None` when the build has none (terminals
+    /// then report why they cannot start).
+    pub terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
+}
+
+impl std::fmt::Debug for SessionConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionConfig")
+            .field("data_dir", &self.data_dir)
+            .field("settings_file", &self.settings_file)
+            .field("autosave_delay", &self.autosave_delay)
+            .field("typing_trace", &self.typing_trace)
+            .field("terminal_backend", &self.terminal_backend.is_some())
+            .finish()
+    }
 }
 
 impl SessionConfig {
@@ -185,6 +200,7 @@ impl SessionConfig {
             data_dir,
             autosave_delay: DEFAULT_AUTOSAVE_DELAY,
             typing_trace: None,
+            terminal_backend: None,
         }
     }
 }
@@ -198,7 +214,8 @@ pub struct Session {
     autosave_delay: Duration,
     started: Instant,
     data_dir: PathBuf,
-    settings_file: PathBuf,
+    pub(crate) settings_file: PathBuf,
+    terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
     pub(crate) trace: Option<Arc<TypingTrace>>,
     pub(crate) sink: Arc<dyn EventSink>,
     /// Incremented by every Find in Files request; older requests stop.
@@ -274,6 +291,7 @@ impl Session {
             settings_file,
             autosave_delay,
             typing_trace,
+            terminal_backend,
         } = config;
         let registry = Arc::new(languages()?);
         Ok(Arc::new_cyclic(move |weak| Self {
@@ -285,6 +303,7 @@ impl Session {
             started: Instant::now(),
             data_dir,
             settings_file,
+            terminal_backend,
             trace: typing_trace.map(|path| Arc::new(TypingTrace::new(path))),
             sink,
             find_counter: Arc::new(AtomicU64::new(0)),
@@ -358,6 +377,7 @@ impl Session {
         let sink = self.sink.clone();
         let settings_file = self.settings_file.clone();
         let session = Arc::downgrade(self);
+        let terminal_backend = self.terminal_backend.clone();
         let runtime = blocking(move || {
             let project = Project::open(Path::new(&path)).map_err(project_error)?;
             Ok(Arc::new(ProjectRuntime::new(
@@ -366,6 +386,7 @@ impl Session {
                 sink,
                 settings_file,
                 session,
+                terminal_backend,
             )))
         })
         .await?;
@@ -380,6 +401,7 @@ impl Session {
         };
         if let Some(old) = previous_runtime {
             old.cancel.cancel();
+            old.terminals.close_all();
             // Shut the old project's server down in the background.
             tokio::spawn(old.lsp.stop());
         }

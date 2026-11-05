@@ -88,6 +88,8 @@ pub enum Action {
     SortImports,
     /// Reformat the current document.
     ReformatCode,
+    /// Show or hide the Terminal tool window.
+    ToggleTerminal,
 }
 
 /// Modifier used in double-tap gestures.
@@ -170,11 +172,12 @@ pub fn action_name(action: Action) -> &'static str {
         Action::OptimizeImports => "Optimize Imports",
         Action::SortImports => "Sort Imports",
         Action::ReformatCode => "Reformat Code",
+        Action::ToggleTerminal => "Terminal",
     }
 }
 
 /// Every action, in display order.
-pub const ALL_ACTIONS: [Action; 37] = [
+pub const ALL_ACTIONS: [Action; 38] = [
     Action::GotoFile,
     Action::GotoSymbol,
     Action::GotoLine,
@@ -212,6 +215,7 @@ pub const ALL_ACTIONS: [Action; 37] = [
     Action::OptimizeImports,
     Action::SortImports,
     Action::ReformatCode,
+    Action::ToggleTerminal,
 ];
 
 /// IntelliJ-style default bindings (from the publicly documented default
@@ -289,6 +293,7 @@ pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
             A::ToggleProblems,
             Chord(if mac { "Mod-6" } else { "Alt-6" }),
         ),
+        bind(A::ToggleTerminal, Chord("Alt-F12")),
     ]
 }
 
@@ -325,6 +330,7 @@ mod tests {
                 Action::OptimizeImports,
                 Action::SortImports,
                 Action::ReformatCode,
+                Action::ToggleTerminal,
             ] {
                 assert_eq!(
                     keymap.iter().filter(|b| b.action == action).count(),

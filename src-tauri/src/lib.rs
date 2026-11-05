@@ -13,7 +13,8 @@ use std::time::Duration;
 mod events;
 
 pub use events::{
-    FsChanged, IndexStatus, ProblemsChanged, ServerStatusChanged, TauriSink, encode as encode_event,
+    FsChanged, IndexStatus, ProblemsChanged, ServerStatusChanged, TauriSink, TerminalExitedEvent,
+    TerminalFrameEvent, encode as encode_event,
 };
 
 use ferrule_core::{Session, SessionConfig};
@@ -23,8 +24,9 @@ use ferrule_ipc::{
     EditorSelection, FileProblems, FindResults, FoldRanges, FrontendReadyReport, Highlights,
     HoverResult, IpcError, KeyBinding, NavKind, NavTarget, OpenedDocument, PROTOCOL_VERSION,
     ProjectInfo, RefactoringPreview, RemoteUpdate, RenameTarget, ReplaceResult, SaveResult,
-    SearchResults, SearchTab, ServerStatus, SignatureView, StartupTarget, TextSearch, TraceSample,
-    UsageResults, WorkspaceEditResult,
+    SearchResults, SearchTab, ServerStatus, SignatureView, StartupTarget, TERMINAL_FLAGS,
+    TerminalCell, TerminalInfo, TerminalKey, TerminalList, TerminalSelectionKind, TerminalSize,
+    TextSearch, TraceSample, UsageResults, WorkspaceEditResult,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -584,6 +586,132 @@ async fn record_typing_trace(
     session.record_typing_trace(samples).await
 }
 
+/// The project's terminals, and why none can start if so.
+#[tauri::command]
+#[specta::specta]
+async fn terminals(session: SessionState<'_>) -> Result<TerminalList, IpcError> {
+    session.terminals().await
+}
+
+/// Starts a terminal in the project root.
+#[tauri::command]
+#[specta::specta]
+async fn open_terminal(
+    session: SessionState<'_>,
+    size: TerminalSize,
+) -> Result<TerminalInfo, IpcError> {
+    session.open_terminal(size).await
+}
+
+/// Sends typed text to a terminal.
+#[tauri::command]
+#[specta::specta]
+async fn terminal_input(session: SessionState<'_>, id: u32, text: String) -> Result<(), IpcError> {
+    session.terminal_input(id, text).await
+}
+
+/// Sends a key (arrows, function keys, Ctrl/Alt combinations).
+#[tauri::command]
+#[specta::specta]
+async fn terminal_key(
+    session: SessionState<'_>,
+    id: u32,
+    key: TerminalKey,
+) -> Result<(), IpcError> {
+    session.terminal_key(id, key).await
+}
+
+/// Pastes text into a terminal.
+#[tauri::command]
+#[specta::specta]
+async fn terminal_paste(session: SessionState<'_>, id: u32, text: String) -> Result<(), IpcError> {
+    session.terminal_paste(id, text).await
+}
+
+/// Resizes a terminal.
+#[tauri::command]
+#[specta::specta]
+async fn terminal_resize(
+    session: SessionState<'_>,
+    id: u32,
+    size: TerminalSize,
+) -> Result<(), IpcError> {
+    session.terminal_resize(id, size).await
+}
+
+/// Scrolls a terminal (positive: back into the scrollback).
+#[tauri::command]
+#[specta::specta]
+async fn terminal_scroll(session: SessionState<'_>, id: u32, lines: i32) -> Result<(), IpcError> {
+    session.terminal_scroll(id, lines).await
+}
+
+/// Selects terminal text from `anchor` to `head`.
+#[tauri::command]
+#[specta::specta]
+async fn terminal_select(
+    session: SessionState<'_>,
+    id: u32,
+    anchor: TerminalCell,
+    head: TerminalCell,
+    kind: TerminalSelectionKind,
+) -> Result<(), IpcError> {
+    session.terminal_select(id, anchor, head, kind).await
+}
+
+/// Clears a terminal's selection.
+#[tauri::command]
+#[specta::specta]
+async fn terminal_clear_selection(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.terminal_clear_selection(id).await
+}
+
+/// A terminal's selected text.
+#[tauri::command]
+#[specta::specta]
+async fn terminal_selection_text(
+    session: SessionState<'_>,
+    id: u32,
+) -> Result<Option<String>, IpcError> {
+    session.terminal_selection_text(id).await
+}
+
+/// The file link under a terminal cell, if any.
+#[tauri::command]
+#[specta::specta]
+async fn terminal_link_at(
+    session: SessionState<'_>,
+    id: u32,
+    cell: TerminalCell,
+) -> Result<Option<NavTarget>, IpcError> {
+    session.terminal_link_at(id, cell).await
+}
+
+/// Renames a terminal tab.
+#[tauri::command]
+#[specta::specta]
+async fn rename_terminal(
+    session: SessionState<'_>,
+    id: u32,
+    title: String,
+) -> Result<TerminalInfo, IpcError> {
+    session.rename_terminal(id, title).await
+}
+
+/// Closes a terminal and ends its processes.
+#[tauri::command]
+#[specta::specta]
+async fn close_terminal(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.close_terminal(id).await
+}
+
+/// The view drew a terminal frame.
+#[tauri::command]
+#[specta::specta]
+async fn terminal_ack(session: SessionState<'_>, id: u32, seq: u32) -> Result<(), IpcError> {
+    session.terminal_ack(id, seq).await
+}
+
 /// Builds the tauri-specta registry of every IPC command and constant.
 ///
 /// The same builder serves the runtime invoke handler and the TypeScript
@@ -639,14 +767,31 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             restart_language_server,
             typing_trace_enabled,
             record_typing_trace,
+            terminals,
+            open_terminal,
+            terminal_input,
+            terminal_key,
+            terminal_paste,
+            terminal_resize,
+            terminal_scroll,
+            terminal_select,
+            terminal_clear_selection,
+            terminal_selection_text,
+            terminal_link_at,
+            rename_terminal,
+            close_terminal,
+            terminal_ack,
         ])
         .events(tauri_specta::collect_events![
             FsChanged,
             IndexStatus,
             ServerStatusChanged,
-            ProblemsChanged
+            ProblemsChanged,
+            TerminalFrameEvent,
+            TerminalExitedEvent
         ])
         .constant("PROTOCOL_VERSION", PROTOCOL_VERSION)
+        .constant("TERMINAL_FLAGS", TERMINAL_FLAGS)
 }
 
 /// Writes the generated TypeScript bindings to `path`.
@@ -670,6 +815,18 @@ pub fn configure<R: Runtime>(
         .manage(initial)
         .manage(smoke)
         .invoke_handler(specta_builder::<R>().invoke_handler())
+}
+
+/// The PTY and terminal emulator built into this binary, if any.
+pub fn terminal_backend() -> Option<Arc<dyn ferrule_terminal::Backend>> {
+    #[cfg(feature = "native")]
+    {
+        Some(Arc::new(ferrule_terminal::native::NativeBackend))
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        None
+    }
 }
 
 /// Initializes logging (`RUST_LOG`, default `info`).
@@ -712,6 +869,7 @@ pub fn run() -> anyhow::Result<()> {
         config.settings_file = settings_file;
         // Typing-path timing for ferrule-perf (docs/ARCHITECTURE.md, 4.8).
         config.typing_trace = std::env::var_os("FERRULE_TYPING_TRACE").map(PathBuf::from);
+        config.terminal_backend = terminal_backend();
         app.manage(Session::with_config(config, sink)?);
         if smoke_enabled {
             tracing::info!("smoke mode enabled");
@@ -730,6 +888,14 @@ pub fn run() -> anyhow::Result<()> {
         }
         Ok(())
     })
-    .run(tauri::generate_context!())?;
+    .build(tauri::generate_context!())?
+    .run(|app, event| {
+        if let tauri::RunEvent::Exit = event {
+            // Shells and their children end with the app.
+            if let Some(session) = app.try_state::<Arc<Session>>() {
+                session.shutdown_terminals();
+            }
+        }
+    });
     Ok(())
 }

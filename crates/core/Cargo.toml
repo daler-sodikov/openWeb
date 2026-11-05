@@ -38,6 +38,7 @@ thiserror.workspace = true
 pulldown-cmark.workspace = true
 
 [dev-dependencies]
+ferrule-terminal = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 

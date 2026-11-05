@@ -1,7 +1,9 @@
 //! Typed backend → frontend events (tauri-specta) and the Tauri event sink.
 
 use ferrule_core::{EventSink, SessionEvent};
-use ferrule_ipc::{FileProblems, FsChangeBatch, IndexState, ServerStatus};
+use ferrule_ipc::{
+    FileProblems, FsChangeBatch, IndexState, ServerStatus, TerminalExited, TerminalFrame,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Runtime};
@@ -23,6 +25,14 @@ pub struct ServerStatusChanged(pub ServerStatus);
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct ProblemsChanged(pub FileProblems);
 
+/// A terminal screen update (`terminal-frame-event`).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct TerminalFrameEvent(pub TerminalFrame);
+
+/// A terminal's shell exited (`terminal-exited-event`).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct TerminalExitedEvent(pub TerminalExited);
+
 /// Event name and JSON payload of a session event, for transports other
 /// than Tauri events (the headless test backend).
 pub fn encode(event: &SessionEvent) -> (&'static str, serde_json::Value) {
@@ -34,6 +44,12 @@ pub fn encode(event: &SessionEvent) -> (&'static str, serde_json::Value) {
         }
         SessionEvent::ProblemsChanged(problems) => {
             (ProblemsChanged::NAME, serde_json::to_value(problems))
+        }
+        SessionEvent::TerminalFrame(frame) => {
+            (TerminalFrameEvent::NAME, serde_json::to_value(frame))
+        }
+        SessionEvent::TerminalExited(exited) => {
+            (TerminalExitedEvent::NAME, serde_json::to_value(exited))
         }
     };
     (name, payload.unwrap_or(serde_json::Value::Null))
@@ -49,6 +65,8 @@ impl<R: Runtime> EventSink for TauriSink<R> {
             SessionEvent::IndexStatus(state) => IndexStatus(state).emit(&self.0),
             SessionEvent::ServerStatus(status) => ServerStatusChanged(status).emit(&self.0),
             SessionEvent::ProblemsChanged(problems) => ProblemsChanged(problems).emit(&self.0),
+            SessionEvent::TerminalFrame(frame) => TerminalFrameEvent(frame).emit(&self.0),
+            SessionEvent::TerminalExited(exited) => TerminalExitedEvent(exited).emit(&self.0),
         };
         if let Err(err) = result {
             tracing::warn!(%err, "emitting an event failed");

@@ -162,6 +162,7 @@ pub(crate) fn action_to_ipc(action: ferrule_settings::Action) -> ipc::KeyAction 
         A::OptimizeImports => K::OptimizeImports,
         A::SortImports => K::SortImports,
         A::ReformatCode => K::ReformatCode,
+        A::ToggleTerminal => K::ToggleTerminal,
     }
 }
 

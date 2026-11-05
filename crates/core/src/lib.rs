@@ -14,6 +14,7 @@ mod project_runtime;
 mod refactor;
 mod search;
 mod session;
+mod terminal;
 mod trace;
 
 pub use events::{EventSink, NoEvents, SessionEvent};

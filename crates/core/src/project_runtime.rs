@@ -42,12 +42,15 @@ pub(crate) struct ProjectRuntime {
     pub recent: Mutex<Vec<String>>,
     /// The project's TypeScript language server.
     pub lsp: Arc<LanguageService>,
+    /// The project's terminals.
+    pub terminals: ferrule_terminal::Terminals,
 }
 
 impl Drop for ProjectRuntime {
     fn drop(&mut self) {
         // Stops a still-running index build for a project that was replaced.
         self.cancel.cancel();
+        self.terminals.close_all();
     }
 }
 
@@ -58,6 +61,7 @@ impl ProjectRuntime {
         sink: Arc<dyn EventSink>,
         settings_file: PathBuf,
         session: Weak<Session>,
+        terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
     ) -> Self {
         let hash = ferrule_vfs::path_hash(project.root());
         let project_file = data_dir.join("projects").join(format!("{hash}.json"));
@@ -67,6 +71,7 @@ impl ProjectRuntime {
             .map(|f| f.recent)
             .unwrap_or_default();
         let project = Arc::new(project);
+        let terminals = crate::terminal::project_terminals(terminal_backend, sink.clone());
         let lsp = Arc::new(LanguageService::new(
             ferrule_lang_js::typescript_server(),
             project.clone(),
@@ -83,6 +88,7 @@ impl ProjectRuntime {
             cache_file: data_dir.join("index").join(format!("{hash}.json")),
             project_file,
             recent: Mutex::new(recent),
+            terminals,
         }
     }
 

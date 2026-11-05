@@ -10,7 +10,7 @@ use specta::Type;
 
 /// Version of the IPC protocol. Bump on any breaking change to a command,
 /// event or DTO so that a mismatched frontend refuses to run.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Operating system the backend runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -342,6 +342,7 @@ pub enum KeyAction {
     OptimizeImports,
     SortImports,
     ReformatCode,
+    ToggleTerminal,
 }
 
 /// Modifier used in double-tap gestures.
@@ -999,6 +1000,172 @@ pub struct CodeActionView {
     pub preferred: bool,
     /// Why it cannot be applied, if disabled.
     pub disabled: Option<String>,
+}
+
+// Terminal (docs/ARCHITECTURE.md, 4.9)
+
+/// Size of a terminal grid in cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSize {
+    /// Columns.
+    pub cols: u32,
+    /// Rows.
+    pub rows: u32,
+}
+
+/// Bits of [`TerminalRun::flags`]. Exported to TypeScript as the constant
+/// `TERMINAL_FLAGS`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub struct TerminalFlagBits {
+    pub bold: u32,
+    pub dim: u32,
+    pub italic: u32,
+    pub underline: u32,
+    pub strike: u32,
+    pub inverse: u32,
+    pub hidden: u32,
+    pub selected: u32,
+    pub wide: u32,
+}
+
+/// The values of the [`TerminalRun::flags`] bits.
+pub const TERMINAL_FLAGS: TerminalFlagBits = TerminalFlagBits {
+    bold: 1,
+    dim: 1 << 1,
+    italic: 1 << 2,
+    underline: 1 << 3,
+    strike: 1 << 4,
+    inverse: 1 << 5,
+    hidden: 1 << 6,
+    selected: 1 << 7,
+    wide: 1 << 8,
+};
+
+/// Consecutive cells of one style.
+///
+/// Colors are numbers: `0` is the theme's default color, `1..=256` is the
+/// palette index plus one (0-15 come from the theme, 16-255 are the xterm
+/// cube and gray ramp), and `0x0100_0000 | 0xRRGGBB` is a 24-bit color.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalRun {
+    /// Text, one character per cell (a wide character covers two cells).
+    pub text: String,
+    /// Foreground color.
+    pub fg: u32,
+    /// Background color.
+    pub bg: u32,
+    /// Attributes ([`TERMINAL_FLAGS`]).
+    pub flags: u32,
+}
+
+/// One row of the viewport.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalRow {
+    /// Row in the viewport, 0 at the top.
+    pub row: u32,
+    /// Runs from the first column.
+    pub runs: Vec<TerminalRun>,
+}
+
+/// A cell of the viewport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalCell {
+    /// Row in the viewport.
+    pub row: u32,
+    /// Column.
+    pub col: u32,
+}
+
+/// A screen update (`terminal-frame`). The view draws it, then calls
+/// `terminal_ack` with `seq`; the next frame waits for that.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalFrame {
+    /// Terminal id.
+    pub id: u32,
+    /// Sequence number.
+    pub seq: u32,
+    /// Grid size.
+    pub size: TerminalSize,
+    /// Whether `rows` holds every row (else only the changed ones).
+    pub full: bool,
+    /// Changed rows.
+    pub rows: Vec<TerminalRow>,
+    /// Cursor, when shown and inside the viewport.
+    pub cursor: Option<TerminalCell>,
+    /// Lines scrolled back from the bottom (0 follows the output).
+    pub display_offset: u32,
+    /// Lines of scrollback.
+    pub history: u32,
+    /// Tab title.
+    pub title: String,
+}
+
+/// A terminal's shell exited (`terminal-exited`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalExited {
+    /// Terminal id.
+    pub id: u32,
+    /// Exit code, if known.
+    pub code: Option<i32>,
+}
+
+/// An open terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalInfo {
+    /// Id.
+    pub id: u32,
+    /// Tab title.
+    pub title: String,
+    /// Shell program.
+    pub shell: String,
+    /// Working directory it started in.
+    pub cwd: String,
+}
+
+/// The project's terminals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalList {
+    /// Why terminals cannot start in this build, if they cannot.
+    pub unavailable: Option<String>,
+    /// Open terminals, in opening order.
+    pub terminals: Vec<TerminalInfo>,
+}
+
+/// A key the view sends as a key rather than text (arrows, function keys,
+/// Ctrl/Alt combinations).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalKey {
+    /// `KeyboardEvent.key`.
+    pub key: String,
+    /// Ctrl held.
+    pub ctrl: bool,
+    /// Alt (Option) held.
+    pub alt: bool,
+    /// Shift held.
+    pub shift: bool,
+}
+
+/// How a mouse selection grows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalSelectionKind {
+    /// By character (drag).
+    Simple,
+    /// By word (double click).
+    Word,
+    /// By line (triple click).
+    Line,
 }
 
 #[cfg(test)]

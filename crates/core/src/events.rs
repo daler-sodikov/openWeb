@@ -1,6 +1,8 @@
 //! Events the session pushes to the frontend.
 
-use ferrule_ipc::{FileProblems, FsChangeBatch, IndexState, ServerStatus};
+use ferrule_ipc::{
+    FileProblems, FsChangeBatch, IndexState, ServerStatus, TerminalExited, TerminalFrame,
+};
 
 /// An event for the frontend.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +15,10 @@ pub enum SessionEvent {
     ServerStatus(ServerStatus),
     /// The problems of one file changed.
     ProblemsChanged(FileProblems),
+    /// A terminal screen update.
+    TerminalFrame(TerminalFrame),
+    /// A terminal's shell exited.
+    TerminalExited(TerminalExited),
 }
 
 /// Where session events go (Tauri events in the app, a queue in tests).

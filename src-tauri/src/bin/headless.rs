@@ -17,8 +17,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use ferrule_app::{InitialProject, SmokeMode, configure, encode_event, init_tracing};
-use ferrule_core::{EventSink, Session, SessionEvent};
+use ferrule_app::{
+    InitialProject, SmokeMode, configure, encode_event, init_tracing, terminal_backend,
+};
+use ferrule_core::{EventSink, Session, SessionConfig, SessionEvent};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
@@ -92,7 +94,9 @@ fn main() -> anyhow::Result<()> {
     init_tracing();
     let args = parse_args()?;
     let events = Arc::new(EventQueue::default());
-    let session = Session::new(args.data_dir, events.clone())?;
+    let mut config = SessionConfig::new(args.data_dir);
+    config.terminal_backend = terminal_backend();
+    let session = Session::with_config(config, events.clone())?;
     let app = configure(mock_builder(), InitialProject(None), SmokeMode::new(false))
         .build(mock_context(noop_assets()))
         .context("building the mock app failed")?;
