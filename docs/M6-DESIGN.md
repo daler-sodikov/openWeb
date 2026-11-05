@@ -91,14 +91,14 @@ editor_bg:      #17181b
 editor_line_bg: #1d1e22
 border:         #2e3036
 text:           #d4d6dc
-text_muted:     #7b7f87
+text_muted:     #9aa0ab
 text_faint:     #4d525b
 selection_bg:   #34406b
 hover_bg:       #2d3036
 accent:         #e8a33d   (Ferrule amber: primary buttons, focus ring, active tab underline)
 on_accent:      #1a1204
 link:           #5fa0f0
-error:          #e5636b
+error:          #ec7a72
 warning:        #e3b341
 success:        #5fb878
 popup_bg:       #2a2c31
