@@ -434,8 +434,76 @@ Open M3b items:
 
 ## M4: Terminal and Git
 
-- [ ] `terminal`: PTY, VT parsing, terminal tool window
-- [ ] `git`: status, diff, blame, log, branches, commit, conflict resolution UI
+Design: [ARCHITECTURE.md, 4.9](ARCHITECTURE.md#49-terminal-and-git-m4).
+Functional UI only (visual polish is M6). In two parts; M4b starts after
+the maintainer says "continue with M4b".
+
+Before M4: Windows CI had failed since M3a (EPERM deleting the UI tests'
+temp projects that the backend still held open); fixed in the test harness,
+confirmed only after a push.
+
+### M4a: Terminal
+
+**Done when:**
+
+1. **Shell.** Alt+F12 (macOS Option+F12) opens the Terminal tool window
+   with a shell in the project root: `terminal.shell` from `settings.json`,
+   else `$SHELL` (Unix, login shell on macOS) or `pwsh`, `powershell`,
+   `%ComSpec%` (Windows). If the shell cannot start, the tab says why.
+2. **Tabs.** New (+, Ctrl+Shift+T while the terminal has focus), close,
+   rename (double-click the tab); the tab title follows the shell's title
+   unless renamed; an exited shell shows its exit code.
+3. **Terminal behavior.** Colors (16, 256, truecolor), bold/underline/
+   inverse, cursor, wide characters, alternate screen (e.g. `less`, `vim`),
+   resize to the window (the program sees the new size), scrollback (mouse
+   wheel, 10 000 lines), mouse selection, copy (Ctrl+Shift+C, macOS Cmd+C)
+   and paste (Ctrl+Shift+V, macOS Cmd+V, bracketed when the program asks).
+4. **Keys.** While the terminal has focus every key goes to the shell
+   (Ctrl+C, Ctrl+D, Ctrl+R, arrows, Tab, Escape, F-keys), except Alt+F12 and
+   the terminal's own copy/paste/new-tab keys.
+5. **Links.** `src/a.ts:12:5`, `src/a.ts:12`, `src/a.ts(12,5)`, absolute
+   paths and `file://` URLs in the output are underlined on Ctrl/Cmd hover
+   and Ctrl/Cmd+click opens the file at that line and column (only if the
+   file exists).
+6. **Cleanup.** Closing a tab, opening another project or quitting ends the
+   shell and everything it started (process group on Unix, Job Object on
+   Windows); a test proves no process survives on each OS.
+7. **Never blocks.** Output is batched per frame with one frame in flight;
+   `yes` running for 10 s keeps the editor typing responsive and Ferrule's
+   memory flat; Ctrl+C stops it at once.
+8. **Tests.** PTY spawn/echo/resize/exit and cleanup tests on Linux, macOS
+   and Windows in CI; a flood test; link-parser and key-encoding unit tests;
+   Playwright `ui` tests for 1, 2, 3 (subset), 4, 5 and 6 (close a tab);
+   all checks pass with zero warnings.
+
+### M4b: Git basics (after M4a)
+
+**Done when:**
+
+1. **Status.** The repository containing the project is discovered; files
+   are modified, added, deleted, untracked, ignored, renamed or conflicted,
+   refreshed after file changes, Ferrule's own writes and on window focus,
+   without blocking typing.
+2. **Tree.** Files and folders show status colors and markers.
+3. **Gutter.** Added/modified/deleted line markers against the index (and
+   HEAD for staged changes); clicking a marker shows the old text and
+   "Rollback" restores the hunk as one undo step.
+4. **Diff.** A file against HEAD, side-by-side and unified, with word-level
+   highlights.
+5. **Commit.** A commit tool window lists changed files with checkboxes
+   (stage/unstage), a message, Amend and Commit; clear errors for missing
+   `user.name`/`user.email`, failing hooks and empty commits.
+6. **Branches.** A popup lists local and remote branches; checkout, create
+   and delete; checkout is refused when local changes would be overwritten.
+7. **Blame.** Toggleable blame in the gutter with author, date and message
+   on hover.
+8. **History.** A list of commits for the repository and for a file
+   (graph, stash and the merge-conflict resolver are follow-ups).
+9. **Safety.** No network or credential-using command runs without an
+   explicit user action; no credentials are stored.
+10. **Tests.** Integration tests on real repositories created in temp
+    directories (status, commit, branch, blame, diff, gutter hunks);
+    Playwright `ui` tests for 2-8; all checks pass with zero warnings.
 
 ## M5: Run, debug, tests
 

@@ -530,6 +530,89 @@ Rust buffer confirming the edit and to the frame showing fresh highlights
 `highlights` take. Both append to the file; `ferrule-perf` reports their
 medians next to the external key-to-glyph latency.
 
+### 4.9 Terminal and Git (M4)
+
+**Terminal: who owns what.** Rust owns each terminal session completely:
+the PTY (`portable-pty`, ConPTY on Windows), the shell process tree, the
+VT parser and the screen/scrollback grid (`alacritty_terminal`), the
+selection and link detection. The view draws rows of styled cells and
+sends input; it has no terminal state of its own.
+
+Why not xterm.js as the view: xterm.js is itself a full VT emulator, so
+using it would mean either parsing the output twice (Rust and JS, two
+states that can disagree) or moving the emulator into TypeScript, against
+the thin-view rule. Rows of cells are simple to draw with the DOM (only the
+visible rows exist), and keeping the grid in Rust gives link detection,
+selection text and later search in one place. Cost we accept: our own
+renderer (colors, cursor, wide characters, selection) and no terminal mouse
+reporting in M4a.
+
+**PTY lifecycle and cleanup.**
+
+- Spawn: the user's shell (setting `terminal.shell`, otherwise `$SHELL` or
+  `/bin/sh` on Unix; `pwsh`, then `powershell`, then `%ComSpec%` on Windows),
+  as a login shell on macOS (`-l`, so `PATH` matches a terminal), in the
+  project root, with `TERM=xterm-256color`, `COLORTERM=truecolor`,
+  `TERM_PROGRAM=Ferrule`.
+- Unix: the shell is a session and process-group leader (portable-pty
+  `setsid`). Closing sends `SIGHUP` to the whole process group, then
+  `SIGKILL` after 2 s. Should Ferrule die, the kernel hangs up the PTY when
+  its master closes.
+- Windows: the shell is assigned to a Job Object with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` right after spawn; closing the
+  terminal (or Ferrule exiting for any reason) closes the job handle and
+  ends every process in it.
+- Terminals belong to the open project: opening another project or quitting
+  closes them all. Closing is done off the async workers and never waits on
+  the view.
+
+**Bytes to the view (batching, backpressure).** A reader thread per
+terminal reads the PTY in 64 KiB chunks and feeds the parser under the
+terminal's lock; it never talks to the view. A frame task marks the
+terminal dirty and, at most every 16 ms, sends one `terminal-frame` event
+with only the rows that changed in the visible viewport (plus cursor,
+size, scroll position, title, exit status). Only one frame is in flight per
+terminal: the next is sent after the view acknowledges the previous one
+(`terminal_ack`), so a slow view gets fewer, larger frames, never a queue.
+A program flooding stdout (`yes`) costs at most one frame of visible rows
+per 16 ms; the parser keeps up with the PTY, and if it does not, the PTY's
+own buffer blocks the writer (the OS backpressure). The view renders a frame
+in one animation frame and caps work to the visible rows.
+
+**Input.** Text and paste go to Rust as text (bracketed paste when the
+program asks for it); special keys go as key names with modifiers and Rust
+encodes them for the current mode (application cursor keys, etc.). While
+the terminal has focus, only the terminal's own shortcuts (toggle, copy,
+paste, new tab) are handled by Ferrule; every other key reaches the shell.
+
+**Links.** Rust recognizes `path:line[:col]`, `path(line,col)` (tsc) and
+`file://` URLs in a row's text; a Ctrl/Cmd+click asks Rust for the link
+under the cell, which resolves it against the terminal's starting directory
+and the project root and only returns files that exist.
+
+**Git (M4b) data model and refresh.** `git` reads with `gix` (pure Rust:
+discovery, status of index vs HEAD and worktree vs index, diffs, blame,
+log) and runs the `git` executable for writes (commit, checkout, branch
+create/delete), so hooks, signing and the user's config behave as on the
+command line. Status is a map path → (index status, worktree status), with
+untracked, ignored, renamed and conflicted states, kept per repository in
+the project runtime. It is recomputed in the background (cancellable) after
+file-watcher batches, after Ferrule's own writes and when the window gains
+focus, debounced, and pushed as a `git-status` event; the tree and the
+editor gutter read from it. Nothing that needs the network or credentials
+(fetch, pull, push) runs without an explicit user action, and no
+credentials are stored.
+
+**IPC (M4).** Terminal commands: `terminal_open(shell?)` →
+`TerminalInfo` (id, title, shell, cwd), `terminal_input(id, text)`,
+`terminal_key(id, key)`, `terminal_paste(id, text)`,
+`terminal_resize(id, cols, rows)`, `terminal_scroll(id, lines)`,
+`terminal_select(id, from, to, kind)`, `terminal_selection_text(id)`,
+`terminal_link_at(id, row, col)`, `terminal_rename(id, title)`,
+`terminal_close(id)`, `terminal_ack(id, seq)`, `terminals()`. Events:
+`terminal-frame` (`TerminalFrame`) and `terminal-exited`. Git commands and
+the `git-status` event are specified with M4b.
+
 ## 5. Editor view layer: CodeMirror 6 as a view only
 
 **Decision: CodeMirror 6 (MIT) is the input and rendering engine. Rust is
