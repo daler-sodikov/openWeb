@@ -30,14 +30,53 @@ Use them for layout, density, spacing and interaction feel ONLY.
 
 Hard rules:
 
-- No JetBrains/WebStorm/IntelliJ/"Islands" names, logos or icons.
-- Do not extract assets or theme files from any installed IDE.
+- No JetBrains/WebStorm/IntelliJ/"Islands" names or product logos anywhere
+  in the product, UI, window titles or binaries. README keeps "Not
+  affiliated with JetBrains."
+- Never take assets or theme files from an installed IDE. Assets may come
+  only from public repositories, under their stated licenses (see Icons).
 - Do not copy the reference color values; use the Ferrule palette below.
-- Icons: Lucide (ISC), inline SVG, 16px, currentColor. File-type badges
-  (JS, TS, JSON, MD, CSS...) are drawn by us as small rounded colored labels.
 - Fonts bundled locally (CSP forbids remote), with license texts: Inter (UI)
   and JetBrains Mono (OFL) or another permissive monospace (editor).
 - Record every license in THIRD_PARTY_LICENSES.md.
+
+## Icons (decision: hybrid)
+
+Approach modeled on github.com/l0ng-ai/openidea (see its
+THIRD_PARTY_LICENSES.md): file-type icons from JetBrains' open-source icon
+set, everything else our own or from a permissive library.
+
+1. **UI icons** (toolbar, chevrons, search, settings, split, close, tool
+   window stripes, status bar, menus): Lucide (`lucide-static`, ISC), inline
+   SVG, 16px, `currentColor`, colors from tokens.
+2. **File-type icons** (project tree, tabs, Search Everywhere results): may
+   be taken from `JetBrains/intellij-community`, `platform/icons/src/expui`
+   (Apache-2.0), plus the other open repos OpenIDEA lists when their icon
+   exists there and its license allows it (for example intellij-rust, MIT).
+   Monochrome icons are recolored to `currentColor` at render time.
+3. **Everything else** (languages with no open-source JetBrains icon, such as
+   Go, Ruby, Dart, Lua, Zig, Svelte, dotenv, lock, license): draw our own in
+   the same style (16px, simple strokes), kept in `src/ui/ferrule/`.
+
+Mandatory license procedure BEFORE copying any JetBrains icon:
+
+- Open the upstream repository's LICENSE and NOTICE at a pinned commit and
+  confirm the license of that exact path. Plugin directories may carry their
+  own license (the open-source plugin repos state this per plugin). If a
+  path's license is unclear or not permissive, do not copy it; draw our own.
+  Do not rely on this document or on the OpenIDEA repo for the legal answer.
+- Keep each file's original copyright header.
+- Mark every modified file as modified (Apache-2.0 section 4).
+- Record in THIRD_PARTY_LICENSES.md and NOTICE: upstream repo, pinned
+  commit hash, exact paths used, copyright line, and the full license text
+  (Apache-2.0 and any MIT text) once.
+- Copy only the icons we actually use (a short allowlist in
+  `src/ui/icons.allowlist.json`), never whole folders.
+- Trademarks are not licensed: no product logos (WebStorm, IntelliJ, the
+  JetBrains logo), no product names in icon filenames or UI.
+- A test fails if an icon file is present that is not on the allowlist, or
+  if an allowlisted file lacks its license header or an entry in
+  THIRD_PARTY_LICENSES.md.
 
 ## Color tokens (dark theme, final values)
 
@@ -68,10 +107,12 @@ popup_border:   #3a3d44
 
 Layering rule: frame > popup > panel/editor, each step slightly lighter than
 the one below; the current-line highlight is one small step above the editor.
-File-type badge colors (our own): JS yellow, TS blue, JSON purple, MD slate,
-CSS teal, HTML orange, config gray. Keep the existing syntax highlighting
-colors (they are original); only check their contrast against the new
-editor_bg.
+Colors for file-type icons that we draw ourselves (fallbacks when no
+open-source icon exists): JS yellow, TS blue, JSON purple, MD slate, CSS teal,
+HTML orange, config gray. Icons taken from the open-source set keep their own
+colors or follow `currentColor`; check every one against both themes. Keep
+the existing syntax highlighting colors (they are original); only check
+their contrast against the new editor_bg.
 
 ## Part 1: shell and components
 
