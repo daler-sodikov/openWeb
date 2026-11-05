@@ -1,7 +1,8 @@
 //! Integrated terminal (`docs/ARCHITECTURE.md`, 4.9): the session (threads,
 //! batching, input), key and paste encoding, file links in output and the
-//! shell choice. The PTY and the VT emulator are behind [`Backend`], so
-//! everything here builds and tests without them.
+//! shell choice. The PTY and the VT emulator are behind [`Backend`]; the
+//! real one ([`native`], portable-pty + alacritty_terminal) is built with
+//! the `native` feature, so everything else builds and tests without it.
 
 mod backend;
 #[cfg(any(test, feature = "testing"))]
@@ -9,6 +10,8 @@ pub mod fake;
 mod keys;
 pub mod links;
 mod model;
+#[cfg(feature = "native")]
+pub mod native;
 mod pacer;
 mod session;
 mod shell;
