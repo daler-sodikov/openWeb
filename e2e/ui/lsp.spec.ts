@@ -267,6 +267,133 @@ test.describe("with typescript-language-server", () => {
   });
 });
 
+test.describe("M3b with typescript-language-server", () => {
+  test.beforeEach(() => {
+    const missing = tsServerMissing();
+    if (missing !== null && process.env.CI) throw new Error(missing);
+    test.skip(missing !== null, missing ?? "");
+  });
+
+  test("completion opens on `.` and parameter info on `(`", async ({ page, project }) => {
+    fs.writeFileSync(
+      path.join(project, "src", "typing.ts"),
+      'import { formatPrice } from "./utils/format";\nexport const s = "abc";\n',
+    );
+    await openApp(page, project);
+    await recordServerStatus(page);
+    await openFile(page, "src/typing.ts");
+    await projectLoaded(page);
+    await editor(page).click();
+    await page.keyboard.press("ControlOrMeta+End");
+
+    // `.` is a completion trigger: members of a string, no Ctrl+Space.
+    await page.keyboard.type("export const n = s.");
+    await expect(page.locator(".cm-tooltip-autocomplete")).toContainText("length", {
+      timeout: 15_000,
+    });
+    await page.keyboard.press("Escape");
+
+    // `(` is a parameter-info trigger: the first parameter is active.
+    await page.keyboard.type("length;\nexport const p = formatPrice(");
+    const signature = page.getByTestId("signature-help");
+    await expect(signature).toContainText("formatPrice(value: number", { timeout: 15_000 });
+    await expect(signature.locator("b")).toHaveText("value: number");
+    await page.keyboard.press("Escape");
+  });
+
+  test("Alt+Enter adds a missing import", async ({ page, project }) => {
+    fs.writeFileSync(
+      path.join(project, "src", "fix.ts"),
+      'export const word = pluralize("item", 2);\n',
+    );
+    await openApp(page, project);
+    await recordServerStatus(page);
+    await openFile(page, "src/fix.ts");
+    await projectLoaded(page);
+    await expect(page.locator(".cm-diag-error", { hasText: "pluralize" })).toBeVisible({
+      timeout: 30_000,
+    });
+    await clickWord(page, "export const word", "pluralize");
+    await page.keyboard.press(keys.intentions);
+    const action = page
+      .getByTestId("code-action")
+      .filter({ hasText: /import/i })
+      .first();
+    await expect(action).toBeVisible({ timeout: 15_000 });
+    await action.click();
+    await expect(page.locator(".editor-host:not([hidden]) .cm-line").first()).toHaveText(
+      'import { pluralize } from "./utils/format";',
+    );
+    await expect(page.locator(".cm-diag-error", { hasText: "pluralize" })).toHaveCount(0, {
+      timeout: 30_000,
+    });
+  });
+
+  test("Reformat Code uses the server and undoes in one step", async ({ page, project }) => {
+    fs.writeFileSync(path.join(project, "src", "messy.ts"), "export const   messy={a:1};\n");
+    await openApp(page, project);
+    await recordServerStatus(page);
+    await openFile(page, "src/messy.ts");
+    await projectLoaded(page);
+    await editor(page).click();
+    await page.keyboard.press(keys.reformat);
+    await expect(editor(page)).toContainText("export const messy = { a: 1 };");
+    await page.keyboard.press(keys.undo);
+    await expect(editor(page)).toContainText("export const   messy={a:1};");
+  });
+
+  test("library code opens read-only", async ({ page, project }) => {
+    test.skip(
+      !fs.existsSync(path.join(project, "node_modules", "@types", "react")),
+      "run `bun install` in fixtures/react-ts first",
+    );
+    await openApp(page, project);
+    await recordServerStatus(page);
+    await openFile(page, "src/components/Counter.tsx");
+    await projectLoaded(page);
+    await clickWord(page, "useState(start)", "useState");
+    await page.keyboard.press(keys.gotoDeclaration);
+    const tab = activeTab(page);
+    await expect(tab).toHaveAttribute("data-path", /node_modules\/@types\/react\/index\.d\.ts$/);
+    await expect(tab.getByTestId("tab-read-only")).toHaveText("RO");
+    const before = await editor(page).textContent();
+    await page.keyboard.type("typed");
+    await expect(tab.getByTestId("tab-dirty")).toHaveText("");
+    expect(await editor(page).textContent()).toBe(before);
+  });
+});
+
+test("oxc marks unused imports without a language server", async ({ page, project }) => {
+  const settings = path.join(BACKEND_DATA, "settings.json");
+  fs.mkdirSync(BACKEND_DATA, { recursive: true });
+  fs.writeFileSync(
+    settings,
+    JSON.stringify({ typescript: { serverPath: path.join(project, "no-such-server") } }),
+  );
+  fs.writeFileSync(
+    path.join(project, "src", "imports.ts"),
+    'import { formatPrice, pluralize } from "./utils/format";\nexport const p = formatPrice(1);\n',
+  );
+  try {
+    await openApp(page, project);
+    await openFile(page, "src/imports.ts");
+    await expect(page.getByTestId("status-server")).toHaveText("TypeScript: not available");
+    const unused = page.locator(".cm-diag-unnecessary", { hasText: "pluralize" });
+    await expect(unused).toBeVisible();
+    await expect(page.locator(".cm-diag-unnecessary", { hasText: "formatPrice" })).toHaveCount(0);
+    await unused.hover();
+    await expect(page.getByTestId("insight")).toContainText("Unused import 'pluralize'");
+    await expect(page.getByTestId("insight")).toContainText("oxc");
+    // Using it removes the hint after the edit settles.
+    await editor(page).click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type('export const q = pluralize("a", 2);');
+    await expect(unused).toHaveCount(0);
+  } finally {
+    fs.rmSync(settings, { force: true });
+  }
+});
+
 test("a missing server is reported and editing keeps working", async ({ page, project }) => {
   const settings = path.join(BACKEND_DATA, "settings.json");
   fs.mkdirSync(BACKEND_DATA, { recursive: true });

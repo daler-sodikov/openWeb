@@ -185,6 +185,10 @@ export const keys = {
   gotoDeclaration: "ControlOrMeta+b",
   gotoImplementation: isMac ? "Meta+Alt+b" : "Control+Alt+b",
   problems: isMac ? "Meta+6" : "Alt+6",
+  parameterInfo: "ControlOrMeta+p",
+  intentions: "Alt+Enter",
+  reformat: isMac ? "Meta+Alt+l" : "Control+Alt+l",
+  undo: "ControlOrMeta+z",
 };
 
 /**
