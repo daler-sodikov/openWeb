@@ -299,6 +299,22 @@ test.describe("M3b with typescript-language-server", () => {
     await expect(signature).toContainText("formatPrice(value: number", { timeout: 15_000 });
     await expect(signature.locator("b")).toHaveText("value: number");
     await page.keyboard.press("Escape");
+
+    // Accepting a symbol of another module adds its import (resolved lazily).
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type("\nexport const w = plurali");
+    await page.keyboard.press("Control+Space");
+    const option = page.locator(".cm-tooltip-autocomplete li", { hasText: "pluralize" }).first();
+    await expect(option).toBeVisible({ timeout: 15_000 });
+    // CodeMirror ignores Enter for 75 ms after the list (re)appears, so an
+    // Enter typed just before it is not taken as accepting.
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".editor-host:not([hidden]) .cm-line").first()).toContainText(
+      'pluralize } from "./utils/format";',
+    );
+    // Enter accepted the item instead of inserting a newline.
+    await expect(editor(page)).toContainText("export const w = pluralize");
   });
 
   test("Alt+Enter adds a missing import", async ({ page, project }) => {
