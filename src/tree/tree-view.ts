@@ -9,6 +9,8 @@ export interface TreeHost {
   listDir(path: string): Promise<DirEntry[]>;
   openFile(path: string): void;
   onError(message: string): void;
+  /** Git status class of a row (`modified`, `untracked`, `changed` folder…). */
+  gitClass?(path: string, directory: boolean): string | null;
 }
 
 export class TreeView {
@@ -102,6 +104,11 @@ export class TreeView {
     this.render();
   }
 
+  /** Redraws the visible rows (e.g. after a Git status change). */
+  redraw(): void {
+    this.requestRender();
+  }
+
   private requestRender(): void {
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
@@ -133,6 +140,11 @@ export class TreeView {
     if (entry.ignored) {
       el.classList.add("ignored");
       el.dataset.ignored = "true";
+    }
+    const git = this.host.gitClass?.(entry.path, entry.kind === "directory");
+    if (git) {
+      el.classList.add(`git-${git}`);
+      el.dataset.git = git;
     }
     el.setAttribute("role", "treeitem");
     el.setAttribute("aria-level", String(row.depth + 1));

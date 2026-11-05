@@ -67,6 +67,18 @@
   --fr-term-13: #dca6ee;
   --fr-term-14: #74d8d8;
   --fr-term-15: #eef0f4;
+
+  /* Git status (text colors meet WCAG AA on the surfaces). */
+  --fr-git-modified: #6fa8f7;
+  --fr-git-added: #7fc77f;
+  --fr-git-deleted: #9aa0ab;
+  --fr-git-untracked: #e8836f;
+  --fr-git-ignored: #a8a47c;
+  --fr-git-conflicted: #f07a7a;
+  --fr-diff-added-bg: rgb(80 170 90 / 18%);
+  --fr-diff-deleted-bg: rgb(220 90 80 / 18%);
+  --fr-diff-word-added: rgb(80 170 90 / 42%);
+  --fr-diff-word-deleted: rgb(220 90 80 / 42%);
 }
 
 @media (prefers-color-scheme: light) {
@@ -125,6 +137,17 @@
     --fr-term-13: #a04fb8;
     --fr-term-14: #008a91;
     --fr-term-15: #8b8f97;
+
+    --fr-git-modified: #1d5fbf;
+    --fr-git-added: #2f7d32;
+    --fr-git-deleted: #5d6470;
+    --fr-git-untracked: #a6402b;
+    --fr-git-ignored: #6e6838;
+    --fr-git-conflicted: #b3261e;
+    --fr-diff-added-bg: rgb(60 150 70 / 16%);
+    --fr-diff-deleted-bg: rgb(200 60 50 / 14%);
+    --fr-diff-word-added: rgb(60 150 70 / 36%);
+    --fr-diff-word-deleted: rgb(200 60 50 / 32%);
   }
 }
 
@@ -264,7 +287,7 @@ button {
 
 .main {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto auto auto;
   min-width: 0;
   min-height: 0;
   position: relative;
@@ -1214,4 +1237,278 @@ input:-webkit-autofill {
 .t-wide {
   display: inline-block;
   width: calc(var(--term-cell-w, 8px) * 2);
+}
+
+/* Git: tree, gutter, blame */
+.tree-row.git-modified .tree-label,
+.tree-row.git-renamed .tree-label,
+.tree-row.git-changed .tree-label,
+.git-modified .commit-letter,
+.git-renamed .commit-letter {
+  color: var(--fr-git-modified);
+}
+.tree-row.git-added .tree-label,
+.git-added .commit-letter {
+  color: var(--fr-git-added);
+}
+.tree-row.git-deleted .tree-label,
+.git-deleted .commit-letter {
+  color: var(--fr-git-deleted);
+}
+.tree-row.git-untracked .tree-label,
+.git-untracked .commit-letter {
+  color: var(--fr-git-untracked);
+}
+.tree-row.git-ignored .tree-label {
+  color: var(--fr-git-ignored);
+}
+.tree-row.git-conflicted .tree-label,
+.git-conflicted .commit-letter {
+  color: var(--fr-git-conflicted);
+}
+.cm-git-gutter {
+  width: 6px;
+}
+.git-marker {
+  width: 4px;
+  height: 100%;
+  margin-left: 1px;
+  cursor: pointer;
+}
+.git-marker.git-added {
+  background: var(--fr-git-added);
+}
+.git-marker.git-modified {
+  background: var(--fr-git-modified);
+}
+.git-marker.git-deleted {
+  height: 0;
+  border-top: 4px solid var(--fr-git-deleted);
+  border-right: 4px solid transparent;
+}
+.git-blame {
+  padding: 0 8px 0 4px;
+  color: var(--fr-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.git-blame.uncommitted {
+  color: var(--fr-text-muted);
+}
+.status-branch {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.status-branch[hidden] {
+  display: none;
+}
+
+/* Hunk popup */
+.popup.hunk-popup {
+  width: min(560px, 80vw);
+  max-height: 40vh;
+}
+.hunk-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border-bottom: 1px solid var(--fr-border);
+}
+.hunk-old {
+  margin: 0;
+  padding: 6px 10px;
+  overflow: auto;
+  background: var(--fr-diff-deleted-bg);
+  font-family: var(--fr-font-code);
+  font-size: 12px;
+}
+
+/* Diff viewer */
+.popup.diff-view {
+  width: 92vw;
+  height: 76vh;
+  max-height: 76vh;
+}
+.diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.diff-labels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 2px 10px;
+  color: var(--fr-text-muted);
+  font-size: 12px;
+}
+.diff-view[data-mode="unified"] .diff-labels {
+  grid-template-columns: auto auto;
+  justify-content: start;
+  gap: 24px;
+}
+.diff-body {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+}
+.diff-body .vlist {
+  max-height: none;
+}
+.diff-row {
+  font-family: var(--fr-font-code);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre;
+}
+.diff-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.diff-cell {
+  overflow: hidden;
+}
+.diff-cell + .diff-cell {
+  border-left: 1px solid var(--fr-border);
+}
+.diff-added {
+  background: var(--fr-diff-added-bg);
+}
+.diff-deleted {
+  background: var(--fr-diff-deleted-bg);
+}
+.diff-added .diff-word {
+  background: var(--fr-diff-word-added);
+  color: inherit;
+}
+.diff-deleted .diff-word {
+  background: var(--fr-diff-word-deleted);
+  color: inherit;
+}
+.diff-number {
+  display: inline-block;
+  min-width: 4ch;
+  padding: 0 6px;
+  color: var(--fr-text-muted);
+  text-align: right;
+}
+.diff-unified .diff-number {
+  min-width: 9ch;
+}
+.diff-sign {
+  display: inline-block;
+  width: 2ch;
+}
+
+/* Commit tool window */
+.commit-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 40%);
+  flex: 1;
+  min-height: 0;
+}
+.commit-files {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.commit-files .vlist {
+  flex: 1;
+}
+.commit-group {
+  padding: 0 8px;
+  color: var(--fr-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+}
+.commit-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 16px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.commit-letter {
+  width: 1ch;
+  font-family: var(--fr-font-code);
+}
+.commit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-left: 1px solid var(--fr-border);
+}
+.commit-message {
+  flex: 1;
+  min-height: 60px;
+  resize: none;
+  border: 1px solid var(--fr-border);
+  background: var(--fr-bg);
+  color: var(--fr-text);
+  font-family: var(--fr-font-code);
+}
+.commit-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.commit-error {
+  max-height: 80px;
+  overflow: auto;
+  color: var(--fr-danger);
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+.commit-error[hidden] {
+  display: none;
+}
+
+/* Git log */
+.log-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px 170px 80px;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.log-subject,
+.log-author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.log-author,
+.log-date,
+.log-id {
+  color: var(--fr-text-muted);
+}
+.log-id {
+  font-family: var(--fr-font-code);
+}
+
+/* Branches */
+.branch-new {
+  color: var(--fr-link);
+}
+.branch-delete {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--fr-text-muted);
+  cursor: pointer;
+}
+/* Diff rows are not selectable; no list highlight. */
+.diff-body .vlist-row.selected {
+  background: none;
+  color: inherit;
+}
+/* Status colors cannot reach 4.5:1 on the selection; use the text color. */
+.tree-row.selected[data-git] .tree-label,
+.vlist-row.selected .commit-letter {
+  color: var(--fr-text);
 }

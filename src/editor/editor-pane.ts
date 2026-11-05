@@ -50,11 +50,14 @@ import {
   type CompletionList_Serialize as CompletionList,
   type DocumentEdit_Serialize as DocumentEdit,
   type FoldSpan,
+  type GitBlameLine,
+  type GitHunk,
   type KeyAction,
   type KeyBinding,
   type NavKind,
   type SignatureView_Serialize as SignatureView,
 } from "../ipc/bindings";
+import { blameGutter, gitGutter, setBlame, setGitHunks } from "../git/gutter";
 import { errorMessage, unwrap } from "../ipc/result";
 import { keyPressed, mark, markNextFrame, takeKey } from "../perf/typing-trace";
 import { type DocModel, type DocPane, mirrored } from "./doc-model";
@@ -120,6 +123,8 @@ export interface PaneHost {
   /** Find Usages, Rename, Alt+Enter, import actions and Reformat Code. */
   refactor(pane: EditorPane, action: KeyAction): void;
   notify(message: string): void;
+  /** A Git change marker was clicked. */
+  showHunk(pane: EditorPane, hunk: GitHunk, event: MouseEvent): void;
 }
 
 // Folding ranges from Rust, mapped through edits until fresh ones arrive.
@@ -240,6 +245,14 @@ export class EditorPane implements DocPane {
 
   setDiagnostics(decorations: DecorationSet): void {
     this.view.dispatch({ effects: setDiagnostics.of(decorations) });
+  }
+
+  setGitHunks(hunks: readonly GitHunk[]): void {
+    this.view.dispatch({ effects: setGitHunks.of(hunks) });
+  }
+
+  setBlame(lines: readonly GitBlameLine[] | null): void {
+    this.view.dispatch({ effects: setBlame.of(lines) });
   }
 
   setCaretInfo(info: CaretInfo | null): void {
@@ -542,7 +555,11 @@ export class EditorPane implements DocPane {
       extensions: [
         colorScheme.of(colorSchemeFlag(prefersDark())),
         editorChrome,
+        blameGutter,
         lineNumbers(),
+        gitGutter((hunk, event) => {
+          this.host.showHunk(this, hunk, event);
+        }),
         // Rebuild the markers when fresh ranges arrive from Rust (not only on
         // document or viewport changes).
         foldGutter({

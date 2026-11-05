@@ -11,6 +11,7 @@ import {
   type AppInfo,
   type FileProblems,
   type FsChangeBatch,
+  type GitHunk,
   type IndexState,
   type KeyAction,
   type KeyBinding,
@@ -30,6 +31,7 @@ import { RenamePopup } from "../popup/rename";
 import { SearchEverywhere } from "../popup/search-everywhere";
 import { GotoLine, RecentFiles } from "../popup/simple-popups";
 import { UsagesPopup } from "../popup/usages";
+import { GIT_ACTIONS, GitUi } from "../git/git-ui";
 import { TerminalWindow } from "../terminal/window";
 import { TreeView } from "../tree/tree-view";
 import { chordMatches, formatChord } from "../ui/keys";
@@ -78,6 +80,7 @@ export class Workbench implements PaneHost, DocHost {
   private readonly statusProblems = el("button", "status-problems", "status-problems");
   private readonly problems: ProblemsPanel;
   private readonly terminal: TerminalWindow;
+  private readonly git: GitUi;
   private serverStatus: ServerStatus | null = null;
   readonly mac: boolean;
   private readonly doubleShift = new DoubleTapDetector("Shift");
@@ -115,6 +118,7 @@ export class Workbench implements PaneHost, DocHost {
       onError: (message) => {
         this.notify(message);
       },
+      gitClass: (path, directory) => this.git.classFor(path, directory),
     });
 
     this.focusedGroup = this.createGroup();
@@ -141,7 +145,38 @@ export class Workbench implements PaneHost, DocHost {
     this.terminal.onHide = () => {
       this.active?.view.focus();
     };
-    main.append(editorArea, this.problems.element, this.terminal.element);
+    this.git = new GitUi({
+      notify: (message) => {
+        this.notify(message);
+      },
+      openFile: (path) => {
+        void this.openFile(path);
+      },
+      activePane: () => this.active,
+      docs: () => this.docs.values(),
+      redrawTree: () => {
+        this.tree.redraw();
+      },
+      saveAll: async () => {
+        const dirty = [...this.docs.values()].filter((d) => d.dirty && !d.readOnly);
+        const results = await Promise.allSettled(dirty.map((d) => d.save()));
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed > 0) this.notify(`${String(failed)} file(s) could not be saved.`);
+      },
+      showPopup: (popup) => {
+        this.showPopup(popup);
+      },
+      showBottom: (element) => {
+        this.showBottom(element);
+      },
+    });
+    main.append(
+      editorArea,
+      this.problems.element,
+      this.terminal.element,
+      this.git.commit.element,
+      this.git.log.element,
+    );
 
     const body = el("div", "body");
     body.append(sidebar, main);
@@ -162,6 +197,7 @@ export class Workbench implements PaneHost, DocHost {
       this.statusPath,
       this.statusNotice,
       this.statusProblems,
+      this.git.branch,
       this.statusPosition,
       this.statusIndex,
       this.statusServer,
@@ -230,6 +266,9 @@ export class Workbench implements PaneHost, DocHost {
       await events.terminalExitedEvent.listen((event) => {
         this.terminal.onExited(event.payload);
       });
+      await events.gitStatusEvent.listen((event) => {
+        this.git.onStatus(event.payload);
+      });
     } catch (error: unknown) {
       this.notify(`Backend events unavailable: ${errorMessage(error)}`);
     }
@@ -240,6 +279,10 @@ export class Workbench implements PaneHost, DocHost {
     const pane = this.active;
     if (EDITOR_ACTIONS.has(action)) {
       pane?.runAction(action);
+      return;
+    }
+    if (GIT_ACTIONS.has(action)) {
+      if (this.requireProject()) this.git.run(action);
       return;
     }
     switch (action) {
@@ -290,7 +333,7 @@ export class Workbench implements PaneHost, DocHost {
         return;
       case "toggleProblems":
         if (this.requireProject()) {
-          if (!this.problems.visible) this.terminal.element.hidden = true;
+          if (!this.problems.visible) this.showBottom(this.problems.element);
           this.problems.toggle();
         }
         if (!this.problems.visible) this.active?.view.focus();
@@ -302,7 +345,7 @@ export class Workbench implements PaneHost, DocHost {
         if (this.terminal.visible && this.terminal.hasFocus()) {
           this.terminal.hide();
         } else {
-          this.problems.toggle(false);
+          this.showBottom(this.terminal.element);
           void this.terminal.show();
         }
         return;
@@ -489,6 +532,7 @@ export class Workbench implements PaneHost, DocHost {
       this.projectName.title = project.root;
       document.title = `${this.info.name} — ${project.name}`;
       this.hasProject = true;
+      void this.git.load();
       this.tree.setRoot(unwrap(await commands.listDir("")));
       this.notify("");
       this.renderWelcome(project.name);
@@ -593,6 +637,7 @@ export class Workbench implements PaneHost, DocHost {
     this.focusedGroup = this.createGroup();
     this.problems.setAll([]);
     this.terminal.reset();
+    this.git.reset();
     this.serverStatus = null;
     this.statusServer.hidden = true;
     this.updateChrome();
@@ -910,6 +955,22 @@ export class Workbench implements PaneHost, DocHost {
       hint.textContent = "Use Open Folder… or start the app with a folder path.";
     }
     this.welcome.replaceChildren(title, hint);
+  }
+
+  /** Bottom tool windows share the space: showing one hides the others. */
+  private showBottom(element: HTMLElement | null): void {
+    for (const other of [
+      this.problems.element,
+      this.terminal.element,
+      this.git.commit.element,
+      this.git.log.element,
+    ]) {
+      if (other !== element) other.hidden = true;
+    }
+  }
+
+  showHunk(pane: EditorPane, hunk: GitHunk, event: MouseEvent): void {
+    this.git.showHunk(pane, hunk, event);
   }
 
   notify(message: string): void {

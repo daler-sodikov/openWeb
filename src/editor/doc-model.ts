@@ -15,6 +15,8 @@ import {
   type DocumentEdit_Serialize as DocumentEdit,
   type EditorSelection as IpcSelection,
   type FoldSpan,
+  type GitBlameLine,
+  type GitHunk,
   type HoverResult,
   type NavKind,
   type NavTarget,
@@ -45,6 +47,8 @@ export interface DocPane {
   setHighlights(decorations: DecorationSet): void;
   setFolds(ranges: readonly FoldSpan[]): void;
   setDiagnostics(decorations: DecorationSet): void;
+  setGitHunks(hunks: readonly GitHunk[]): void;
+  setBlame(lines: readonly GitBlameLine[] | null): void;
   setCaretInfo(info: CaretInfo | null): void;
   showExternalChange(show: boolean): void;
   applyDocumentEdit(edit: DocumentEdit): void;
@@ -62,6 +66,8 @@ const HIGHLIGHT_DEBOUNCE_MS = 40;
 const FOLD_DEBOUNCE_MS = 300;
 const CARET_DEBOUNCE_MS = 60;
 const DIAGNOSTICS_RETRY_MS = 150;
+/** Git gutter and blame refresh after edits. */
+const GIT_DEBOUNCE_MS = 400;
 
 type SelectionCall = (
   docId: DocId,
@@ -87,6 +93,12 @@ export class DocModel {
   private foldTimer: ReturnType<typeof setTimeout> | undefined;
   private caretTimer: ReturnType<typeof setTimeout> | undefined;
   private diagnosticsTimer: ReturnType<typeof setTimeout> | undefined;
+  private gitTimer: ReturnType<typeof setTimeout> | undefined;
+  private blameTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Latest gutter hunks (for Rollback at the caret). */
+  hunks: readonly GitHunk[] = [];
+  /** Whether blame is shown for this document. */
+  blameOn = false;
   private destroyed = false;
   /** Traced keystrokes not yet confirmed by Rust / not yet highlighted. */
   private unconfirmed: KeyTrace[] = [];
@@ -125,6 +137,8 @@ export class DocModel {
     this.scheduleHighlights();
     this.scheduleFolds(0);
     this.scheduleDiagnostics(0);
+    this.scheduleGitChanges(0);
+    if (this.blameOn) this.scheduleBlame(0);
   }
 
   detach(pane: DocPane): void {
@@ -137,6 +151,8 @@ export class DocModel {
     clearTimeout(this.foldTimer);
     clearTimeout(this.caretTimer);
     clearTimeout(this.diagnosticsTimer);
+    clearTimeout(this.gitTimer);
+    clearTimeout(this.blameTimer);
   }
 
   /** Runs after all queued work for this document has finished. */
@@ -189,6 +205,8 @@ export class DocModel {
     this.scheduleFolds(FOLD_DEBOUNCE_MS);
     // In-process results (oxc unused imports) follow edits without the server.
     this.scheduleDiagnostics(FOLD_DEBOUNCE_MS);
+    this.scheduleGitChanges(GIT_DEBOUNCE_MS);
+    if (this.blameOn) this.scheduleBlame(GIT_DEBOUNCE_MS);
   }
 
   // Commands (all go through the queue)
@@ -511,6 +529,66 @@ export class DocModel {
         for (const pane of this.panes) pane.setDiagnostics(decorations);
       });
     }, delay);
+  }
+
+  /** Asks Rust for the lines that differ from the Git index. */
+  scheduleGitChanges(delay: number): void {
+    clearTimeout(this.gitTimer);
+    this.gitTimer = setTimeout(() => {
+      void this.enqueue(async () => {
+        if (this.panes.size === 0) return;
+        await this.pushAll();
+        const result = await commands.gitLineChanges(this.docId);
+        // No repository: no markers (the status bar says why).
+        if (result.status === "error") return;
+        if (!this.isSynced(result.data.version)) {
+          this.scheduleGitChanges(DIAGNOSTICS_RETRY_MS);
+          return;
+        }
+        this.hunks = result.data.hunks;
+        for (const pane of this.panes) pane.setGitHunks(this.hunks);
+      });
+    }, delay);
+  }
+
+  toggleBlame(): void {
+    this.blameOn = !this.blameOn;
+    if (this.blameOn) this.scheduleBlame(0);
+    else for (const pane of this.panes) pane.setBlame(null);
+  }
+
+  private scheduleBlame(delay: number): void {
+    clearTimeout(this.blameTimer);
+    this.blameTimer = setTimeout(() => {
+      void this.enqueue(async () => {
+        if (!this.blameOn || this.panes.size === 0) return;
+        await this.pushAll();
+        const result = await commands.gitBlame(this.docId);
+        if (result.status === "error") {
+          this.blameOn = false;
+          this.host.onError(this, result.error.message);
+          return;
+        }
+        if (!this.isSynced(result.data.version)) {
+          this.scheduleBlame(DIAGNOSTICS_RETRY_MS);
+          return;
+        }
+        for (const pane of this.panes) pane.setBlame(result.data.lines);
+      });
+    }, delay);
+  }
+
+  /** Rolls a hunk back to the index text, as one undo step. */
+  async rollback(hunk: GitHunk): Promise<void> {
+    let version = 0;
+    await this.enqueue(async () => {
+      await this.pushAll();
+      version = getSyncedVersion(this.hub);
+    });
+    const replace = unwrap(
+      await commands.gitRollbackHunk(this.docId, version, hunk.line, hunk.lines),
+    );
+    await this.applyReplace(replace.version, replace.edits);
   }
 
   /** Hover / Quick Documentation at `pos` of `pane` (null: nothing to show). */
