@@ -115,7 +115,14 @@ export const test = base.extend<{ project: string }>({
     const root = path.join(dir, "react-ts");
     fs.cpSync(path.join(repoRoot, "fixtures", "react-ts"), root, { recursive: true });
     await use(root);
-    fs.rmSync(dir, { recursive: true, force: true });
+    // The backend keeps the project open (file watcher, language server
+    // with the project as its working directory). Windows cannot delete a
+    // folder a process still holds, so switch the backend to an empty idle
+    // project first (which stops those) and retry while they exit.
+    const idle = path.join(os.tmpdir(), "ferrule-ui-idle");
+    fs.mkdirSync(idle, { recursive: true });
+    await backend("open_project", { path: idle }).catch(() => undefined);
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });
   },
   page: async ({ page }, use) => {
     await page.addInitScript(installTauriShim, BACKEND_URL);
