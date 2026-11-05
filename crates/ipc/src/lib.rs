@@ -1046,9 +1046,9 @@ pub const TERMINAL_FLAGS: TerminalFlagBits = TerminalFlagBits {
 
 /// Consecutive cells of one style.
 ///
-/// Colors are numbers: `0` is the theme's default color, `1..=256` is the
-/// palette index plus one (0-15 come from the theme, 16-255 are the xterm
-/// cube and gray ramp), and `0x0100_0000 | 0xRRGGBB` is a 24-bit color.
+/// Colors are numbers: `0` is the theme's default color, `1..=16` is one of
+/// the 16 theme colors (index plus one), and `0x0100_0000 | 0xRRGGBB` is a
+/// 24-bit color (the backend resolves the other xterm palette colors).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalRun {
@@ -1082,7 +1082,7 @@ pub struct TerminalCell {
     pub col: u32,
 }
 
-/// A screen update (`terminal-frame`). The view draws it, then calls
+/// A screen update (`terminal-frame-event`). The view draws it, then calls
 /// `terminal_ack` with `seq`; the next frame waits for that.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1107,7 +1107,7 @@ pub struct TerminalFrame {
     pub title: String,
 }
 
-/// A terminal's shell exited (`terminal-exited`).
+/// A terminal's shell exited (`terminal-exited-event`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalExited {

@@ -66,7 +66,7 @@ fn cell_from_ipc(cell: ipc::TerminalCell) -> CellPos {
 
 /// See [`ipc::TerminalRun`] for the encoding.
 fn color_to_ipc(color: Color) -> u32 {
-    match color {
+    match color.resolve_xterm() {
         Color::Default => 0,
         Color::Indexed(i) => u32::from(i) + 1,
         Color::Rgb(r, g, b) => {
@@ -339,7 +339,8 @@ mod tests {
     fn colors_and_flags_encode_as_documented() {
         assert_eq!(color_to_ipc(Color::Default), 0);
         assert_eq!(color_to_ipc(Color::Indexed(0)), 1);
-        assert_eq!(color_to_ipc(Color::Indexed(255)), 256);
+        assert_eq!(color_to_ipc(Color::Indexed(15)), 16);
+        assert_eq!(color_to_ipc(Color::Indexed(255)), 0x01ee_eeee);
         assert_eq!(color_to_ipc(Color::Rgb(0x12, 0x34, 0x56)), 0x0112_3456);
         let style = Style {
             bold: true,

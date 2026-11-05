@@ -33,6 +33,29 @@ pub enum Color {
     Rgb(u8, u8, u8),
 }
 
+impl Color {
+    /// Palette colors 16-255 as RGB (the xterm 6×6×6 cube and the gray
+    /// ramp), so a view only maps the 16 theme colors. Other colors are
+    /// returned unchanged.
+    pub fn resolve_xterm(self) -> Self {
+        let Self::Indexed(i) = self else {
+            return self;
+        };
+        match i {
+            0..=15 => self,
+            16..=231 => {
+                let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
+                let n = i - 16;
+                Self::Rgb(level(n / 36), level((n / 6) % 6), level(n % 6))
+            }
+            232..=255 => {
+                let gray = 8 + (i - 232) * 10;
+                Self::Rgb(gray, gray, gray)
+            }
+        }
+    }
+}
+
 /// Text attributes of a run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Style {
@@ -150,4 +173,27 @@ pub struct Frame {
     pub title: String,
     /// Exit code once the shell has exited (`Some(None)` if unknown).
     pub exited: Option<Option<i32>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xterm_palette_resolves_to_rgb_above_the_theme_colors() {
+        assert_eq!(Color::Indexed(1).resolve_xterm(), Color::Indexed(1));
+        assert_eq!(Color::Indexed(16).resolve_xterm(), Color::Rgb(0, 0, 0));
+        assert_eq!(Color::Indexed(196).resolve_xterm(), Color::Rgb(255, 0, 0));
+        assert_eq!(
+            Color::Indexed(231).resolve_xterm(),
+            Color::Rgb(255, 255, 255)
+        );
+        assert_eq!(Color::Indexed(67).resolve_xterm(), Color::Rgb(95, 135, 175));
+        assert_eq!(Color::Indexed(232).resolve_xterm(), Color::Rgb(8, 8, 8));
+        assert_eq!(
+            Color::Indexed(255).resolve_xterm(),
+            Color::Rgb(238, 238, 238)
+        );
+        assert_eq!(Color::Default.resolve_xterm(), Color::Default);
+    }
 }
