@@ -387,3 +387,106 @@ async fn unused_imports_show_without_any_server() {
     assert_eq!(items.items.len(), 1);
     assert_eq!(items.items[0].message, "Unused import 'unused'");
 }
+
+#[tokio::test]
+async fn a_newer_completion_cancels_the_older_one() {
+    let Some(server) = fake_server() else { return };
+    let f = fixture(&server, &[("c.ts", "slow 😀 fast\nfa")]).await;
+    let doc = f.session.open_document("c.ts".into()).await.unwrap();
+    ready(&f).await;
+    // The fake server never answers completion on `slow` until cancelled.
+    let session = f.session.clone();
+    let older =
+        tokio::spawn(async move { session.completion(doc.doc_id, doc.version, 2, None).await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let end = utf16("slow 😀 fast\nfa");
+    let newer = f
+        .session
+        .completion(doc.doc_id, doc.version, end, None)
+        .await
+        .unwrap()
+        .unwrap();
+    // Ranked in Rust for `fa`: `fast` matches, `slow` does not. (The fake
+    // server also lists the typed `fa` itself, an exact match ranked first.)
+    let labels: Vec<&str> = newer.items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.contains(&"fast") && !labels.contains(&"slow"),
+        "{labels:?}"
+    );
+    assert_eq!(newer.from, end - 2);
+    let err = older.await.unwrap().unwrap_err();
+    assert_eq!(err.kind, IpcErrorKind::Cancelled);
+    // A typed character the server does not list as a trigger asks nothing.
+    assert!(
+        f.session
+            .completion(doc.doc_id, doc.version, end, Some(";".into()))
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn rename_edits_every_open_document_at_utf16_positions() {
+    let Some(server) = fake_server() else { return };
+    let a_text = "const 名前 = \"😀\"; // 名前\n";
+    let b_text = "🎉 use(名前);\n";
+    let f = fixture(&server, &[("a.ts", a_text), ("b.ts", b_text)]).await;
+    let a = f.session.open_document("a.ts".into()).await.unwrap();
+    f.session.open_document("b.ts".into()).await.unwrap();
+    ready(&f).await;
+    let at = utf16("const 名");
+    let preview = eventually_preview(&f, a.doc_id, a.version, at).await;
+    let counts: Vec<(&str, u32)> = preview
+        .files
+        .iter()
+        .map(|p| (p.path.as_str(), p.count))
+        .collect();
+    assert_eq!(counts, [("a.ts", 2), ("b.ts", 1)]);
+    let result = f.session.apply_refactoring(preview.id).await.unwrap();
+    assert!(
+        result.skipped.is_empty() && result.files_written.is_empty(),
+        "{result:?}"
+    );
+    assert_eq!(result.open_documents.len(), 2);
+    for replace in &result.open_documents {
+        f.session
+            .apply_changes(
+                replace.doc_id,
+                replace.version,
+                vec![ChangeTransaction {
+                    edits: replace.edits.clone(),
+                    kind: EditKind::Other,
+                    selection_before: cursor(0),
+                    selection_after: cursor(0),
+                }],
+            )
+            .await
+            .unwrap();
+    }
+    let a_now = f.session.open_document("a.ts".into()).await.unwrap().text;
+    let b_now = f.session.open_document("b.ts".into()).await.unwrap().text;
+    assert_eq!(a_now, "const 値😀 = \"😀\"; // 値😀\n");
+    assert_eq!(b_now, "🎉 use(値😀);\n");
+}
+
+/// Rename preview once both documents are open on the fake server.
+async fn eventually_preview(
+    f: &Fixture,
+    doc: DocId,
+    version: u32,
+    at: u32,
+) -> ferrule_ipc::RefactoringPreview {
+    for _ in 0..500 {
+        if let Ok(preview) = f
+            .session
+            .rename_preview(doc, version, at, "値😀".into())
+            .await
+            && preview.files.len() == 2
+        {
+            return preview;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("timed out waiting for a rename preview over both files");
+}

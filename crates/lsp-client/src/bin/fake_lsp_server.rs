@@ -17,6 +17,10 @@
 //!   `RequestCancelled`).
 //! - `textDocument/definition` → the first whole-word occurrence of the word
 //!   in each open document.
+//! - `textDocument/completion` → every distinct word of the open documents
+//!   (trigger character `.`); the word `slow` waits for `$/cancelRequest`.
+//! - `textDocument/rename` → every whole-word occurrence in the open
+//!   documents (`changes`).
 //! - `fake/crash` (notification) exits with code 1; `exit` with code 0.
 
 use std::collections::BTreeMap;
@@ -111,7 +115,9 @@ impl Server {
                             "positionEncoding": encoding,
                             "textDocumentSync": { "openClose": true, "change": 2, "save": true },
                             "hoverProvider": true,
-                            "definitionProvider": true
+                            "definitionProvider": true,
+                            "completionProvider": { "triggerCharacters": ["."] },
+                            "renameProvider": true
                         },
                         "serverInfo": { "name": "fake-lsp-server", "version": "1.0" }
                     }),
@@ -196,6 +202,53 @@ impl Server {
                     })
                     .collect();
                 self.reply(&id, Value::Array(locations))
+            }
+            ("textDocument/completion", Some(id)) => {
+                let word = self.word_at(params);
+                if word == "slow" {
+                    self.slow.push(id);
+                    return Ok(());
+                }
+                // Every distinct word of the open documents.
+                let mut labels: Vec<String> = self
+                    .docs
+                    .values()
+                    .flat_map(|doc| {
+                        doc.text
+                            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                            .filter(|w| !w.is_empty())
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+                labels.sort();
+                labels.dedup();
+                let items: Vec<Value> = labels
+                    .into_iter()
+                    .map(|label| json!({ "label": label, "kind": 6 }))
+                    .collect();
+                self.reply(&id, json!({ "isIncomplete": false, "items": items }))
+            }
+            ("textDocument/rename", Some(id)) => {
+                // Every whole-word occurrence in every open document.
+                let word = self.word_at(params);
+                let new_name = params["newName"].as_str().unwrap_or("").to_owned();
+                let mut changes = serde_json::Map::new();
+                for (uri, doc) in &self.docs {
+                    let edits: Vec<Value> = find_words(&doc.text, &word)
+                        .into_iter()
+                        .map(|(line, column)| {
+                            let end = column + word.encode_utf16().count();
+                            json!({ "newText": new_name, "range": {
+                                "start": { "line": line, "character": column },
+                                "end": { "line": line, "character": end } } })
+                        })
+                        .collect();
+                    if !edits.is_empty() {
+                        changes.insert(uri.clone(), Value::Array(edits));
+                    }
+                }
+                self.reply(&id, json!({ "changes": changes }))
             }
             ("$/cancelRequest", None) => {
                 let target = params["id"].clone();
@@ -298,6 +351,25 @@ fn offset(text: &str, position: &Value) -> usize {
         start += content.len() + 1;
     }
     text.len()
+}
+
+/// Line and UTF-16 column of every whole-word occurrence of `word`.
+fn find_words(text: &str, word: &str) -> Vec<(usize, usize)> {
+    let mut found = Vec::new();
+    if word.is_empty() {
+        return found;
+    }
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    for (line_no, line) in text.split('\n').enumerate() {
+        for (byte, _) in line.match_indices(word) {
+            let before = line[..byte].chars().next_back();
+            let after = line[byte + word.len()..].chars().next();
+            if !before.is_some_and(is_word) && !after.is_some_and(is_word) {
+                found.push((line_no, line[..byte].encode_utf16().count()));
+            }
+        }
+    }
+    found
 }
 
 /// Line and UTF-16 column of the first whole-word occurrence of `word`.
