@@ -311,19 +311,24 @@ for (const scheme of ["dark", "light"] as const) {
       await expect(docs).toBeVisible({ timeout: 15_000 });
       await expectReadable(page, ".cm-tooltip.cm-completionInfo", "documentation panel");
       // Popup and panel stay inside the window.
-      const inside = await page.evaluate(() =>
-        [".cm-tooltip-autocomplete", ".cm-tooltip.cm-completionInfo"].every((s) => {
-          const r = document.querySelector(s)?.getBoundingClientRect();
-          return (
-            r !== undefined &&
-            r.left >= 0 &&
-            r.top >= 0 &&
-            r.right <= innerWidth &&
-            r.bottom <= innerHeight
-          );
+      // CodeMirror positions the panel in the frame after adding it; check
+      // the settled position.
+      await expect(docs).toHaveAttribute("style", /max-height/);
+      // Popup and panel stay inside the window (rectangles reported on failure).
+      const outside = await page.evaluate(() =>
+        [".cm-tooltip-autocomplete", ".cm-tooltip.cm-completionInfo"].flatMap((selector) => {
+          const r = document.querySelector(selector)?.getBoundingClientRect();
+          if (!r) return [`${selector}: missing`];
+          const fits =
+            r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+          return fits
+            ? []
+            : [
+                `${selector}: left ${String(r.left)} top ${String(r.top)} right ${String(r.right)} bottom ${String(r.bottom)} in ${String(innerWidth)}x${String(innerHeight)}`,
+              ];
         }),
       );
-      expect(inside, "completion popup and documentation inside the window").toBe(true);
+      expect(outside, "completion popup and documentation inside the window").toEqual([]);
       const completionShot = await shot(
         page,
         info,
