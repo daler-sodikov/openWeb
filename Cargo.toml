@@ -31,7 +31,9 @@ ferrule-search = { path = "crates/search" }
 ferrule-lsp-client = { path = "crates/lsp-client" }
 ferrule-dap-client = { path = "crates/dap-client" }
 ferrule-git = { path = "crates/git" }
-ferrule-terminal = { path = "crates/terminal" }
+# Without default features: only the app enables the native backend
+# (its "native" feature), so every other crate builds without it.
+ferrule-terminal = { path = "crates/terminal", default-features = false }
 ferrule-run-debug = { path = "crates/run-debug" }
 ferrule-plugin-host = { path = "crates/plugin-host" }
 ferrule-ipc = { path = "crates/ipc" }
@@ -86,6 +88,11 @@ oxc_ast = "0.157"
 oxc_parser = "0.157"
 oxc_semantic = "0.157"
 oxc_span = "0.157"
+# M4 terminal backend (optional "native" feature of ferrule-terminal)
+portable-pty = "0.9"
+alacritty_terminal = "0.26"
+libc = "0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
 
 [workspace.lints.rust]
 missing_docs = "warn"

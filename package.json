@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "gen:ipc": "cargo run --quiet -p ferrule-app --bin export-bindings",
+    "gen:ipc": "cargo run --quiet -p ferrule-app --no-default-features --bin export-bindings",
     "dev": "bun run gen:ipc && vite",
     "build": "bun run gen:ipc && tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",

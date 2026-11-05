@@ -9,7 +9,29 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+default = ["native"]
+# The real backend: PTYs (portable-pty) and the VT emulator
+# (alacritty_terminal). Without it, only the backend-independent logic is
+# built (session state, batching, links, key encoding), which keeps the
+# rest of the workspace buildable without these crates.
+native = ["dep:portable-pty", "dep:alacritty_terminal", "dep:libc", "dep:windows-sys"]
+
 [dependencies]
+regex.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+portable-pty = { workspace = true, optional = true }
+alacritty_terminal = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

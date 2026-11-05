@@ -29,6 +29,10 @@ path = "src/bin/headless.rs"
 required-features = ["headless"]
 
 [features]
+default = ["native"]
+# Real terminals (PTY + VT emulator). Off only for offline tooling that does
+# not need them (exporting the IPC bindings).
+native = ["ferrule-terminal/native"]
 headless = ["tauri/test", "dep:tiny_http"]
 
 [build-dependencies]
@@ -37,6 +41,7 @@ tauri-build.workspace = true
 [dependencies]
 ferrule-core.workspace = true
 ferrule-ipc.workspace = true
+ferrule-terminal.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
