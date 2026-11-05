@@ -16,6 +16,8 @@ default = ["native"]
 # built (session state, batching, links, key encoding), which keeps the
 # rest of the workspace buildable without these crates.
 native = ["dep:portable-pty", "dep:alacritty_terminal", "dep:libc", "dep:windows-sys"]
+# The in-memory backend (`fake`) for other crates' tests.
+testing = []
 
 [dependencies]
 regex.workspace = true
