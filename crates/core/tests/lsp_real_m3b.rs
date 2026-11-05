@@ -181,13 +181,22 @@ async fn m3b_features_against_typescript_language_server() {
     let f = fixture().await;
     let s = &f.session;
     let (util, util_v, _) = current(&f, "src/util.ts").await;
+    // Wait until the server has loaded the project (indexing, then ready):
+    // before that it answers from syntax only (no cross-file results).
     poll("the server to load the project", || async {
-        f.events
-            .0
-            .lock()
-            .unwrap()
+        let events = f.events.0.lock().unwrap();
+        let states: Vec<ServerStateKind> = events
             .iter()
-            .any(|e| matches!(e, SessionEvent::ServerStatus(st) if st.state == ServerStateKind::Ready))
+            .filter_map(|e| match e {
+                SessionEvent::ServerStatus(st) => Some(st.state),
+                _ => None,
+            })
+            .collect();
+        let indexed = states
+            .iter()
+            .position(|s| *s == ServerStateKind::Indexing)?;
+        states[indexed..]
+            .contains(&ServerStateKind::Ready)
             .then_some(())
     })
     .await;
