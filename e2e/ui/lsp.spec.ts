@@ -216,6 +216,55 @@ test.describe("with typescript-language-server", () => {
     await expect(chooser).toHaveCount(0);
     await expect.poll(() => caretLine(page)).toBe(7);
   });
+
+  test("Find Usages, Rename with preview and completion", async ({ page, project }) => {
+    fs.writeFileSync(
+      path.join(project, "src", "rename-me.ts"),
+      "export function oldName(): number {\n  return 1;\n}\n",
+    );
+    const user = path.join(project, "src", "use-rename.ts");
+    fs.writeFileSync(
+      user,
+      'import { oldName } from "./rename-me";\n\nexport const value = oldName();\n',
+    );
+    await openApp(page, project);
+    await recordServerStatus(page);
+    await openFile(page, "src/rename-me.ts");
+    await projectLoaded(page);
+
+    // Find Usages lists the declaration and the use in the closed file.
+    await clickWord(page, "export function oldName", "oldName");
+    await page.keyboard.press("Alt+F7");
+    await expect(page.getByTestId("usage-result").first()).toBeVisible();
+    expect(await page.getByTestId("usage-result").count()).toBeGreaterThanOrEqual(2);
+    await page.keyboard.press("Escape");
+
+    // Rename: preview first, then apply (open tab edited, closed file written).
+    await clickWord(page, "export function oldName", "oldName");
+    await page.keyboard.press("Shift+F6");
+    // The dialog opens after the server confirmed the symbol can be renamed.
+    const nameField = page.getByRole("textbox", { name: "New name" });
+    await expect(nameField).toBeVisible();
+    await expect(nameField).toHaveValue("oldName");
+    await nameField.fill("newName");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("rename-files")).toContainText("use-rename.ts");
+    await page.getByTestId("rename-apply").click();
+    await expect(page.locator(".cm-content").first()).toContainText("function newName");
+    await expect
+      .poll(() => fs.readFileSync(user, "utf8"), { timeout: 15_000 })
+      .toContain("newName()");
+
+    // Completion offers the new name.
+    await editor(page).click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type("\nnewNa");
+    await page.keyboard.press("Control+Space");
+    await expect(page.locator(".cm-tooltip-autocomplete")).toContainText("newName", {
+      timeout: 15_000,
+    });
+    await page.keyboard.press("Escape");
+  });
 });
 
 test("a missing server is reported and editing keeps working", async ({ page, project }) => {
