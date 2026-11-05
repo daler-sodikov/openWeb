@@ -10,5 +10,6 @@ test-results/
 playwright-report/
 fixtures/
 crates/*/tests/golden/
+crates/*/tests/imports-golden/
 .openidea/
 third_party/
