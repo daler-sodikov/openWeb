@@ -6,6 +6,41 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M4a: terminal; native backend not compiled yet)
+
+- Terminal tool window (Alt+F12, macOS Option+F12): shells in the project
+  root (`terminal.shellPath` / `terminal.shellArgs` in `settings.json`,
+  else `$SHELL`, `pwsh`, `powershell` or `%ComSpec%`); tabs (+ or
+  Ctrl+Shift+T / Cmd+T, rename by double click, close); exit codes shown;
+  colors, bold/italic/underline/inverse, cursor and wide characters drawn
+  from Rust frames; resize, wheel scrollback, mouse selection, copy
+  (Ctrl+Shift+C / Cmd+C) and paste (Ctrl+Shift+V / Cmd+V, bracketed when
+  asked); every other key goes to the shell.
+- `file:line:col`, `file(line,col)` and `file://` links: underlined on
+  Ctrl/Cmd hover, Ctrl/Cmd+click opens the file at that position.
+- Output batched into at most one frame per 16 ms with one frame in
+  flight; closing a tab, switching projects or quitting ends the shell's
+  process group (Unix) or Job Object (Windows).
+- The PTY and VT emulator (portable-pty, alacritty_terminal) are behind the
+  `native` feature and were written against their sources while they could
+  not be downloaded; they are compiled and tested on CI after the fetch.
+
+### Added (M4b: Git)
+
+- Git through the user's `git`: status colors in the project tree, gutter
+  markers against the index with Rollback (Ctrl+Alt+Z / Cmd+Alt+Z, one undo
+  step), diff against HEAD side by side or unified with word highlights,
+  commit window (Alt+0 / Cmd+0) with stage checkboxes, Amend and clear
+  errors, Git log (Alt+9 / Cmd+9) for the branch or the current file,
+  branches popup from the status bar (checkout, create, delete), blame in
+  the gutter ("Annotate with Git Blame"). Status refreshes after file
+  changes, saves, Git writes and window focus. No network or credentials.
+
+### Fixed (M4)
+
+- A popup opened while an Enter was being applied lost its focus to the
+  editor.
+
 ### Fixed (readability, before M4)
 
 - Dark theme: the completion list and its documentation panel used

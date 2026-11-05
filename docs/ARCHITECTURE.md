@@ -549,7 +549,8 @@ reporting in M4a.
 
 **PTY lifecycle and cleanup.**
 
-- Spawn: the user's shell (setting `terminal.shell`, otherwise `$SHELL` or
+- Spawn: the user's shell (settings `terminal.shellPath` and
+  `terminal.shellArgs`, otherwise `$SHELL` or
   `/bin/sh` on Unix; `pwsh`, then `powershell`, then `%ComSpec%` on Windows),
   as a login shell on macOS (`-l`, so `PATH` matches a terminal), in the
   project root, with `TERM=xterm-256color`, `COLORTERM=truecolor`,
@@ -648,20 +649,51 @@ stages and unstages with `git add` / `git restore --staged` (`git rm
 `user.name`/`user.email`, failing hooks and empty commits are recognized and
 reported in plain words.
 
-**IPC (M4).** Terminal commands: `terminal_open(shell?)` →
+**IPC (M4).** Terminal commands: `terminals()` → `TerminalList` (open
+terminals, and why none can start in this build), `open_terminal(size)` →
 `TerminalInfo` (id, title, shell, cwd), `terminal_input(id, text)`,
 `terminal_key(id, key)`, `terminal_paste(id, text)`,
-`terminal_resize(id, cols, rows)`, `terminal_scroll(id, lines)`,
-`terminal_select(id, from, to, kind)`, `terminal_selection_text(id)`,
-`terminal_link_at(id, row, col)`, `terminal_rename(id, title)`,
-`terminal_close(id)`, `terminal_ack(id, seq)`, `terminals()`. Events:
-`terminal-frame-event` (`TerminalFrame`) and `terminal-exited-event`.
+`terminal_resize(id, size)`, `terminal_scroll(id, lines)`,
+`terminal_select(id, anchor, head, kind)`, `terminal_clear_selection(id)`,
+`terminal_selection_text(id)`, `terminal_link_at(id, cell)` →
+`TerminalLink` (target and column range), `rename_terminal(id, title)`,
+`close_terminal(id)`, `terminal_ack(id, seq)`. Events:
+`terminal-frame-event` (`TerminalFrame`: dirty rows of styled runs; colors
+are 0 = default, 1–16 = theme palette, `0x01RRGGBB` = 24-bit, Rust resolves
+the other xterm colors; flags from the exported `TERMINAL_FLAGS`) and
+`terminal-exited-event`. The view sends input through one ordered queue
+(IPC calls may otherwise be handled out of order).
 Git commands: `git_status`, `git_refresh`, `git_line_changes(doc)`,
-`git_rollback_hunk(doc, version, hunk)`, `git_diff(path, mode)`,
-`git_blame(doc)`, `git_log(path?)`, `git_branches`, `git_checkout`,
-`git_create_branch`, `git_delete_branch`, `git_stage`, `git_unstage`,
-`git_commit(message, amend)`, `git_last_commit_message`. Event:
-`git-status-event` (`GitStatus`).
+`git_rollback_hunk(doc, version, line, lines)` → `DocumentReplace`,
+`git_diff(path, mode)`, `git_blame(doc)`, `git_log(path?)`,
+`git_branches`, `git_checkout(name, remote)`,
+`git_create_branch(name, checkout)`, `git_delete_branch(name, force)` →
+`Deleted | NotMerged`, `git_stage(paths)`, `git_unstage(paths)`,
+`git_commit(message, amend, paths)` (saves, restages the checked files,
+commits), `git_last_commit_message`. Event: `git-status-event`
+(`GitStatus`).
+
+**Test backends.** `ferrule-terminal` has an in-memory backend (`fake`,
+feature `testing`): its "shell" echoes input and its screen is plain text.
+Core tests use it, and the headless UI-test backend offers it with
+`--fake-terminals` (Playwright: `FERRULE_E2E_FAKE_TERMINAL=1`) so the
+terminal UI is tested where the native backend is not built. It is never
+used by the app.
+
+**What M4 verified offline (2026-11-05).** The terminal crates could not be
+downloaded during M4 (ROADMAP, "M4 build workflow"):
+
+| Part                                                                                                                   | Status                                                          |
+| ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `ferrule-terminal` without `native`: session, batching/backpressure, keys, paste, links, shell detection, fake backend | built, clippy clean, unit tests pass                            |
+| `ferrule-terminal` `native` module (portable-pty, alacritty_terminal, Unix process group, Windows Job Object)          | written against the cached crate sources; **not compiled**      |
+| `ferrule-terminal/tests/native.rs` (real PTYs: echo, cwd, resize, exit code, cleanup, flood)                           | written; **not compiled or run** (needs `native`; runs in CI)   |
+| Core terminal commands and events                                                                                      | built and tested with the in-memory backend                     |
+| Terminal UI                                                                                                            | Vitest; Playwright against the in-memory backend                |
+| Terminal UI with real shells (pwd, history, word selection, flood with `node`)                                         | Playwright tests written; **skipped locally**, must pass on CI  |
+| `ferrule-git`, core Git, Git UI                                                                                        | built and tested offline on real repositories (git 2.56, Linux) |
+| The app binary with `native` (`bun tauri dev`), the M0 smoke test                                                      | **not built** (needs the crates)                                |
+| `cargo deny check` with the new crates                                                                                 | **not run** (needs the advisory database and full metadata)     |
 
 ## 5. Editor view layer: CodeMirror 6 as a view only
 

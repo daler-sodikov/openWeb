@@ -35,6 +35,9 @@ None. No third-party source code is copied into this repository.
 | `x11rb` (`ferrule-perf` only, Linux)                                                                          | MIT OR Apache-2.0                 | Benchmark harness: screen capture and XTest input; not shipped                                                              |
 | `regex`                                                                                                       | MIT OR Apache-2.0                 | Find/Replace in Files (`search`)                                                                                            |
 | `tempfile`                                                                                                    | MIT OR Apache-2.0                 | Atomic saves (`vfs`) and temporary files in tests                                                                           |
+| `portable-pty` (`native` feature)                                                                             | MIT                               | Pseudo-terminals and shell processes, ConPTY on Windows (`terminal`); its Unix dependency `nix` is MIT                      |
+| `alacritty_terminal` (with `vte`) (`native` feature)                                                          | Apache-2.0 / Apache-2.0 OR MIT    | Terminal emulation: VT parser, screen grid, scrollback, selection (`terminal`)                                              |
+| `libc` (Unix), `windows-sys` (Windows) (`native` feature)                                                     | MIT OR Apache-2.0                 | Ending a terminal's process group (Unix) and its Job Object (Windows)                                                       |
 
 ## Rust: accepted exceptions
 

@@ -435,8 +435,8 @@ Open M3b items:
 ## M4: Terminal and Git
 
 Design: [ARCHITECTURE.md, 4.9](ARCHITECTURE.md#49-terminal-and-git-m4).
-Functional UI only (visual polish is M6). In two parts; M4b starts after
-the maintainer says "continue with M4b".
+Functional UI only (visual polish is M6). In two parts, written back to
+back without a stop (change of plan with the M4 build workflow below).
 
 Before M4: Windows CI had failed since M3a (EPERM deleting the UI tests'
 temp projects that the backend still held open); fixed in the test harness,
@@ -458,7 +458,8 @@ offline is listed in ARCHITECTURE.md, 4.9.
 **Done when:**
 
 1. **Shell.** Alt+F12 (macOS Option+F12) opens the Terminal tool window
-   with a shell in the project root: `terminal.shell` from `settings.json`,
+   with a shell in the project root: `terminal.shellPath` (and
+   `terminal.shellArgs`) from `settings.json`,
    else `$SHELL` (Unix, login shell on macOS) or `pwsh`, `powershell`,
    `%ComSpec%` (Windows). If the shell cannot start, the tab says why.
 2. **Tabs.** New (+, Ctrl+Shift+T while the terminal has focus), close,
@@ -486,6 +487,32 @@ offline is listed in ARCHITECTURE.md, 4.9.
    and Windows in CI; a flood test; link-parser and key-encoding unit tests;
    Playwright `ui` tests for 1, 2, 3 (subset), 4, 5 and 6 (close a tab);
    all checks pass with zero warnings.
+
+**Status (2026-11-05): written; the native backend is not compiled yet**
+(see ARCHITECTURE.md 4.9, "What M4 verified offline").
+
+- [ ] 1 Shell: written (setting, `$SHELL`, `pwsh`/`powershell`/`ComSpec`;
+      the tool window says why a shell cannot start). Verified with the
+      in-memory backend only.
+- [x] 2 Tabs: new (+, Ctrl+Shift+T / Cmd+T), close, rename, title from the
+      program unless renamed, exit code shown (in-memory backend).
+- [ ] 3 Terminal behavior: renderer for colors (16/256/truecolor), bold,
+      dim, italic, underline, strike, inverse, cursor, wide characters;
+      resize, wheel scrollback, mouse selection, copy/paste written. Real
+      emulation (alternate screen, 10 000 lines) depends on the native
+      backend: not run yet.
+- [x] 4 Keys: everything goes to the shell except Alt+F12 and the
+      terminal's copy/paste/new-tab keys (in-memory backend; key encoding
+      unit-tested).
+- [x] 5 Links: underlined on Ctrl/Cmd hover, Ctrl/Cmd+click opens the file
+      at line and column, only existing files.
+- [ ] 6 Cleanup: closing a tab, switching projects and quitting call it;
+      process group / Job Object code not compiled; the per-OS test is
+      written, not run.
+- [ ] 7 Never blocks: batching with one frame in flight is tested with the
+      in-memory flood; the real `yes` flood is a written test, not run.
+- [ ] 8 Tests: unit and in-memory tests pass; native PTY tests and the
+      real-shell Playwright tests run only on CI after the fetch.
 
 ### M4b: Git basics (after M4a)
 
@@ -515,6 +542,30 @@ offline is listed in ARCHITECTURE.md, 4.9.
 10. **Tests.** Integration tests on real repositories created in temp
     directories (status, commit, branch, blame, diff, gutter hunks);
     Playwright `ui` tests for 2-8; all checks pass with zero warnings.
+
+**Status (2026-11-05):** built and tested offline on Linux with git 2.56
+(the `git` executable, see ARCHITECTURE.md 4.9); CI on macOS/Windows not
+run yet.
+
+- [x] 1 Status, refreshed after file changes, saves, Git writes and window
+      focus (debounced, off the async workers).
+- [x] 2 Tree colors for files and folders containing changes.
+- [ ] 3 Gutter: markers against the index with old text, Rollback (one undo
+      step) and Ctrl+Alt+Z / Cmd+Alt+Z. Not done: separate markers for
+      staged changes (against HEAD).
+- [x] 4 Diff against HEAD, side by side and unified, word highlights.
+- [x] 5 Commit window (Alt+0 / Cmd+0): checkboxes stage, message, Amend,
+      errors for identity, hooks, empty commits; saves first.
+- [x] 6 Branches popup (status bar branch, or Find Action "Branches…"):
+      local and remote, checkout (refused with unsaved documents; git's
+      refusal shown), create, delete with a second confirmation when
+      unmerged.
+- [x] 7 Blame (Find Action "Annotate with Git Blame"; no default key, as in
+      IntelliJ) with author, date and message on hover.
+- [x] 8 History (Alt+9 / Cmd+9): branch or current file.
+- [x] 9 Safety: only local subcommands, prompts off, no credentials.
+- [x] 10 Tests: real-repository integration tests (crate and core) and
+      Playwright tests for 2-8, plus WCAG checks of the Git surfaces.
 
 ## M5: Run, debug, tests
 
