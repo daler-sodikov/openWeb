@@ -1151,6 +1151,35 @@ input:-webkit-autofill {
 .terminal-cursor[hidden] {
   display: none;
 }
+.terminal-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 17px;
+  border-bottom: 1px solid var(--fr-link);
+  pointer-events: none;
+}
+.terminal-link[hidden],
+.terminal-exit[hidden] {
+  display: none;
+}
+.terminal-view.on-link {
+  cursor: pointer;
+}
+.terminal-exit {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--fr-border);
+  border-radius: 3px;
+  background: var(--fr-surface);
+  color: var(--fr-text);
+  font-family: var(--fr-font-ui);
+}
+.terminal-tab[data-exited="true"] .terminal-tab-title {
+  font-style: italic;
+}
 .terminal-input {
   position: absolute;
   top: 0;

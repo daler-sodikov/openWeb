@@ -6,6 +6,7 @@ import {
   commands,
   type NavTarget,
   type TerminalCell,
+  type TerminalLink,
   type TerminalFrame,
   type TerminalSelectionKind,
   type TerminalSize,
@@ -18,6 +19,7 @@ export interface TerminalHost {
   readonly mac: boolean;
   notify(message: string): void;
   openLink(target: NavTarget): void;
+  newTab(): void;
 }
 
 const SELECTION_KINDS: Record<number, TerminalSelectionKind> = {
@@ -32,6 +34,11 @@ export class TerminalView {
   private readonly cursorEl = document.createElement("div");
   private readonly input = document.createElement("textarea");
   private readonly measureEl = document.createElement("span");
+  private readonly linkEl = document.createElement("div");
+  private readonly exitEl = document.createElement("div");
+  /** Cell last asked for a link while Ctrl/Cmd hovers. */
+  private hoverCell: TerminalCell | null = null;
+  private exited = false;
   private readonly model = new ScreenModel();
   private rowEls: HTMLElement[] = [];
   private dirty = new Set<number>();
@@ -65,7 +72,20 @@ export class TerminalView {
     this.input.spellcheck = false;
     this.measureEl.className = "terminal-measure";
     this.measureEl.textContent = "W".repeat(10);
-    this.element.append(this.screen, this.cursorEl, this.input, this.measureEl);
+    this.linkEl.className = "terminal-link";
+    this.linkEl.dataset.testid = "terminal-link";
+    this.linkEl.hidden = true;
+    this.exitEl.className = "terminal-exit";
+    this.exitEl.dataset.testid = "terminal-exit";
+    this.exitEl.hidden = true;
+    this.element.append(
+      this.screen,
+      this.linkEl,
+      this.cursorEl,
+      this.input,
+      this.measureEl,
+      this.exitEl,
+    );
     this.observer = new ResizeObserver(() => {
       this.scheduleFit();
     });
@@ -109,6 +129,15 @@ export class TerminalView {
     this.abort.abort();
     window.clearTimeout(this.resizeTimer);
     this.element.remove();
+  }
+
+  /** The shell ended: input stops, the exit code is shown. */
+  showExit(code: number | null): void {
+    this.exited = true;
+    this.element.dataset.exited = "true";
+    this.exitEl.textContent =
+      code === null ? "Process exited." : `Process exited with code ${String(code)}.`;
+    this.exitEl.hidden = false;
   }
 
   get title(): string {
@@ -202,6 +231,7 @@ export class TerminalView {
 
   private async sendInput(item: InputItem): Promise<void> {
     await this.attached;
+    if (this.exited) return;
     switch (item.kind) {
       case "text":
         await this.call(commands.terminalInput(this.id, item.text));
@@ -237,8 +267,36 @@ export class TerminalView {
   }
 
   private async openLinkAt(cell: TerminalCell): Promise<void> {
-    const target = await this.call(commands.terminalLinkAt(this.id, cell));
-    if (target) this.host.openLink(target);
+    const link = await this.call(commands.terminalLinkAt(this.id, cell));
+    if (link) this.host.openLink(link.target);
+  }
+
+  /** Underlines the link under the mouse while Ctrl/Cmd is held. */
+  private async hoverLink(event: MouseEvent): Promise<void> {
+    if (!(event.ctrlKey || event.metaKey) || this.id === 0) {
+      this.showLink(null, null);
+      return;
+    }
+    const cell = this.cellAt(event);
+    if (this.hoverCell?.row === cell.row && this.hoverCell.col === cell.col) return;
+    this.hoverCell = cell;
+    const link = await this.call(commands.terminalLinkAt(this.id, cell));
+    // Ignore answers for a cell the mouse has left.
+    if (this.hoverCell !== cell) return;
+    this.showLink(link, cell.row);
+  }
+
+  private showLink(link: TerminalLink | null, row: number | null): void {
+    if (!link || row === null) {
+      this.hoverCell = null;
+      this.linkEl.hidden = true;
+      this.element.classList.remove("on-link");
+      return;
+    }
+    this.linkEl.hidden = false;
+    this.linkEl.style.transform = `translate(${String(link.start * this.cell.width)}px, ${String(row * this.cell.height)}px)`;
+    this.linkEl.style.width = `${String((link.end - link.start) * this.cell.width)}px`;
+    this.element.classList.add("on-link");
   }
 
   private bindEvents(): void {
@@ -254,6 +312,10 @@ export class TerminalView {
         case "copy":
           event.preventDefault();
           void this.copy();
+          return;
+        case "newTab":
+          event.preventDefault();
+          this.host.newTab();
           return;
         case "key":
           event.preventDefault();
@@ -294,6 +356,15 @@ export class TerminalView {
       if (kind !== "simple") {
         void this.call(commands.terminalSelect(this.id, cell, cell, kind));
       }
+    });
+    this.element.addEventListener("mousemove", (event) => {
+      if (!this.drag) void this.hoverLink(event);
+    });
+    this.element.addEventListener("mouseleave", () => {
+      this.showLink(null, null);
+    });
+    this.input.addEventListener("keyup", (event) => {
+      if (event.key === "Control" || event.key === "Meta") this.showLink(null, null);
     });
     window.addEventListener(
       "mousemove",

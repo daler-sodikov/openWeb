@@ -1,5 +1,5 @@
 // Terminal tool window: tabs (new, close, rename by double click) over
-// terminal views. A tab closes when its shell exits.
+// terminal views. A tab whose shell exited stays open with the exit code.
 import {
   commands,
   type TerminalExited,
@@ -31,7 +31,15 @@ export class TerminalWindow {
   /** Called when the window hides itself (last tab closed). */
   onHide: (() => void) | null = null;
 
-  constructor(private readonly host: TerminalHost) {
+  private readonly host: TerminalHost;
+
+  constructor(host: Omit<TerminalHost, "newTab">) {
+    this.host = {
+      ...host,
+      newTab: () => {
+        void this.newTab();
+      },
+    };
     this.element.className = "tool-window terminal";
     this.element.dataset.testid = "terminal";
     this.element.setAttribute("aria-label", "Terminal");
@@ -132,9 +140,12 @@ export class TerminalWindow {
     } catch (error: unknown) {
       view.dispose();
       if (this.active) this.active.view.element.hidden = false;
-      this.host.notify(`Cannot start a terminal: ${errorMessage(error)}`);
+      // Shown in the tool window itself (e.g. a wrong terminal.shellPath).
+      this.unavailable.textContent = `Cannot start a terminal: ${errorMessage(error)}`;
+      this.unavailable.hidden = false;
       return;
     }
+    this.unavailable.hidden = true;
     view.attach(info.id, size);
     const tab = this.addTab(info, view);
     for (const frame of this.early.get(info.id) ?? []) view.applyFrame(frame);
@@ -267,6 +278,10 @@ export class TerminalWindow {
 
   onExited(exited: TerminalExited): void {
     const tab = this.tabs.find((t) => t.info.id === exited.id);
-    if (tab) void this.closeTab(tab);
+    if (!tab) return;
+    const code = exited.code ?? null;
+    tab.view.showExit(code);
+    tab.button.dataset.exited = "true";
+    tab.button.title = code === null ? "Exited" : `Exited with code ${String(code)}`;
   }
 }

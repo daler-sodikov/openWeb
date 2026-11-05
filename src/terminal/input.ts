@@ -8,6 +8,8 @@ export type KeyRoute =
   /** Not for the terminal (lone modifiers, app shortcuts on macOS). */
   | { kind: "ignore" }
   | { kind: "copy" }
+  /** New terminal tab (Ctrl+Shift+T, macOS Cmd+T). */
+  | { kind: "newTab" }
   /** Let the browser fire its paste event (handled by the view). */
   | { kind: "paste" }
   /** Let the textarea receive the character. */
@@ -27,11 +29,13 @@ export function routeKey(event: KeyInfo, mac: boolean): KeyRoute {
   if (mac && event.metaKey) {
     if (name === "c") return { kind: "copy" };
     if (name === "v") return { kind: "paste" };
+    if (name === "t" && !event.shiftKey) return { kind: "newTab" };
     return { kind: "ignore" };
   }
   if (!mac) {
     if (event.ctrlKey && event.shiftKey && name === "c") return { kind: "copy" };
     if (event.ctrlKey && event.shiftKey && name === "v") return { kind: "paste" };
+    if (event.ctrlKey && event.shiftKey && name === "t") return { kind: "newTab" };
     if (event.ctrlKey && !event.shiftKey && event.key === "Insert") return { kind: "copy" };
     if (event.shiftKey && !event.ctrlKey && event.key === "Insert") return { kind: "paste" };
   }

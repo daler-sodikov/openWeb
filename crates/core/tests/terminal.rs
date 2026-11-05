@@ -156,7 +156,10 @@ async fn links_resolve_to_project_files() {
         .unwrap();
     wait_for_row(&s, &events, id, "nope.ts").await;
     let cell = |col| TerminalCell { row: 0, col };
-    let target = s.terminal_link_at(id, cell(5)).await.unwrap().unwrap();
+    let link = s.terminal_link_at(id, cell(5)).await.unwrap().unwrap();
+    // The row is "$ at src/a.ts:2:8 and …" (the fake shell echoes input).
+    assert_eq!((link.start, link.end), (5, 17));
+    let target = link.target;
     assert_eq!(target.path, "src/a.ts");
     assert!(target.in_project);
     assert_eq!((target.line, target.column), (1, 7));
@@ -191,5 +194,19 @@ async fn rename_close_and_project_switch_end_terminals() {
         .await
         .unwrap();
     assert_eq!(*backend.log.terminated.lock().unwrap(), 2);
+    assert!(s.terminals().await.unwrap().terminals.is_empty());
+}
+
+#[tokio::test]
+async fn a_shell_that_cannot_start_says_why() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(FakeBackend {
+        fail: Some("No such file or directory".into()),
+        ..FakeBackend::default()
+    });
+    let (s, _) = session(dir.path(), Some(backend)).await;
+    let err = s.open_terminal(SIZE).await.unwrap_err();
+    assert_eq!(err.kind, IpcErrorKind::Io);
+    assert!(err.message.contains("No such file or directory"), "{err}");
     assert!(s.terminals().await.unwrap().terminals.is_empty());
 }

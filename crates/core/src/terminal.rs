@@ -271,7 +271,7 @@ impl Session {
         &self,
         id: u32,
         cell: ipc::TerminalCell,
-    ) -> Result<Option<ipc::NavTarget>, IpcError> {
+    ) -> Result<Option<ipc::TerminalLink>, IpcError> {
         let runtime = self.runtime()?;
         let text = runtime
             .terminals
@@ -281,18 +281,23 @@ impl Session {
         let col = usize::from(to_u16(cell.col));
         blocking(move || {
             let project = &runtime.project;
-            let Some(link) = links::link_at(&text, col)
-                .and_then(|found| links::resolve(&found, &[project.root()]))
-            else {
+            let Some(found) = links::link_at(&text, col) else {
+                return Ok(None);
+            };
+            let Some(link) = links::resolve(&found, &[project.root()]) else {
                 return Ok(None);
             };
             let rel = project.relativize(&link.path);
-            Ok(Some(ipc::NavTarget {
-                in_project: rel.is_some(),
-                path: rel.unwrap_or_else(|| link.path.to_string_lossy().into_owned()),
-                line: link.line.map_or(0, |l| l.saturating_sub(1)),
-                column: link.column.map_or(0, |c| c.saturating_sub(1)),
-                preview: String::new(),
+            Ok(Some(ipc::TerminalLink {
+                target: ipc::NavTarget {
+                    in_project: rel.is_some(),
+                    path: rel.unwrap_or_else(|| link.path.to_string_lossy().into_owned()),
+                    line: link.line.map_or(0, |l| l.saturating_sub(1)),
+                    column: link.column.map_or(0, |c| c.saturating_sub(1)),
+                    preview: String::new(),
+                },
+                start: u32::try_from(found.start).unwrap_or(u32::MAX),
+                end: u32::try_from(found.end).unwrap_or(u32::MAX),
             }))
         })
         .await

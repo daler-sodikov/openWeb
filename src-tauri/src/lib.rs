@@ -25,8 +25,8 @@ use ferrule_ipc::{
     HoverResult, IpcError, KeyBinding, NavKind, NavTarget, OpenedDocument, PROTOCOL_VERSION,
     ProjectInfo, RefactoringPreview, RemoteUpdate, RenameTarget, ReplaceResult, SaveResult,
     SearchResults, SearchTab, ServerStatus, SignatureView, StartupTarget, TERMINAL_FLAGS,
-    TerminalCell, TerminalInfo, TerminalKey, TerminalList, TerminalSelectionKind, TerminalSize,
-    TextSearch, TraceSample, UsageResults, WorkspaceEditResult,
+    TerminalCell, TerminalInfo, TerminalKey, TerminalLink, TerminalList, TerminalSelectionKind,
+    TerminalSize, TextSearch, TraceSample, UsageResults, WorkspaceEditResult,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -683,7 +683,7 @@ async fn terminal_link_at(
     session: SessionState<'_>,
     id: u32,
     cell: TerminalCell,
-) -> Result<Option<NavTarget>, IpcError> {
+) -> Result<Option<TerminalLink>, IpcError> {
     session.terminal_link_at(id, cell).await
 }
 

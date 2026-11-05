@@ -110,7 +110,7 @@ test("Alt+F12 opens a shell in the project root; keys reach it", async ({ page, 
   await expectOutput(page, "hello-ferrule");
 });
 
-test("tabs: new, rename, close; exit closes the tab", async ({ page, project }) => {
+test("tabs: new, rename, close; an exited shell shows its code", async ({ page, project }) => {
   await openApp(page, project);
   await requireTerminals();
   await openTerminal(page);
@@ -136,9 +136,22 @@ test("tabs: new, rename, close; exit closes the tab", async ({ page, project }) 
   await expect(page.getByTestId("terminal-tab")).toHaveCount(1);
   expect(((await backend("terminals", {})) as { terminals: unknown[] }).terminals).toHaveLength(1);
 
+  // Ctrl+Shift+T (Cmd+T) opens another tab from the keyboard.
+  await page.getByTestId("terminal-input").focus();
+  await page.keyboard.press(isMac ? "Meta+t" : "Control+Shift+T");
+  await expect(page.getByTestId("terminal-tab")).toHaveCount(2);
+  await page.getByTestId("terminal-tab-close").nth(1).click();
+  await expect(page.getByTestId("terminal-tab")).toHaveCount(1);
+
+  // An exited shell keeps its tab and shows the exit code.
   await page.getByTestId("terminal-input").focus();
   await run(page, "exit");
-  await expect(page.getByTestId("terminal-tab")).toHaveCount(0, { timeout: 20_000 });
+  await expect(view(page).getByTestId("terminal-exit")).toHaveText("Process exited with code 0.", {
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId("terminal-tab")).toHaveAttribute("data-exited", "true");
+  await page.getByTestId("terminal-tab-close").click();
+  await expect(page.getByTestId("terminal-tab")).toHaveCount(0);
   await expect(page.getByTestId("terminal")).toBeHidden();
 });
 
@@ -150,6 +163,14 @@ test("Ctrl/Cmd+click on file:line:col opens the file", async ({ page, project })
   await expectOutput(page, "at src/App.tsx:3:5 here");
   const point = await cellOf(page, "src/App.tsx:3:5", 4);
   await page.keyboard.down(isMac ? "Meta" : "Control");
+  // Hovering with Ctrl/Cmd underlines the whole link.
+  await page.mouse.move(point.x, point.y);
+  await expect(view(page).getByTestId("terminal-link")).toBeVisible();
+  const cell = await view(page).evaluate((el) =>
+    Number.parseFloat(getComputedStyle(el).getPropertyValue("--term-cell-w")),
+  );
+  const width = (await view(page).getByTestId("terminal-link").boundingBox())?.width ?? 0;
+  expect(Math.round(width / cell)).toBe("src/App.tsx:3:5".length);
   await page.mouse.click(point.x, point.y);
   await page.keyboard.up(isMac ? "Meta" : "Control");
   await expect(activeTab(page)).toHaveAttribute("data-path", "src/App.tsx");

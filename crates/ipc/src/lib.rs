@@ -1156,6 +1156,18 @@ pub struct TerminalKey {
     pub shift: bool,
 }
 
+/// A file link in terminal output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalLink {
+    /// Where it points.
+    pub target: NavTarget,
+    /// First column of the link on its row.
+    pub start: u32,
+    /// One past its last column.
+    pub end: u32,
+}
+
 /// How a mouse selection grows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

@@ -51,7 +51,16 @@ describe("routeKey", () => {
     });
     expect(routeKey(ev("c", "KeyC", { metaKey: true }), true)).toEqual({ kind: "copy" });
     expect(routeKey(ev("v", "KeyV", { metaKey: true }), true)).toEqual({ kind: "paste" });
-    expect(routeKey(ev("t", "KeyT", { metaKey: true }), true)).toEqual({ kind: "ignore" });
+    expect(routeKey(ev("w", "KeyW", { metaKey: true }), true)).toEqual({ kind: "ignore" });
+  });
+
+  it("opens a new tab with Ctrl+Shift+T or Cmd+T", () => {
+    expect(routeKey(ev("T", "KeyT", { ctrlKey: true, shiftKey: true }), false)).toEqual({
+      kind: "newTab",
+    });
+    expect(routeKey(ev("t", "KeyT", { metaKey: true }), true)).toEqual({ kind: "newTab" });
+    // Plain Ctrl+T is the shell's (transpose characters).
+    expect(routeKey(ev("t", "KeyT", { ctrlKey: true }), false)).toMatchObject({ kind: "key" });
   });
 
   it("ignores lone modifiers", () => {
