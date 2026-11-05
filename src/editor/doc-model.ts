@@ -396,7 +396,12 @@ export class DocModel {
     let next = fromIpcSelection(selection, length);
     if (pending.length > 0) next = next.map(composePending(pending, length));
     pane.view.dispatch({ selection: next, scrollIntoView: true, userEvent: "select" });
-    pane.view.focus();
+    // Keep the focus where the user moved it meanwhile (e.g. a popup opened
+    // while an Enter was in flight).
+    const active = document.activeElement;
+    if (active === null || active === document.body || pane.view.dom.contains(active)) {
+      pane.view.focus();
+    }
   }
 
   /** Whether Rust has exactly the text the panes show. */
