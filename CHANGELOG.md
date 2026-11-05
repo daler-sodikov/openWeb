@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed (readability, before M4)
+
+- Dark theme: the completion list and its documentation panel used
+  CodeMirror's light styles (light text on near-white), and the selection
+  was pale lavender under light text. The editor now uses dark styles
+  from CSS variables; completion rows are whole rows and stay inside the
+  window.
+- A selection on the caret's line was invisible (opaque active-line
+  highlight).
+- Text below WCAG AA (4.5:1) on selected list rows, greyed tree entries,
+  breadcrumb separators, error icons on hovered rows and some light-theme
+  syntax colors. A Playwright check now enforces 4.5:1 in both themes.
+
 ### Added (M3b: completion, refactoring, code actions)
 
 - Completion popup: opened by typing a word, a trigger character the
