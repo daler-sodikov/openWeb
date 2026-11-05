@@ -8,12 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added (M3b: completion, refactoring, code actions)
 
-- Completion popup: opened by typing a word or Ctrl+Space (not yet by
-  trigger characters such as `.`); fuzzy-filtered and ranked in Rust; lazy detail
+- Completion popup: opened by typing a word, a trigger character the
+  server lists (`.`, quotes, `/`, `@`, `<`) or Ctrl+Space; fuzzy-filtered
+  and ranked in Rust; lazy detail
   loading (`completionItem/resolve`); snippet expansion with tab stops and
   `additionalTextEdits` (auto-import) as one undoable step.
-- Parameter hints (Ctrl+P on every OS): signature popup with the active
-  parameter highlighted (not yet opened by typing `(` or `,`).
+- Parameter hints (Ctrl+P, macOS Cmd+P, and on typing `(` or `,`):
+  signature popup with the active parameter highlighted.
 - Find Usages (Alt+F7): references panel grouped by file; click to navigate.
 - Rename (Shift+F6): preview dialog showing affected files and occurrence
   counts; open documents edited as one undo step, closed files rewritten
@@ -23,6 +24,8 @@ All notable changes to this project are documented here. The format follows
 - Reformat Code (Ctrl+Alt+L, macOS Cmd+Option+L) via the language server.
 - Optimize Imports (Ctrl+Alt+O, the server's organize imports) and Sort
   Imports (Ctrl+Alt+Shift+O, in-process with `oxc`).
+- Unused imports found in-process with `oxc` are shown faded right after
+  an edit, without waiting for the language server.
 - Typing-path timing spans (`FERRULE_TYPING_TRACE`) and a before/after
   measurement in `perf/RESULTS.md`.
 - Read-only tabs for files outside the project (`lib.dom.d.ts`,

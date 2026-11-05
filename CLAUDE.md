@@ -237,11 +237,10 @@ Update this section at the end of every milestone.
 - [x] M3a: LSP client, diagnostics, hover, go to definition
       (2026-11-05; checks pass locally on Linux with the real
       typescript-language-server; see docs/ROADMAP.md M3a)
-- [ ] M3b: completion, signature help, usages, rename, code actions,
-      formatting, oxc fast path (2026-11-05: mostly done and verified on
-      Linux with the real server; open items in docs/ROADMAP.md M3b:
-      trigger characters, parameter hints on `(`, oxc unused imports in the
-      editor, some UI tests)
+- [x] M3b: completion, signature help, usages, rename, code actions,
+      formatting, oxc fast path (2026-11-05; checks pass locally on Linux
+      with the real typescript-language-server; open: snippet tab stops
+      verified end to end, CI on macOS/Windows; see docs/ROADMAP.md M3b)
 - [ ] M4: terminal, Git basics
 - [ ] M5: run/debug, test runner
 - [ ] M6: UI design (see docs/M6-DESIGN.md; start only when the
