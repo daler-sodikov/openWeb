@@ -246,10 +246,19 @@ export class CommitWindow {
     }
   }
 
+  /** Amend's current state (read again after awaits; the user may change it). */
+  private amending(): boolean {
+    return this.amend.checked;
+  }
+
   private async onAmend(): Promise<void> {
     if (!this.amend.checked || this.message.value.trim() !== "") return;
+    const before = this.message.value;
     try {
-      this.message.value = unwrap(await commands.gitLastCommitMessage()) ?? "";
+      const last = unwrap(await commands.gitLastCommitMessage()) ?? "";
+      // Fill in only if nothing changed meanwhile: text typed while the
+      // request ran (or unchecking Amend) wins over the old message.
+      if (this.amending() && this.message.value === before) this.message.value = last;
     } catch (error: unknown) {
       this.showError(errorMessage(error));
     }
