@@ -27,9 +27,12 @@ struct Inner {
     master: Option<Box<dyn MasterPty + Send>>,
     child: Box<dyn Child + Send + Sync>,
     killer: Box<dyn ChildKiller + Send + Sync>,
-    pid: Option<u32>,
     exit: Option<Option<i32>>,
     terminated: bool,
+    /// The shell's pid, which is also its process group id (Unix cleanup).
+    #[cfg(unix)]
+    pid: Option<u32>,
+    /// The Job Object holding the shell and its children (Windows cleanup).
     #[cfg(windows)]
     job: Option<job::Job>,
 }
@@ -69,6 +72,7 @@ pub fn spawn(spec: &SpawnSpec, size: TermSize) -> Result<Spawned, TerminalError>
     #[cfg(windows)]
     let job = child.as_raw_handle().and_then(job::Job::for_process);
     let killer = child.clone_killer();
+    #[cfg(unix)]
     let pid = child.process_id();
     Ok(Spawned {
         reader,
@@ -78,9 +82,10 @@ pub fn spawn(spec: &SpawnSpec, size: TermSize) -> Result<Spawned, TerminalError>
                 master: Some(pair.master),
                 child,
                 killer,
-                pid,
                 exit: None,
                 terminated: false,
+                #[cfg(unix)]
+                pid,
                 #[cfg(windows)]
                 job,
             }),
@@ -108,11 +113,9 @@ impl Process for PtyProcess {
         if let Some(pid) = inner.pid {
             unix::hang_up_group(pid);
         }
+        // Closing the job handle ends every process in the job.
         #[cfg(windows)]
-        {
-            // Closing the job ends every process in it.
-            inner.job = None;
-        }
+        drop(inner.job.take());
         if let Err(err) = inner.killer.kill() {
             tracing::debug!(%err, "terminal shell already gone");
         }
