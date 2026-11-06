@@ -107,6 +107,19 @@ dbg_macro = "warn"
 print_stdout = "warn"
 print_stderr = "warn"
 
+# Debug builds: line tables only for workspace crates (file:line in
+# backtraces and panics, no variable info), none for dependencies. This
+# cuts the size of target/ and the disk written per build; use a debugger
+# with full info by raising `debug` locally when needed.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# `cargo test` uses the built-in `test` profile, which inherits these dev
+# settings; nothing is repeated for it.
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

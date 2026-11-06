@@ -395,7 +395,7 @@ Known gaps found in M3a (tracked here):
 Status (2026-11-05, Linux, typescript-language-server 6.0.3): **done**,
 except the open items below. "Real server" means
 `crates/core/tests/lsp_real_m3b.rs`, "mock" means `fake-lsp-server` tests in
-`crates/core/tests/lsp_fake.rs`, "UI" means `e2e/ui/lsp.spec.ts`.
+`crates/core/tests/integration/lsp_fake.rs`, "UI" means `e2e/ui/lsp.spec.ts`.
 
 - Point 1, completion: trigger characters (`.` real server, mock, UI),
   Ctrl+Space and word prefixes (UI), ranking and filtering in Rust (real

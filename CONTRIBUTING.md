@@ -45,6 +45,25 @@ bunx playwright test
 - New dependencies need a permissive license (checked by `cargo deny`) and a
   justification in the commit message.
 
+## Disk usage
+
+`target/` holds everything Cargo builds: compiled dependencies, the
+incremental caches of workspace crates, test binaries and the app. It grows
+with every build profile and every set of features (the app with and
+without `native`, the headless test backend), and can reach many gigabytes.
+To keep it smaller, debug builds keep only line tables for our crates and no
+debug info for dependencies (see `[profile.dev]` in `Cargo.toml`); raise
+`debug` locally if you need full debugger info.
+
+- `cargo clean` deletes all of `target/` (the next build starts from
+  scratch).
+- [`cargo sweep`](https://crates.io/crates/cargo-sweep) (`cargo install
+cargo-sweep`) deletes only stale files, e.g. `cargo sweep --time 14` for
+  files not used in 14 days, or `cargo sweep --installed` for builds of
+  toolchains you no longer have.
+- Do not point `CARGO_TARGET_DIR` at extra copies or build in extra git
+  worktrees unless you need to: each one is a full second `target/`.
+
 ## Code of conduct
 
 Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

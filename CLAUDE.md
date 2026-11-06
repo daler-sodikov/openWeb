@@ -209,6 +209,9 @@ polish visuals beyond what a feature needs to be usable; use CSS variables
    `bun install --frozen-lockfile`.
 8. **Docs to maintain:** README, CONTRIBUTING, CODE_OF_CONDUCT, LICENSE,
    NOTICE, THIRD_PARTY_LICENSES.md, docs/ARCHITECTURE.md, docs/ROADMAP.md.
+9. **Disk usage.** At the end of each milestone part, report `du -sh target`.
+   Never create extra worktrees or target directories (`CARGO_TARGET_DIR`
+   copies, worktrees in `/tmp`); delete any you made.
 
 ## Things not to do
 
