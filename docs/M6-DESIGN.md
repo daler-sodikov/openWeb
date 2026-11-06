@@ -122,8 +122,33 @@ their contrast against the new editor_bg.
    (title, content, OK/Cancel/Apply, focus trap, Esc/Enter).
 2. "Islands" layout: dark frame, rounded panels with gaps between them. Left
    stripe with tool window icons (Project, Find, Problems, and later Terminal,
-   Git), bottom stripe. Panels resizable, sizes persisted, minimum window size
-   enforced. Fix the clipped text at the left window edge.
+   Git), bottom stripe. Fix the clipped text at the left window edge.
+
+   Resizable workspace (every panel, nothing fixed-size):
+
+   - Drag handles with a hit area of at least 6 px, a visible hover/active
+     state, and the right cursor, between: the project tree and the editor;
+     the editor area and the bottom tool window (Terminal, Problems, Git log,
+     Find results, and later Run/Debug/Tests); the editor area and any right
+     tool window; and between split editor groups.
+   - Every panel has sensible min and max sizes, and the editor area always
+     keeps a minimum width/height. Double-clicking a handle resets that panel to
+     its default size.
+   - A tool window can be collapsed and restored from its stripe icon or
+     shortcut (Alt+1, Alt+F12, Alt+6, Alt+9...) and remembers its last size.
+   - Sizes and collapsed state are persisted (per window, and per project where
+     it makes sense) and restored on start.
+   - Keyboard resizing for accessibility.
+   - Everything inside re-fits while dragging: the terminal re-measures its
+     columns and rows and resizes the PTY (throttled), the editor and
+     CodeMirror re-measure, popups and dialogs are clamped to the window.
+   - Dragging must stay smooth (no layout thrash; use CSS grid/flex and
+     pointer capture) and must never lose terminal output or editor scroll
+     position.
+   - Playwright tests: drag each handle, min/max limits, double-click reset,
+     collapse/restore, persistence after reload, terminal columns change after
+     a drag, narrow and very wide windows.
+
 3. Top bar: main menu, project name with a small colored initials badge,
    search icon (opens Search Everywhere), settings icon. Items for features
    that do not exist are NOT shown. No fake functionality anywhere.

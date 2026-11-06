@@ -592,37 +592,60 @@ are built functionally, using CSS variables where easy.
 3. **Layout.** Dark frame with rounded panels and gaps; left and bottom tool
    window stripes; resizable panels with persisted sizes; minimum window
    size; no clipped text at the window edge.
-4. **Top bar.** Main menu, project name with an initials badge, search and
+4. **Resizable workspace** (every panel, nothing fixed-size):
+   - Drag handles with a hit area of at least 6 px, a visible hover/active
+     state, and the right cursor, between: the project tree and the editor;
+     the editor area and the bottom tool window (Terminal, Problems, Git log,
+     Find results, and later Run/Debug/Tests); the editor area and any right
+     tool window; and between split editor groups.
+   - Every panel has sensible min and max sizes, and the editor area always
+     keeps a minimum width/height. Double-clicking a handle resets that panel to
+     its default size.
+   - A tool window can be collapsed and restored from its stripe icon or
+     shortcut (Alt+1, Alt+F12, Alt+6, Alt+9...) and remembers its last size.
+   - Sizes and collapsed state are persisted (per window, and per project where
+     it makes sense) and restored on start.
+   - Keyboard resizing for accessibility.
+   - Everything inside re-fits while dragging: the terminal re-measures its
+     columns and rows and resizes the PTY (throttled), the editor and
+     CodeMirror re-measure, popups and dialogs are clamped to the window.
+   - Dragging must stay smooth (no layout thrash; use CSS grid/flex and
+     pointer capture) and must never lose terminal output or editor scroll
+     position.
+   - Playwright tests: drag each handle, min/max limits, double-click reset,
+     collapse/restore, persistence after reload, terminal columns change after
+     a drag, narrow and very wide windows.
+5. **Top bar.** Main menu, project name with an initials badge, search and
    settings icons; nothing for features that do not exist.
-5. **Project tree.** Root row with muted path, chevrons, folder and
+6. **Project tree.** Root row with muted path, chevrons, folder and
    file-type icons (Lucide, ISC, inline SVG, 16px; our own file-type
    badges), indent guides, selected/hover states, greyed ignored entries,
    "library root" next to `node_modules`.
-6. **Editor chrome.** Tabs with file icon, close on hover, modified dot,
+7. **Editor chrome.** Tabs with file icon, close on hover, modified dot,
    overflow handling, a real split icon; gutter with fold chevrons,
    current-line highlight, indent guides; inspection widget with LSP error and
    warning counts; scrollbar diagnostic markers.
-7. **Status bar.** Breadcrumbs on the left (replacing the breadcrumb bar);
+8. **Status bar.** Breadcrumbs on the left (replacing the breadcrumb bar);
    line:col, line separator, encoding, indent and TypeScript server state on
    the right.
-8. **Empty editor.** Centered hint list with the real shortcuts.
-9. **Menus.** File, Edit, View, Navigate, Code, Refactor, Run, Tools, Git,
-   Window, Help with submenus, separators, shortcuts and mnemonics; only real
-   actions enabled, others hidden or disabled with a clear label.
-10. **Popups.** All popups and panels (Search Everywhere, Go to,
+9. **Empty editor.** Centered hint list with the real shortcuts.
+10. **Menus.** File, Edit, View, Navigate, Code, Refactor, Run, Tools, Git,
+    Window, Help with submenus, separators, shortcuts and mnemonics; only real
+    actions enabled, others hidden or disabled with a clear label.
+11. **Popups.** All popups and panels (Search Everywhere, Go to,
     Find/Replace, hover and diagnostics, completion, signature help, rename,
     usages, Alt+Enter, chooser, reload bar, M4 terminal and Git panels) use
     the shared style.
-11. **Theme switch.** System / dark / light.
-12. **Performance (Part 3).** Typing latency re-measured after the redesign
+12. **Theme switch.** System / dark / light.
+13. **Performance (Part 3).** Typing latency re-measured after the redesign
     (on a real display if possible), profiled, the biggest costs fixed, and
     `perf/RESULTS.md` updated with before/after.
-13. **Verification.** Playwright screenshots of every key screen in dark and
+14. **Verification.** Playwright screenshots of every key screen in dark and
     light (Chromium against the headless backend), compared against the
     references outside the repo (`~/Desktop/design-refs/`, never copied in),
     differences listed and fixed; a Playwright check that fails on clipped or
     overflowing text; Ferrule's own screenshots in `docs/media/`.
-14. **Legal.** No JetBrains/WebStorm/IntelliJ/"Islands" names, logos, icons,
+15. **Legal.** No JetBrains/WebStorm/IntelliJ/"Islands" names, logos, icons,
     assets or reference color values; every new license recorded in
     `THIRD_PARTY_LICENSES.md`. All checks pass with zero warnings.
 
