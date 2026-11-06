@@ -10,6 +10,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
+use ferrule_process::ProcessTree;
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Exit,
     Initialized, Notification,
@@ -726,7 +727,35 @@ fn initialize_params(config: &ServerConfig) -> Value {
 struct Started {
     conn: Connection,
     child: Child,
+    /// The server and the processes it started (TypeScript's `tsserver`,
+    /// or Node behind a `.cmd` wrapper on Windows). `None` if it could not
+    /// be set up; then only the server itself is stopped.
+    tree: Option<ProcessTree>,
     result: InitializeResult,
+}
+
+/// How long to wait for what is left of a stopped server's processes.
+const TREE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Ends what is left of a stopped server's process tree and waits until it
+/// is gone: a process still running in the project folder keeps it in use
+/// (Windows cannot delete or rename it) and is an orphan.
+async fn end_tree(name: &str, tree: Option<&ProcessTree>) {
+    let Some(tree) = tree else {
+        return;
+    };
+    if !tree.is_alive() {
+        return;
+    }
+    tree.kill();
+    let deadline = Instant::now() + TREE_TIMEOUT;
+    while tree.is_alive() {
+        if Instant::now() >= deadline {
+            tracing::warn!(server = %name, "processes of the stopped server are still running");
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 async fn spawn_and_initialize(shared: &Arc<Shared>) -> Result<Started, LspError> {
@@ -740,6 +769,9 @@ async fn spawn_and_initialize(shared: &Arc<Shared>) -> Result<Started, LspError>
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // Its own process group, so it and everything it starts end together.
+    #[cfg(unix)]
+    command.process_group(0);
     #[cfg(windows)]
     {
         // CREATE_NO_WINDOW: no console window for the server.
@@ -751,6 +783,10 @@ async fn spawn_and_initialize(shared: &Arc<Shared>) -> Result<Started, LspError>
             config.command.program.to_string_lossy()
         ))
     })?;
+    #[cfg(unix)]
+    let tree = child.id().and_then(ProcessTree::group);
+    #[cfg(windows)]
+    let tree = child.raw_handle().and_then(ProcessTree::job);
     let (Some(stdin), Some(stdout), Some(stderr)) =
         (child.stdin.take(), child.stdout.take(), child.stderr.take())
     else {
@@ -787,6 +823,7 @@ async fn spawn_and_initialize(shared: &Arc<Shared>) -> Result<Started, LspError>
     Ok(Started {
         conn,
         child,
+        tree,
         result,
     })
 }
@@ -876,9 +913,11 @@ async fn run(shared: Arc<Shared>) {
                 }
                 if stopped {
                     shutdown(&started.conn, &mut started.child).await;
+                    end_tree(&name, started.tree.as_ref()).await;
                     break;
                 }
                 last_error = describe_exit(&mut started.child).await;
+                end_tree(&name, started.tree.as_ref()).await;
                 tracing::warn!(server = %name, "{last_error}");
                 if up_since.elapsed() >= policy.stable_after {
                     failures = 0;

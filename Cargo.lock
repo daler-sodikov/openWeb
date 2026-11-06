@@ -1072,6 +1072,8 @@ dependencies = [
 name = "ferrule-lsp-client"
 version = "0.1.0"
 dependencies = [
+ "ferrule-process",
+ "libc",
  "lsp-types",
  "serde",
  "serde_json",

@@ -420,3 +420,41 @@ async fn stop_shuts_the_server_down() {
         Err(LspError::NotRunning)
     ));
 }
+
+/// Whether process `pid` still runs.
+#[cfg(unix)]
+fn alive(pid: u32) -> bool {
+    let pid = libc::pid_t::try_from(pid).unwrap();
+    // SAFETY: kill with signal 0 only checks that the process exists; it
+    // sends nothing and touches no memory.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+#[cfg(windows)]
+fn alive(pid: u32) -> bool {
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).contains(&pid.to_string())
+}
+
+#[tokio::test]
+async fn stopping_ends_the_processes_the_server_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let pidfile = dir.path().join("child.pid");
+    let fixture = start(vec![("FAKE_LSP_CHILD_PIDFILE", pidfile.to_str().unwrap())]);
+    running(&fixture, 1).await;
+    eventually("the child's pid", || pidfile.exists()).await;
+    let pid: u32 = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(alive(pid));
+    tokio::time::timeout(Duration::from_secs(10), fixture.server.stop())
+        .await
+        .unwrap();
+    // The server exits cleanly but leaves its child; stopping ends it too.
+    eventually("the server's child to end", || !alive(pid)).await;
+}

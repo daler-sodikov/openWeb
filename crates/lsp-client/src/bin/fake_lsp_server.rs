@@ -22,11 +22,31 @@
 //! - `textDocument/rename` → every whole-word occurrence in the open
 //!   documents (`changes`).
 //! - `fake/crash` (notification) exits with code 1; `exit` with code 0.
+//! - With `FAKE_LSP_CHILD_PIDFILE` set it starts a copy of itself that only
+//!   sleeps (as TypeScript's server starts `tsserver`), writes that
+//!   process's pid to the file and leaves it running when it exits.
 
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader, Write};
 
 use serde_json::{Value, json};
+
+/// Starts the long-running child and records its pid (not waited for).
+fn start_sleeper(pidfile: &std::path::Path) {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let child = std::process::Command::new(exe)
+        .env("FAKE_LSP_SLEEPER", "1")
+        .env_remove("FAKE_LSP_CHILD_PIDFILE")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    if let Ok(child) = child {
+        let _ = std::fs::write(pidfile, child.id().to_string());
+    }
+}
 
 struct Doc {
     text: String,
@@ -41,8 +61,16 @@ struct Server {
 }
 
 fn main() {
+    if std::env::var_os("FAKE_LSP_SLEEPER").is_some() {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+    }
     if std::env::var_os("FAKE_LSP_FAIL_START").is_some() {
         std::process::exit(3);
+    }
+    if let Some(pidfile) = std::env::var_os("FAKE_LSP_CHILD_PIDFILE") {
+        start_sleeper(std::path::Path::new(&pidfile));
     }
     let _ = writeln!(io::stderr(), "fake-lsp-server started");
     let mut server = Server {

@@ -10,6 +10,7 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+ferrule-process.workspace = true
 lsp-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,6 +22,9 @@ url.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true
 tokio = { workspace = true, features = ["process", "io-util", "rt", "test-util"] }
 
 # Test-only scripted language server (see src/bin/fake_lsp_server.rs).
