@@ -1,8 +1,12 @@
 //! [`Process`] on top of portable-pty, with cleanup of the whole process
-//! tree: the process group on Unix (the shell is a session leader, so its
-//! group id is its pid) and a kill-on-close Job Object on Windows.
+//! tree ([`ProcessTree`]): the process group on Unix (portable-pty makes the
+//! shell a session leader with `setsid`, so its group id is its pid) and a
+//! kill-on-close Job Object on Windows.
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
+
+use ferrule_process::ProcessTree;
 
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
@@ -29,13 +33,13 @@ struct Inner {
     killer: Box<dyn ChildKiller + Send + Sync>,
     exit: Option<Option<i32>>,
     terminated: bool,
-    /// The shell's pid, which is also its process group id (Unix cleanup).
-    #[cfg(unix)]
-    pid: Option<u32>,
-    /// The Job Object holding the shell and its children (Windows cleanup).
-    #[cfg(windows)]
-    job: Option<job::Job>,
+    /// The shell and everything it starts; `None` if it could not be set
+    /// up (the shell itself is still killed).
+    tree: Option<ProcessTree>,
 }
+
+/// After a hang-up, how long programs get to exit before they are killed.
+const HANG_UP_GRACE: Duration = Duration::from_secs(2);
 
 /// A shell on a PTY.
 pub struct PtyProcess {
@@ -69,11 +73,14 @@ pub fn spawn(spec: &SpawnSpec, size: TermSize) -> Result<Spawned, TerminalError>
         .try_clone_reader()
         .map_err(|e| fail(e.to_string()))?;
     let writer = pair.master.take_writer().map_err(|e| fail(e.to_string()))?;
-    #[cfg(windows)]
-    let job = child.as_raw_handle().and_then(job::Job::for_process);
-    let killer = child.clone_killer();
     #[cfg(unix)]
-    let pid = child.process_id();
+    let tree = child.process_id().and_then(ProcessTree::group);
+    #[cfg(windows)]
+    let tree = child.as_raw_handle().and_then(ProcessTree::job);
+    if tree.is_none() {
+        tracing::warn!(%program, "cannot track the shell's processes; only the shell is ended on close");
+    }
+    let killer = child.clone_killer();
     Ok(Spawned {
         reader,
         writer,
@@ -84,10 +91,7 @@ pub fn spawn(spec: &SpawnSpec, size: TermSize) -> Result<Spawned, TerminalError>
                 killer,
                 exit: None,
                 terminated: false,
-                #[cfg(unix)]
-                pid,
-                #[cfg(windows)]
-                job,
+                tree,
             }),
         }),
     })
@@ -109,13 +113,11 @@ impl Process for PtyProcess {
             return;
         }
         inner.terminated = true;
-        #[cfg(unix)]
-        if let Some(pid) = inner.pid {
-            unix::hang_up_group(pid);
+        // Unix: SIGHUP to the group, SIGKILL to what is left later.
+        // Windows: ends every process in the job.
+        if let Some(tree) = &inner.tree {
+            tree.hang_up(HANG_UP_GRACE);
         }
-        // Closing the job handle ends every process in the job.
-        #[cfg(windows)]
-        drop(inner.job.take());
         if let Err(err) = inner.killer.kill() {
             tracing::debug!(%err, "terminal shell already gone");
         }
@@ -134,93 +136,5 @@ impl Process for PtyProcess {
         };
         inner.exit = exit;
         exit
-    }
-}
-
-#[cfg(unix)]
-mod unix {
-    use std::time::Duration;
-
-    /// SIGHUP to the shell's process group now, SIGKILL to whatever is left
-    /// of it two seconds later.
-    pub(super) fn hang_up_group(pid: u32) {
-        let Ok(group) = libc::pid_t::try_from(pid) else {
-            return;
-        };
-        // SAFETY: killpg only sends a signal; `group` is the shell's process
-        // group id (portable-pty makes the shell a session leader with
-        // setsid, so its pid is its group id). No memory is involved.
-        unsafe {
-            libc::killpg(group, libc::SIGHUP);
-        }
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(2));
-            // SAFETY: as above. Checks first (signal 0) that the group still
-            // exists; a group id is not reused while the group has members.
-            unsafe {
-                if libc::killpg(group, 0) == 0 {
-                    libc::killpg(group, libc::SIGKILL);
-                }
-            }
-        });
-    }
-}
-
-#[cfg(windows)]
-mod job {
-    use std::os::windows::io::RawHandle;
-
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-        SetInformationJobObject,
-    };
-
-    /// A Job Object that kills its processes when its handle closes.
-    pub(super) struct Job(HANDLE);
-
-    // SAFETY: a job handle is a kernel handle; it may be used and closed
-    // from any thread.
-    unsafe impl Send for Job {}
-    // SAFETY: as above; the handle is only read.
-    unsafe impl Sync for Job {}
-
-    impl Job {
-        /// Creates a kill-on-close job and puts `process` in it.
-        pub(super) fn for_process(process: RawHandle) -> Option<Self> {
-            // SAFETY: creates a new unnamed job; null attributes and name
-            // are allowed.
-            let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-            if handle.is_null() {
-                return None;
-            }
-            let job = Self(handle);
-            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).ok()?;
-            // SAFETY: `info` lives across the call and `size` is its size.
-            let limited = unsafe {
-                SetInformationJobObject(
-                    job.0,
-                    JobObjectExtendedLimitInformation,
-                    (&raw const info).cast(),
-                    size,
-                )
-            };
-            // SAFETY: both handles are valid: the job above, the process from
-            // the child that is still alive.
-            let assigned = unsafe { AssignProcessToJobObject(job.0, process.cast()) };
-            (limited != 0 && assigned != 0).then_some(job)
-        }
-    }
-
-    impl Drop for Job {
-        fn drop(&mut self) {
-            // SAFETY: the handle is owned by this value and closed once.
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
     }
 }
