@@ -1100,6 +1100,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrule-process"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tracing",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "ferrule-project"
 version = "0.1.0"
 dependencies = [
@@ -1158,13 +1167,13 @@ name = "ferrule-terminal"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "ferrule-process",
  "libc",
  "portable-pty",
  "regex",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

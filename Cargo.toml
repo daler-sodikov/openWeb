@@ -34,6 +34,7 @@ ferrule-git = { path = "crates/git" }
 # Without default features: only the app enables the native backend
 # (its "native" feature), so every other crate builds without it.
 ferrule-terminal = { path = "crates/terminal", default-features = false }
+ferrule-process = { path = "crates/process" }
 ferrule-run-debug = { path = "crates/run-debug" }
 ferrule-plugin-host = { path = "crates/plugin-host" }
 ferrule-ipc = { path = "crates/ipc" }
