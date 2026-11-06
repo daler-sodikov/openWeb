@@ -550,8 +550,8 @@ reporting in M4a.
 **PTY lifecycle and cleanup.**
 
 - Spawn: the user's shell (settings `terminal.shellPath` and
-  `terminal.shellArgs`, otherwise `$SHELL` or
-  `/bin/sh` on Unix; `pwsh`, then `powershell`, then `%ComSpec%` on Windows),
+  `terminal.shellArgs`, otherwise `$SHELL`, then the account's login shell
+  from its passwd entry, then `/bin/sh` on Unix; `pwsh`, then `powershell`, then `%ComSpec%` on Windows),
   as a login shell on macOS (`-l`, so `PATH` matches a terminal), in the
   project root, with `TERM=xterm-256color`, `COLORTERM=truecolor`,
   `TERM_PROGRAM=Ferrule`.

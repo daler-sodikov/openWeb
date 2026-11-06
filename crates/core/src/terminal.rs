@@ -153,6 +153,7 @@ fn shell_spec(settings_file: &Path, cwd: PathBuf) -> SpawnSpec {
         Os::current(),
         &|name| std::env::var(name).ok(),
         &ferrule_lsp_client::find_on_path,
+        &ferrule_terminal::login_shell,
     );
     SpawnSpec {
         program: shell.program,

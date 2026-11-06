@@ -23,4 +23,4 @@ pub use model::{
 };
 pub use pacer::{Decision, Pacer};
 pub use session::{EventSink, Terminal, TerminalEvent, TerminalInfo, TerminalOptions, Terminals};
-pub use shell::{Os, Shell, detect_shell, terminal_env};
+pub use shell::{Os, Shell, detect_shell, login_shell, terminal_env};
