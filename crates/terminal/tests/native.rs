@@ -1,11 +1,24 @@
-//! Real shells on real PTYs (CI on Linux, macOS and Windows): start, echo,
-//! resize, exit code, cleanup of child processes and a flood of output.
-//! Built only with the `native` feature.
+//! Real programs on real PTYs (CI on Linux, macOS and Windows): working
+//! directory and typed input, resize, exit code, cleanup of child processes
+//! and a flood of output. Built only with the `native` feature.
+//!
+//! On Unix each test starts its program directly as `/bin/sh -c <script>`:
+//! no prompt, no job control and nothing from the user's shell or its
+//! startup files, so the output does not depend on who runs the tests (on
+//! Ubuntu `/bin/sh` is dash, elsewhere bash). Input still goes through the
+//! PTY: the scripts `read` typed lines. The PTY echoes typed text when it is
+//! written, so a program's output always starts on a line of its own. (An
+//! interactive shell without a line editor, like dash, prints its first
+//! prompt after the echo of text typed ahead, and the output then lands on
+//! the prompt's line: that made these tests depend on timing.)
+//!
+//! On Windows the tests type into an interactive `cmd.exe`, which reads
+//! typed-ahead input itself and echoes it after its prompt.
 
 #![cfg(feature = "native")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,17 +30,21 @@ use ferrule_terminal::{
 
 const SIZE: TermSize = TermSize { cols: 80, rows: 24 };
 
-/// `/bin/sh` on Unix, `cmd.exe` on Windows: present on every CI runner.
-fn shell(cwd: PathBuf) -> SpawnSpec {
-    let program = if cfg!(windows) {
-        PathBuf::from("cmd.exe")
+/// `/bin/sh -c unix_script` on Unix, an interactive `cmd.exe` on Windows
+/// (the test then types its commands).
+fn program(cwd: &Path, unix_script: &str) -> SpawnSpec {
+    let (program, args) = if cfg!(windows) {
+        (PathBuf::from("cmd.exe"), Vec::new())
     } else {
-        PathBuf::from("/bin/sh")
+        (
+            PathBuf::from("/bin/sh"),
+            vec!["-c".to_owned(), unix_script.to_owned()],
+        )
     };
     SpawnSpec {
         program,
-        args: Vec::new(),
-        cwd,
+        args,
+        cwd: cwd.to_path_buf(),
         env: terminal_env(),
     }
 }
@@ -39,7 +56,7 @@ struct Recorder {
     terminal: Mutex<Option<Arc<Terminal>>>,
 }
 
-fn start(cwd: PathBuf) -> (Arc<Terminal>, Arc<Recorder>) {
+fn start(spec: &SpawnSpec) -> (Arc<Terminal>, Arc<Recorder>) {
     let recorder = Arc::new(Recorder {
         frames: AtomicUsize::new(0),
         exited: Mutex::new(None),
@@ -59,7 +76,7 @@ fn start(cwd: PathBuf) -> (Arc<Terminal>, Arc<Recorder>) {
         Terminal::start(
             1,
             &NativeBackend,
-            &shell(cwd),
+            spec,
             SIZE,
             &TerminalOptions::default(),
             sink,
@@ -96,19 +113,40 @@ fn wait_line(t: &Terminal, rows: u16, what: &str, pred: impl Fn(&str) -> bool) -
     }
 }
 
-fn run(t: &Terminal, command: &str) {
-    t.input(&format!("{command}\r")).unwrap();
+/// Types a line (Enter is CR, as a keyboard sends it).
+fn type_line(t: &Terminal, text: &str) {
+    t.input(&format!("{text}\r")).unwrap();
+}
+
+fn wait_exit(recorder: &Recorder) -> Option<i32> {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(code) = *recorder.exited.lock().unwrap() {
+            return code;
+        }
+        assert!(Instant::now() < deadline, "no exit event");
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 #[test]
-fn a_shell_starts_in_its_directory_and_echoes() {
+fn a_program_starts_in_its_directory_and_reads_typed_input() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("ferrule-marker-file"), "").unwrap();
-    let (t, recorder) = start(dir.path().to_path_buf());
-    run(&t, "echo hello-native");
-    wait_line(&t, SIZE.rows, "with the echo", |l| l == "hello-native");
+    let (t, recorder) = start(&program(
+        dir.path(),
+        r#"IFS= read -r line; echo "got:$line"; ls"#,
+    ));
+    if cfg!(windows) {
+        type_line(&t, "echo got:hello-native");
+        type_line(&t, "dir /b");
+    } else {
+        type_line(&t, "hello-native");
+    }
+    wait_line(&t, SIZE.rows, "with the typed text", |l| {
+        l == "got:hello-native"
+    });
     // The working directory is the given one: its file is listed.
-    run(&t, if cfg!(windows) { "dir /b" } else { "ls" });
     wait_line(&t, SIZE.rows, "with the marker file", |l| {
         l.ends_with("ferrule-marker-file")
     });
@@ -119,15 +157,16 @@ fn a_shell_starts_in_its_directory_and_echoes() {
 #[test]
 fn resize_reaches_the_program() {
     let dir = tempfile::tempdir().unwrap();
-    let (t, _) = start(dir.path().to_path_buf());
+    let (t, _) = start(&program(dir.path(), "IFS= read -r _; stty size"));
     t.resize(TermSize::new(100, 30)).unwrap();
     if cfg!(windows) {
-        run(&t, "mode con");
+        type_line(&t, "mode con");
         wait_line(&t, 30, "with 100 columns", |l| {
             l.contains("Columns") && l.contains("100")
         });
     } else {
-        run(&t, "stty size");
+        // The program asks for its size only after the resize.
+        type_line(&t, "");
         wait_line(&t, 30, "with the size", |l| l == "30 100");
     }
     t.close();
@@ -136,14 +175,13 @@ fn resize_reaches_the_program() {
 #[test]
 fn the_exit_code_is_reported() {
     let dir = tempfile::tempdir().unwrap();
-    let (t, recorder) = start(dir.path().to_path_buf());
-    run(&t, "exit 3");
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while recorder.exited.lock().unwrap().is_none() {
-        assert!(Instant::now() < deadline, "no exit event");
-        std::thread::sleep(Duration::from_millis(50));
+    let (t, recorder) = start(&program(dir.path(), r#"IFS= read -r code; exit "$code""#));
+    if cfg!(windows) {
+        type_line(&t, "exit 3");
+    } else {
+        type_line(&t, "3");
     }
-    assert_eq!(*recorder.exited.lock().unwrap(), Some(Some(3)));
+    assert_eq!(wait_exit(&recorder), Some(3));
     assert_eq!(t.exited(), Some(Some(3)));
 }
 
@@ -168,16 +206,15 @@ fn alive(pid: u32) -> bool {
 #[test]
 fn closing_ends_the_running_program() {
     let dir = tempfile::tempdir().unwrap();
-    let (t, _) = start(dir.path().to_path_buf());
-    // A long-running program in the foreground (like a dev server) that
-    // prints its pid first.
+    // A long-running child of the program (like a dev server started by a
+    // script), which prints its pid. On Unix it shares the program's
+    // process group (no job control without a terminal shell).
+    let (t, _) = start(&program(dir.path(), r#"sleep 1000 & echo "pid=$!"; wait"#));
     if cfg!(windows) {
-        run(
+        type_line(
             &t,
             "powershell -NoProfile -Command \"$p = Start-Process ping -ArgumentList '-n','1000','127.0.0.1' -PassThru -NoNewWindow; 'pid=' + $p.Id; Wait-Process -Id $p.Id\"",
         );
-    } else {
-        run(&t, "sh -c 'echo pid=$$; exec sleep 1000'");
     }
     let line = wait_line(&t, SIZE.rows, "with the pid", |l| {
         l.strip_prefix("pid=")
@@ -199,17 +236,17 @@ fn closing_ends_the_running_program() {
 #[test]
 fn a_flood_is_batched_into_few_frames() {
     let dir = tempfile::tempdir().unwrap();
-    let (t, recorder) = start(dir.path().to_path_buf());
     // cmd.exe loops are slow; fewer lines still flood the PTY.
     let lines = if cfg!(windows) { 20_000 } else { 200_000 };
     let started = Instant::now();
+    let (t, recorder) = start(&program(
+        dir.path(),
+        &format!(
+            r#"i=0; while [ "$i" -lt {lines} ]; do i=$((i+1)); echo "line $i"; done; IFS= read -r line; echo "got:$line""#
+        ),
+    ));
     if cfg!(windows) {
-        run(&t, &format!("for /L %i in (1,1,{lines}) do @echo line %i"));
-    } else {
-        run(
-            &t,
-            &format!("i=0; while [ $i -lt {lines} ]; do i=$((i+1)); echo line $i; done"),
-        );
+        type_line(&t, &format!("for /L %i in (1,1,{lines}) do @echo line %i"));
     }
     wait_line(&t, SIZE.rows, "with the last line", |l| {
         l == format!("line {lines}")
@@ -217,14 +254,18 @@ fn a_flood_is_batched_into_few_frames() {
     let frames = recorder.frames.load(Ordering::Relaxed);
     let elapsed = started.elapsed();
     // At most about one frame per 16 ms interval (plus a few for the
-    // prompt), far fewer than the lines printed.
+    // start), far fewer than the lines printed.
     let bound = usize::try_from(elapsed.as_millis() / 16).unwrap() + 20;
     assert!(
         frames <= bound,
         "{frames} frames in {elapsed:?} for {lines} lines"
     );
-    // Still responsive.
-    run(&t, "echo after-flood");
-    wait_line(&t, SIZE.rows, "after the flood", |l| l == "after-flood");
+    // Still responsive: typed input reaches the program.
+    if cfg!(windows) {
+        type_line(&t, "echo got:after-flood");
+    } else {
+        type_line(&t, "after-flood");
+    }
+    wait_line(&t, SIZE.rows, "after the flood", |l| l == "got:after-flood");
     t.close();
 }
