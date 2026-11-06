@@ -34,6 +34,9 @@ use crate::convert::{
     selection_from_ipc, selection_to_ipc, to_u32, to_usize, token_to_ipc, vfs_error,
 };
 
+/// How long closing a project waits for each kind of work to stop.
+const CLOSE_WAIT: Duration = Duration::from_secs(5);
+
 /// Default delay between the last edit and writing the recovery file.
 pub const DEFAULT_AUTOSAVE_DELAY: Duration = Duration::from_secs(1);
 
@@ -420,17 +423,73 @@ impl Session {
             .emit(SessionEvent::IndexStatus(runtime.index_state()));
         let registry = self.registry.clone();
         let sink = self.sink.clone();
-        tokio::spawn(async move {
+        let indexed = runtime.clone();
+        let task = tokio::spawn(async move {
             let task =
-                tokio::task::spawn_blocking(move || index_project(&runtime, &registry, &sink));
+                tokio::task::spawn_blocking(move || index_project(&indexed, &registry, &sink));
             if let Err(err) = task.await {
                 tracing::error!(%err, "indexing task failed");
             }
         });
+        if let Ok(mut slot) = runtime.index_task.lock() {
+            *slot = Some(task);
+        }
         Ok(ipc::ProjectInfo {
             name: project.name().to_owned(),
             root: project.root().to_string_lossy().into_owned(),
         })
+    }
+
+    /// Closes the project: writes recovery files for unsaved documents and
+    /// ends its terminals, language server, indexing, file watcher and Git
+    /// refresh, returning once they have stopped (each waited for a few
+    /// seconds at most; the report lists what still ran then). Afterwards
+    /// nothing Ferrule started keeps the project folder in use.
+    pub async fn close_project(&self) -> Result<ipc::ProjectCloseReport, IpcError> {
+        let (docs, runtime) = {
+            let mut state = lock(&self.state)?;
+            state.by_path.clear();
+            (
+                state.docs.drain().map(|(_, doc)| doc).collect::<Vec<_>>(),
+                state.project.take(),
+            )
+        };
+        self.flush_closed(docs).await;
+        let mut still_running = Vec::new();
+        let Some(runtime) = runtime else {
+            return Ok(ipc::ProjectCloseReport { still_running });
+        };
+        runtime.cancel.cancel();
+        let terminals = runtime.clone();
+        for id in blocking(move || Ok(terminals.terminals.close_all_and_wait(CLOSE_WAIT))).await? {
+            still_running.push(format!("terminal {id}"));
+        }
+        // Waits for the server and the processes it started.
+        if tokio::time::timeout(CLOSE_WAIT, runtime.lsp.stop())
+            .await
+            .is_err()
+        {
+            still_running.push("the TypeScript language server".to_owned());
+        }
+        // The index build creates the watcher when it ends: wait for it
+        // before stopping the watcher.
+        let task = runtime.index_task.lock().ok().and_then(|mut t| t.take());
+        if let Some(task) = task
+            && tokio::time::timeout(CLOSE_WAIT, task).await.is_err()
+        {
+            still_running.push("indexing".to_owned());
+        }
+        runtime.stop_watching();
+        let git = runtime.git.clone();
+        if !blocking(move || Ok(git.stop(CLOSE_WAIT))).await? {
+            still_running.push("a Git status refresh".to_owned());
+        }
+        if still_running.is_empty() {
+            tracing::info!(root = ?runtime.project.root(), "project closed");
+        } else {
+            tracing::warn!(?still_running, "project closed; some work had not stopped");
+        }
+        Ok(ipc::ProjectCloseReport { still_running })
     }
 
     async fn flush_closed(&self, docs: Vec<Arc<DocHandle>>) {

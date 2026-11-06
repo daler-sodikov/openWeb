@@ -46,6 +46,8 @@ pub(crate) struct ProjectRuntime {
     pub terminals: ferrule_terminal::Terminals,
     /// The Git repository containing the project.
     pub git: Arc<crate::git::GitState>,
+    /// The background index build (awaited when the project closes).
+    pub index_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Drop for ProjectRuntime {
@@ -93,6 +95,14 @@ impl ProjectRuntime {
             recent: Mutex::new(recent),
             terminals,
             git,
+            index_task: Mutex::new(None),
+        }
+    }
+
+    /// Stops watching the project's files (it is closing).
+    pub fn stop_watching(&self) {
+        if let Ok(mut slot) = self.watcher.lock() {
+            slot.take();
         }
     }
 

@@ -24,10 +24,10 @@ use ferrule_ipc::{
     DocumentReplace, EditorSelection, FileProblems, FindResults, FoldRanges, FrontendReadyReport,
     GitBlame, GitBranch, GitCommit, GitDeleteResult, GitDiff, GitDiffMode, GitLineChanges,
     GitStatus, Highlights, HoverResult, IpcError, KeyBinding, NavKind, NavTarget, OpenedDocument,
-    PROTOCOL_VERSION, ProjectInfo, RefactoringPreview, RemoteUpdate, RenameTarget, ReplaceResult,
-    SaveResult, SearchResults, SearchTab, ServerStatus, SignatureView, StartupTarget,
-    TERMINAL_FLAGS, TerminalCell, TerminalInfo, TerminalKey, TerminalLink, TerminalList,
-    TerminalSelectionKind, TerminalSize, TextSearch, TraceSample, UsageResults,
+    PROTOCOL_VERSION, ProjectCloseReport, ProjectInfo, RefactoringPreview, RemoteUpdate,
+    RenameTarget, ReplaceResult, SaveResult, SearchResults, SearchTab, ServerStatus, SignatureView,
+    StartupTarget, TERMINAL_FLAGS, TerminalCell, TerminalInfo, TerminalKey, TerminalLink,
+    TerminalList, TerminalSelectionKind, TerminalSize, TextSearch, TraceSample, UsageResults,
     WorkspaceEditResult,
 };
 use specta_typescript::Typescript;
@@ -123,6 +123,14 @@ async fn keymap() -> Vec<KeyBinding> {
 #[specta::specta]
 async fn open_project(session: SessionState<'_>, path: String) -> Result<ProjectInfo, IpcError> {
     session.open_project(path).await
+}
+
+/// Closes the project and waits until its terminals, language server,
+/// indexing, watcher and Git refresh have stopped.
+#[tauri::command]
+#[specta::specta]
+async fn close_project(session: SessionState<'_>) -> Result<ProjectCloseReport, IpcError> {
+    session.close_project().await
 }
 
 /// Lists a project directory (`""` is the root).
@@ -866,6 +874,7 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             initial_project,
             keymap,
             open_project,
+            close_project,
             list_dir,
             open_document,
             open_external,

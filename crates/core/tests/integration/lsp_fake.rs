@@ -490,3 +490,43 @@ async fn eventually_preview(
     }
     panic!("timed out waiting for a rename preview over both files");
 }
+
+#[tokio::test]
+async fn closing_the_project_stops_its_language_server() {
+    let Some(server) = fake_server() else { return };
+    let f = fixture(&server, &[("a.ts", "let a = 1;\n")]).await;
+    let doc = f.session.open_document("a.ts".into()).await.unwrap();
+    ready(&f).await;
+    // An unsaved edit is kept in a recovery file.
+    f.session
+        .apply_changes(doc.doc_id, doc.version, vec![typed(0, 0, "// x\n")])
+        .await
+        .unwrap();
+    let report = f.session.close_project().await.unwrap();
+    assert!(
+        report.still_running.is_empty(),
+        "{:?}",
+        report.still_running
+    );
+    assert!(
+        f.session.language_servers().await.unwrap().is_empty(),
+        "no project is open"
+    );
+    // Closing again is a no-op.
+    assert!(
+        f.session
+            .close_project()
+            .await
+            .unwrap()
+            .still_running
+            .is_empty()
+    );
+    // Reopening restores the unsaved text from the recovery file.
+    f.session
+        .open_project(f.root.to_string_lossy().into_owned())
+        .await
+        .unwrap();
+    let reopened = f.session.open_document("a.ts".into()).await.unwrap();
+    assert!(reopened.restored);
+    assert_eq!(reopened.text, "// x\nlet a = 1;\n");
+}

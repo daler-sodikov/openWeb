@@ -98,6 +98,15 @@ impl IpcError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct DocId(pub u32);
 
+/// What was still running when a project closed (empty when everything
+/// stopped in time).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCloseReport {
+    /// Descriptions such as "terminal 3" or "the TypeScript language server".
+    pub still_running: Vec<String>,
+}
+
 /// The opened project.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

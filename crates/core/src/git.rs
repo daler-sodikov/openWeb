@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -41,6 +41,10 @@ pub(crate) struct GitState {
     sink: Arc<dyn EventSink>,
     inner: Mutex<Inner>,
     refresh: Mutex<Option<mpsc::Sender<()>>>,
+    /// The refresh thread (joined when the project closes).
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Set when the project closes: no refresh thread is started after it.
+    stopped: AtomicBool,
     generation: AtomicU32,
 }
 
@@ -177,14 +181,42 @@ impl GitState {
                 ..Inner::default()
             }),
             refresh: Mutex::new(None),
+            thread: Mutex::new(None),
+            stopped: AtomicBool::new(false),
             generation: AtomicU32::new(0),
         }
+    }
+
+    /// Stops refreshing (the project is closing) and waits for a refresh
+    /// that is running, at most `timeout`. Returns whether it has stopped.
+    pub fn stop(&self, timeout: Duration) -> bool {
+        self.stopped.store(true, Ordering::Release);
+        // Dropping the sender ends the refresh thread after its current run.
+        if let Ok(mut slot) = self.refresh.lock() {
+            slot.take();
+        }
+        let Some(thread) = self.thread.lock().ok().and_then(|mut t| t.take()) else {
+            return true;
+        };
+        let deadline = Instant::now() + timeout;
+        while !thread.is_finished() {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = thread.join();
+        true
     }
 
     /// Finds the repository containing `dir` and starts refreshing.
     /// Blocking.
     pub fn start(self: &Arc<Self>, dir: &Path, program: PathBuf) {
+        if self.stopped.load(Ordering::Acquire) {
+            return;
+        }
         let unavailable = match Git::new(program).discover(dir) {
+            Ok(Some(_)) if self.stopped.load(Ordering::Acquire) => return,
             Ok(Some(repo)) => {
                 tracing::info!(root = ?repo.root(), "Git repository");
                 if let Ok(mut inner) = self.inner.lock() {
@@ -196,9 +228,12 @@ impl GitState {
                     .name("git-refresh".into())
                     .spawn(move || refresher(weak, rx));
                 match spawned {
-                    Ok(_) => {
+                    Ok(thread) => {
                         if let Ok(mut slot) = self.refresh.lock() {
                             *slot = Some(tx);
+                        }
+                        if let Ok(mut slot) = self.thread.lock() {
+                            *slot = Some(thread);
                         }
                     }
                     Err(err) => tracing::warn!(%err, "no Git refresh thread"),

@@ -210,3 +210,49 @@ async fn a_shell_that_cannot_start_says_why() {
     assert!(err.message.contains("No such file or directory"), "{err}");
     assert!(s.terminals().await.unwrap().terminals.is_empty());
 }
+
+#[tokio::test]
+async fn closing_the_project_ends_terminals_and_frees_the_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(FakeBackend::default());
+    let (s, _) = session(dir.path(), Some(backend.clone())).await;
+    // A Git repository too, so its refresh thread runs.
+    let root = dir.path().join("p");
+    let git = |args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    s.open_project(root.to_string_lossy().into_owned())
+        .await
+        .unwrap();
+    s.open_terminal(SIZE).await.unwrap();
+    s.open_terminal(SIZE).await.unwrap();
+    let terminated_before = *backend.log.terminated.lock().unwrap();
+
+    let report = s.close_project().await.unwrap();
+    assert!(
+        report.still_running.is_empty(),
+        "{:?}",
+        report.still_running
+    );
+    assert_eq!(
+        *backend.log.terminated.lock().unwrap(),
+        terminated_before + 2
+    );
+    assert_eq!(
+        s.terminals().await.unwrap_err().kind,
+        IpcErrorKind::Conflict
+    );
+    assert_eq!(
+        s.git_status().await.unwrap_err().kind,
+        IpcErrorKind::Conflict
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
