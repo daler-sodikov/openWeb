@@ -680,20 +680,20 @@ Core tests use it, and the headless UI-test backend offers it with
 terminal UI is tested where the native backend is not built. It is never
 used by the app.
 
-**What M4 verified offline (2026-11-05).** The terminal crates could not be
-downloaded during M4 (ROADMAP, "M4 build workflow"):
+**What M4 verified, and where (2026-11-06).** M4 was written without
+downloading the terminal crates (ROADMAP, "M4 build workflow"); after the
+maintainer's fetch everything was compiled and run on Linux:
 
-| Part                                                                                                                   | Status                                                          |
-| ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `ferrule-terminal` without `native`: session, batching/backpressure, keys, paste, links, shell detection, fake backend | built, clippy clean, unit tests pass                            |
-| `ferrule-terminal` `native` module (portable-pty, alacritty_terminal, Unix process group, Windows Job Object)          | written against the cached crate sources; **not compiled**      |
-| `ferrule-terminal/tests/native.rs` (real PTYs: echo, cwd, resize, exit code, cleanup, flood)                           | written; **not compiled or run** (needs `native`; runs in CI)   |
-| Core terminal commands and events                                                                                      | built and tested with the in-memory backend                     |
-| Terminal UI                                                                                                            | Vitest; Playwright against the in-memory backend                |
-| Terminal UI with real shells (pwd, history, word selection, flood with `node`)                                         | Playwright tests written; **skipped locally**, must pass on CI  |
-| `ferrule-git`, core Git, Git UI                                                                                        | built and tested offline on real repositories (git 2.56, Linux) |
-| The app binary with `native` (`bun tauri dev`), the M0 smoke test                                                      | **not built** (needs the crates)                                |
-| `cargo deny check` with the new crates                                                                                 | **not run** (needs the advisory database and full metadata)     |
+| Part                                                                                           | Status (Linux)                                                |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `ferrule-terminal` with `native` (portable-pty, alacritty_terminal, process group, Job Object) | compiled first time without errors or warnings; clippy clean  |
+| `ferrule-terminal/tests/native.rs` (real PTYs: echo, cwd, resize, exit code, cleanup, flood)   | 5/5 pass (Unix code paths; Windows paths compiled only on CI) |
+| Terminal and Git core, IPC, UI                                                                 | Rust, Vitest and Playwright tests pass                        |
+| Terminal UI with real shells (pwd, history, word selection, links, `node` flood)               | Playwright 5/5 pass with the native headless backend          |
+| App binary and the smoke test (`bun tauri build --debug --no-bundle`)                          | pass                                                          |
+| `cargo deny check`                                                                             | pass (advisory database as of 2026-11-05, no fetch)           |
+| macOS and Windows                                                                              | **not run yet**: CI after the push                            |
+| Alternate screen (`less`, `vim`), 10 000-line scrollback, memory during a long `yes`           | **not tested** (no automated test; check by hand)             |
 
 ## 5. Editor view layer: CodeMirror 6 as a view only
 

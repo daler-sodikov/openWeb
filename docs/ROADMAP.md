@@ -488,31 +488,32 @@ offline is listed in ARCHITECTURE.md, 4.9.
    Playwright `ui` tests for 1, 2, 3 (subset), 4, 5 and 6 (close a tab);
    all checks pass with zero warnings.
 
-**Status (2026-11-05): written; the native backend is not compiled yet**
-(see ARCHITECTURE.md 4.9, "What M4 verified offline").
+**Status (2026-11-06):** compiled and tested on Linux after the fetch (see
+ARCHITECTURE.md 4.9, "What M4 verified"); macOS and Windows on CI after the
+push.
 
-- [ ] 1 Shell: written (setting, `$SHELL`, `pwsh`/`powershell`/`ComSpec`;
-      the tool window says why a shell cannot start). Verified with the
-      in-memory backend only.
+- [x] 1 Shell: `terminal.shellPath`/`shellArgs`, else `$SHELL` (login shell
+      on macOS), `pwsh`/`powershell`/`ComSpec`; starts in the project root
+      (real shell); the tool window says why a shell cannot start.
 - [x] 2 Tabs: new (+, Ctrl+Shift+T / Cmd+T), close, rename, title from the
-      program unless renamed, exit code shown (in-memory backend).
-- [ ] 3 Terminal behavior: renderer for colors (16/256/truecolor), bold,
-      dim, italic, underline, strike, inverse, cursor, wide characters;
-      resize, wheel scrollback, mouse selection, copy/paste written. Real
-      emulation (alternate screen, 10 000 lines) depends on the native
-      backend: not run yet.
+      program unless renamed, exit code shown.
+- [ ] 3 Terminal behavior: colors, attributes, cursor, wide characters,
+      resize (the program sees the new size, tested), wheel scrollback,
+      mouse and word selection, copy/paste (tested with a real shell). Not
+      tested: alternate screen (`less`, `vim`) and the 10 000-line
+      scrollback limit.
 - [x] 4 Keys: everything goes to the shell except Alt+F12 and the
-      terminal's copy/paste/new-tab keys (in-memory backend; key encoding
-      unit-tested).
+      terminal's copy/paste/new-tab keys (history with the arrow keys
+      tested in a real shell).
 - [x] 5 Links: underlined on Ctrl/Cmd hover, Ctrl/Cmd+click opens the file
       at line and column, only existing files.
-- [ ] 6 Cleanup: closing a tab, switching projects and quitting call it;
-      process group / Job Object code not compiled; the per-OS test is
-      written, not run.
-- [ ] 7 Never blocks: batching with one frame in flight is tested with the
-      in-memory flood; the real `yes` flood is a written test, not run.
-- [ ] 8 Tests: unit and in-memory tests pass; native PTY tests and the
-      real-shell Playwright tests run only on CI after the fetch.
+- [ ] 6 Cleanup: closing ends the running program (tested on Linux);
+      Windows Job Object and macOS not run yet (CI).
+- [ ] 7 Never blocks: a 200 000-line flood is batched (frames bounded by
+      the 16 ms interval) and the terminal stays responsive; a `node` flood
+      in the UI too. Not measured: memory during 10 s of `yes`.
+- [ ] 8 Tests: all pass on Linux (unit, in-memory, native PTY, real-shell
+      Playwright); macOS and Windows CI pending.
 
 ### M4b: Git basics (after M4a)
 
@@ -543,7 +544,7 @@ offline is listed in ARCHITECTURE.md, 4.9.
     directories (status, commit, branch, blame, diff, gutter hunks);
     Playwright `ui` tests for 2-8; all checks pass with zero warnings.
 
-**Status (2026-11-05):** built and tested offline on Linux with git 2.56
+**Status (2026-11-06):** built and tested on Linux with git 2.56
 (the `git` executable, see ARCHITECTURE.md 4.9); CI on macOS/Windows not
 run yet.
 

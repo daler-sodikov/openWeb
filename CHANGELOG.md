@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Added (M4a: terminal; native backend not compiled yet)
+### Added (M4a: terminal)
 
 - Terminal tool window (Alt+F12, macOS Option+F12): shells in the project
   root (`terminal.shellPath` / `terminal.shellArgs` in `settings.json`,
@@ -22,8 +22,8 @@ All notable changes to this project are documented here. The format follows
   flight; closing a tab, switching projects or quitting ends the shell's
   process group (Unix) or Job Object (Windows).
 - The PTY and VT emulator (portable-pty, alacritty_terminal) are behind the
-  `native` feature and were written against their sources while they could
-  not be downloaded; they are compiled and tested on CI after the fetch.
+  `native` feature (on by default); tools that do not need them build
+  without it.
 
 ### Added (M4b: Git)
 

@@ -241,10 +241,11 @@ Update this section at the end of every milestone.
       formatting, oxc fast path (2026-11-05; checks pass locally on Linux
       with the real typescript-language-server; open: snippet tab stops
       verified end to end, CI on macOS/Windows; see docs/ROADMAP.md M3b)
-- [ ] M4: terminal, Git basics
-      (2026-11-05: written; M4b built and tested offline on Linux; M4a's
-      native backend not compiled until the maintainer fetches the crates;
-      see docs/ROADMAP.md M4a/M4b and docs/ARCHITECTURE.md 4.9)
+- [x] M4: terminal, Git basics
+      (2026-11-06; all checks and the full Playwright suite pass locally on
+      Linux with real shells; open: macOS/Windows CI, alternate screen and
+      scrollback limit untested, staged-change gutter markers; see
+      docs/ROADMAP.md M4a/M4b)
 - [ ] M5: run/debug, test runner
 - [ ] M6: UI design (see docs/M6-DESIGN.md; start only when the
       maintainer says "start M6")
