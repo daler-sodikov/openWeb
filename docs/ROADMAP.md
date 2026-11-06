@@ -590,8 +590,8 @@ are built functionally, using CSS variables where easy.
    popup/menu, tooltip, panel header, status bar item, input and dialog
    (title, content, OK/Cancel/Apply, focus trap, Esc/Enter).
 3. **Layout.** Dark frame with rounded panels and gaps; left and bottom tool
-   window stripes; resizable panels with persisted sizes; minimum window
-   size; no clipped text at the window edge.
+   window stripes; minimum window size enforced; no clipped text at the left
+   window edge.
 4. **Resizable workspace** (every panel, nothing fixed-size):
    - Drag handles with a hit area of at least 6 px, a visible hover/active
      state, and the right cursor, between: the project tree and the editor;

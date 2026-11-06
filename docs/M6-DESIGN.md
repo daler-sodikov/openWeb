@@ -122,7 +122,8 @@ their contrast against the new editor_bg.
    (title, content, OK/Cancel/Apply, focus trap, Esc/Enter).
 2. "Islands" layout: dark frame, rounded panels with gaps between them. Left
    stripe with tool window icons (Project, Find, Problems, and later Terminal,
-   Git), bottom stripe. Fix the clipped text at the left window edge.
+   Git), bottom stripe. Minimum window size enforced. Fix the clipped text at
+   the left window edge.
 
    Resizable workspace (every panel, nothing fixed-size):
 
