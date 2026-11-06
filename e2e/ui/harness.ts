@@ -129,6 +129,34 @@ export async function waitForIndex(): Promise<void> {
     .toBe(false);
 }
 
+/** Closes the backend's project; returns what it reported still running. */
+async function closeProject(): Promise<string[]> {
+  try {
+    const report = (await backend("close_project", {})) as { stillRunning: string[] };
+    return report.stillRunning;
+  } catch (error: unknown) {
+    return [`close_project failed: ${String(error)}`];
+  }
+}
+
+/** Processes whose command line contains `dir` (diagnostics only). */
+function processesMentioning(dir: string): string {
+  try {
+    if (process.platform === "win32") {
+      const query = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${dir.replaceAll("'", "''")}*' } | ForEach-Object { "$($_.ProcessId) $($_.Name): $($_.CommandLine)" }`;
+      return execFileSync("powershell", ["-NoProfile", "-Command", query], {
+        encoding: "utf8",
+      }).trim();
+    }
+    return execFileSync("ps", ["-eo", "pid,args"], { encoding: "utf8" })
+      .split("\n")
+      .filter((line) => line.includes(dir))
+      .join("\n");
+  } catch (error: unknown) {
+    return `(could not list processes: ${String(error)})`;
+  }
+}
+
 export const test = base.extend<{ project: string }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires object destructuring here
   project: async ({}, use) => {
@@ -136,14 +164,24 @@ export const test = base.extend<{ project: string }>({
     const root = path.join(dir, "react-ts");
     fs.cpSync(path.join(repoRoot, "fixtures", "react-ts"), root, { recursive: true });
     await use(root);
-    // The backend keeps the project open (file watcher, language server
-    // with the project as its working directory). Windows cannot delete a
-    // folder a process still holds, so switch the backend to an empty idle
-    // project first (which stops those) and retry while they exit.
-    const idle = path.join(os.tmpdir(), "ferrule-ui-idle");
-    fs.mkdirSync(idle, { recursive: true });
-    await backend("open_project", { path: idle }).catch(() => undefined);
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 });
+    // Windows cannot delete a folder a process still uses. close_project
+    // stops everything the backend started for the project (file watcher,
+    // language server and the processes it started, terminals, indexing,
+    // Git refresh) and returns once they have ended; the short retry is
+    // for handles Windows releases a moment after a process exits.
+    const report = await closeProject();
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (error: unknown) {
+      throw new Error(
+        [
+          `cannot delete the test project ${dir}: ${String(error)}`,
+          `still running after close_project: ${report.join("; ") || "nothing"}`,
+          `processes whose command line mentions the folder:\n${processesMentioning(dir)}`,
+        ].join("\n"),
+        { cause: error },
+      );
+    }
   },
   page: async ({ page }, use) => {
     await page.addInitScript(installTauriShim, BACKEND_URL);
