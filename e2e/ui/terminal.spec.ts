@@ -64,7 +64,16 @@ async function openTerminal(page: Page): Promise<void> {
   await expect(page.getByTestId("terminal")).toBeVisible();
   await expect(page.getByTestId("terminal-tab")).toHaveCount(1);
   await expect(page.getByTestId("terminal-input")).toBeFocused();
-  // The shell is ready once it has drawn its prompt.
+  await waitForPrompt(page);
+}
+
+/**
+ * Waits until the visible terminal's shell has drawn its prompt. Type only
+ * after that: a shell without a line editor (dash) prints its first prompt
+ * after the echo of text typed ahead, and the output then lands on the
+ * prompt's line.
+ */
+async function waitForPrompt(page: Page): Promise<void> {
   await expect.poll(() => screenText(page), { timeout: 20_000 }).not.toMatch(/^\s*$/);
 }
 
@@ -115,10 +124,15 @@ test("tabs: new, rename, close; an exited shell shows its code", async ({ page, 
   await requireTerminals();
   await openTerminal(page);
 
-  // Typing right after "+" goes to the new shell, nothing is lost.
+  // "+" gives the keyboard to the new tab at once, so keys typed right
+  // away go to it (the view holds them until the shell runs; see
+  // InputQueue). Typing itself waits for the prompt, so the check does not
+  // depend on the shell's line editor.
   await page.getByTestId("terminal-new").click();
-  await run(page, "echo second-tab");
+  await expect(view(page).getByTestId("terminal-input")).toBeFocused();
   await expect(page.getByTestId("terminal-tab")).toHaveCount(2);
+  await waitForPrompt(page);
+  await run(page, "echo second-tab");
   await expectOutput(page, "second-tab");
   await expect(page.getByTestId("terminal-tab").nth(1)).toHaveAttribute("aria-selected", "true");
 
