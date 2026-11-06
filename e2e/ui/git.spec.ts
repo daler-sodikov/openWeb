@@ -30,6 +30,18 @@ async function runAction(page: Page, name: string): Promise<void> {
   await page.keyboard.press("Enter");
 }
 
+/**
+ * Waits until the commit started from the commit window has finished: on
+ * success it clears the message and Amend, and the notice names the new
+ * HEAD. (A "Committed" notice alone may be left from an earlier commit.)
+ */
+async function committed(page: Page, project: string): Promise<void> {
+  await expect(page.getByTestId("commit-message")).toHaveValue("", { timeout: 15_000 });
+  await expect(page.getByTestId("commit-amend")).not.toBeChecked();
+  const head = git(project, "rev-parse", "--short", "HEAD").trim();
+  await expect(page.getByTestId("status-notice")).toHaveText(`Committed ${head}.`);
+}
+
 async function waitForBranch(page: Page, name: string): Promise<void> {
   await expect(page.getByTestId("status-branch")).toHaveText(`⎇ ${name}`, { timeout: 15_000 });
 }
@@ -135,7 +147,7 @@ test("commit window: stage, diff, commit, errors and amend", async ({ page, proj
   git(project, "config", "user.name", "Test User");
 
   await page.getByTestId("commit-button").click();
-  await expect(page.getByTestId("status-notice")).toContainText("Committed");
+  await committed(page, project);
   await expect(row("src/utils/format.ts")).toHaveCount(0);
   await expect(row("notes.md")).toBeVisible();
   expect(git(project, "log", "-1", "--format=%s").trim()).toBe("Change format");
@@ -145,7 +157,8 @@ test("commit window: stage, diff, commit, errors and amend", async ({ page, proj
   await expect(page.getByTestId("commit-message")).toHaveValue("Change format");
   await page.getByTestId("commit-message").fill("Change format, amended");
   await page.getByTestId("commit-button").click();
-  await expect(page.getByTestId("status-notice")).toContainText("Committed");
+  // Not the notice: it still says "Committed" from the first commit.
+  await committed(page, project);
   expect(git(project, "log", "--format=%s").trim().split("\n")).toEqual([
     "Change format, amended",
     "Initial commit",
