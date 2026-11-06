@@ -25,7 +25,8 @@ use std::time::{Duration, Instant};
 
 use ferrule_terminal::native::NativeBackend;
 use ferrule_terminal::{
-    EventSink, SpawnSpec, TermSize, Terminal, TerminalEvent, TerminalOptions, terminal_env,
+    EventSink, SpawnSpec, TermSize, Terminal, TerminalEvent, TerminalOptions, Terminals,
+    terminal_env,
 };
 
 const SIZE: TermSize = TermSize { cols: 80, rows: 24 };
@@ -268,4 +269,36 @@ fn a_flood_is_batched_into_few_frames() {
     }
     wait_line(&t, SIZE.rows, "after the flood", |l| l == "got:after-flood");
     t.close();
+}
+
+#[test]
+fn close_all_and_wait_returns_after_the_programs_ended() {
+    let dir = tempfile::tempdir().unwrap();
+    let pidfile = dir.path().join("pid");
+    let terminals = Terminals::new(
+        Some(Arc::new(NativeBackend)),
+        TerminalOptions::default(),
+        Arc::new(|_| {}),
+    );
+    let script = format!(r#"sleep 1000 & echo "$!" > '{}'; wait"#, pidfile.display());
+    if cfg!(windows) {
+        // The Windows path is covered by closing_ends_the_running_program.
+        return;
+    }
+    terminals.open(&program(dir.path(), &script), SIZE).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let pid = loop {
+        if let Some(pid) = std::fs::read_to_string(&pidfile)
+            .ok()
+            .and_then(|t| t.trim().parse::<u32>().ok())
+        {
+            break pid;
+        }
+        assert!(Instant::now() < deadline, "no pid written");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(alive(pid));
+    let left = terminals.close_all_and_wait(Duration::from_secs(10));
+    assert!(left.is_empty(), "terminals still running: {left:?}");
+    assert!(!alive(pid), "the background child survived");
 }

@@ -53,6 +53,11 @@ pub trait Process: Send + Sync {
     /// The exit code once the shell has exited (`Some(None)`: exited, code
     /// unknown); `None` while it runs.
     fn exit_status(&self) -> Option<Option<i32>>;
+    /// Whether the shell or anything it started still runs (by default:
+    /// the shell).
+    fn running(&self) -> bool {
+        self.exit_status().is_none()
+    }
 }
 
 /// A started shell: its output, its input and its process.

@@ -306,6 +306,11 @@ impl Terminal {
         lock(&self.shared.state).exited
     }
 
+    /// Whether the shell or anything it started still runs.
+    pub fn running(&self) -> bool {
+        self.shared.process.running()
+    }
+
     /// Ends the shell and everything it started, and stops the threads.
     /// Does not wait for them.
     pub fn close(&self) {
@@ -548,6 +553,28 @@ impl Terminals {
             entry.terminal.close();
         }
     }
+
+    /// Closes every terminal and waits (blocking) until their processes
+    /// have ended, at most `timeout`. Returns the ids of terminals whose
+    /// processes still ran then.
+    pub fn close_all_and_wait(&self, timeout: Duration) -> Vec<u32> {
+        let entries: Vec<Entry> = lock(&self.open).drain(..).collect();
+        for entry in &entries {
+            entry.terminal.close();
+        }
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left: Vec<u32> = entries
+                .iter()
+                .filter(|e| e.terminal.running())
+                .map(|e| e.terminal.id())
+                .collect();
+            if left.is_empty() || Instant::now() >= deadline {
+                return left;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
 }
 
 impl Drop for Terminals {
@@ -740,6 +767,21 @@ mod tests {
         ));
         assert_eq!(terminals.list().len(), 1);
         terminals.close_all();
+        assert!(terminals.list().is_empty());
+    }
+
+    #[test]
+    fn close_all_and_wait_returns_once_processes_ended() {
+        let backend: Arc<dyn Backend> = Arc::new(FakeBackend::default());
+        let (sink, _rx) = channel_sink();
+        let terminals = Terminals::new(Some(backend), options(), sink);
+        terminals.open(&spec(), TermSize::new(20, 4)).unwrap();
+        terminals.open(&spec(), TermSize::new(20, 4)).unwrap();
+        assert!(
+            terminals
+                .close_all_and_wait(Duration::from_secs(5))
+                .is_empty()
+        );
         assert!(terminals.list().is_empty());
     }
 

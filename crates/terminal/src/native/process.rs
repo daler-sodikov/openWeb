@@ -124,6 +124,17 @@ impl Process for PtyProcess {
         inner.master = None;
     }
 
+    fn running(&self) -> bool {
+        // Reaps the shell if it exited: a zombie still counts as a member
+        // of its process group.
+        let shell_running = self.exit_status().is_none();
+        shell_running
+            || lock(&self.inner)
+                .tree
+                .as_ref()
+                .is_some_and(ProcessTree::is_alive)
+    }
+
     fn exit_status(&self) -> Option<Option<i32>> {
         let mut inner = lock(&self.inner);
         if let Some(exit) = inner.exit {
