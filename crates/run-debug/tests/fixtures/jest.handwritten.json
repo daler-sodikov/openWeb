@@ -1,0 +1,81 @@
+{
+  "numFailedTestSuites": 2,
+  "numFailedTests": 1,
+  "numPassedTestSuites": 0,
+  "numPassedTests": 3,
+  "numPendingTestSuites": 0,
+  "numPendingTests": 1,
+  "numTodoTests": 0,
+  "numTotalTestSuites": 2,
+  "numTotalTests": 5,
+  "success": false,
+  "startTime": 1794734490000,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["math"],
+          "duration": 2,
+          "failureMessages": [],
+          "fullName": "math adds",
+          "location": { "column": 3, "line": 6 },
+          "status": "passed",
+          "title": "adds"
+        },
+        {
+          "ancestorTitles": ["math"],
+          "duration": 4,
+          "failureMessages": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: \u001b[32m0.5\u001b[39m\nReceived: \u001b[31m0.25\u001b[39m\n    at Object.toBe (__ROOT__/src/math.test.ts:12:26)\n    at Promise.then.completed (__ROOT__/node_modules/jest-circus/build/utils.js:298:28)"
+          ],
+          "fullName": "math divides",
+          "location": { "column": 3, "line": 10 },
+          "status": "failed",
+          "title": "divides"
+        },
+        {
+          "ancestorTitles": ["math"],
+          "duration": null,
+          "failureMessages": [],
+          "fullName": "math is skipped",
+          "location": { "column": 6, "line": 15 },
+          "status": "pending",
+          "title": "is skipped"
+        },
+        {
+          "ancestorTitles": ["math", "tables"],
+          "duration": 0,
+          "failureMessages": [],
+          "fullName": "math tables adds 1 and 1",
+          "location": { "column": 5, "line": 20 },
+          "status": "passed",
+          "title": "adds 1 and 1"
+        },
+        {
+          "ancestorTitles": ["math", "tables"],
+          "duration": 1,
+          "failureMessages": [],
+          "fullName": "math tables adds 2 and 3",
+          "location": { "column": 5, "line": 20 },
+          "status": "passed",
+          "title": "adds 2 and 3"
+        }
+      ],
+      "endTime": 1794734490120,
+      "message": "",
+      "name": "__ROOT__/src/math.test.ts",
+      "startTime": 1794734490050,
+      "status": "failed",
+      "summary": ""
+    },
+    {
+      "assertionResults": [],
+      "endTime": 1794734490140,
+      "message": "  \u001b[1m● \u001b[22mTest suite failed to run\n\n    SyntaxError: __ROOT__/src/broken.test.ts: Unexpected token (3:1)\n\n      at Parser.raise (__ROOT__/node_modules/@babel/parser/lib/index.js:1:1)",
+      "name": "__ROOT__/src/broken.test.ts",
+      "startTime": 1794734490130,
+      "status": "failed",
+      "summary": ""
+    }
+  ]
+}

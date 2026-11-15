@@ -1,5 +1,23 @@
-//! Run/debug configurations, process supervision, test runners and debug sessions.
+//! Run configurations and test reports (`docs/ARCHITECTURE.md`, 4.10).
 //!
-//! Empty in M0: the crate exists so the workspace layout and dependency
-//! graph from `docs/ARCHITECTURE.md` are in place. Its scope and milestone
-//! are listed in `docs/ROADMAP.md`.
+//! Pure logic, no processes: the configuration model and its file
+//! (`.ferrule/run.json`), detection from `package.json`, the exact command
+//! a configuration runs, test filters, and parsing of the JSON reports of
+//! Vitest, Jest and Playwright into one test tree. `ferrule-core` starts
+//! and supervises the processes.
+
+mod command;
+mod config;
+mod detect;
+mod report;
+
+pub use command::{CommandError, CommandLine, Os, Tools, command_line, test_name_pattern};
+pub use config::{
+    ConfigError, PackageManager, RunConfig, RunKind, TestFramework, TestRef, TestScope,
+    load_configs, save_configs,
+};
+pub use detect::{detect_configs, detect_package_manager};
+pub use report::{
+    Failure, NodeKind, StackFrame, TestNode, TestReport, TestStatus, parse_jest_report,
+    parse_playwright_report,
+};
