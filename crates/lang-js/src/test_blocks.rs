@@ -59,6 +59,8 @@ pub struct TestBlock {
     pub name: Vec<String>,
     /// Zero-based line of the call.
     pub line: u32,
+    /// Zero-based line where the call ends (its body included).
+    pub end_line: u32,
 }
 
 fn grammar(path: &Path) -> Option<Language> {
@@ -129,7 +131,7 @@ pub fn test_blocks(path: &Path, text: &str) -> Vec<TestBlock> {
         return Vec::new();
     };
     // Blocks with their byte ranges, in source order.
-    let mut found: Vec<(std::ops::Range<usize>, TestBlockKind, String, u32)> = Vec::new();
+    let mut found: Vec<(std::ops::Range<usize>, TestBlockKind, String, u32, u32)> = Vec::new();
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
     while let Some(m) = matches.next() {
@@ -147,13 +149,17 @@ pub fn test_blocks(path: &Path, text: &str) -> Vec<TestBlock> {
         let (Some(kind), Some(title)) = (callee_kind(callee, text), title(title_node, text)) else {
             continue;
         };
-        let line = u32::try_from(block.start_position().row).unwrap_or(u32::MAX);
-        found.push((block.byte_range(), kind, title, line));
+        let row = |r: usize| u32::try_from(r).unwrap_or(u32::MAX);
+        let (line, end_line) = (
+            row(block.start_position().row),
+            row(block.end_position().row),
+        );
+        found.push((block.byte_range(), kind, title, line, end_line));
     }
     found.sort_by_key(|(range, ..)| range.start);
     found
         .iter()
-        .map(|(range, kind, title, line)| {
+        .map(|(range, kind, title, line, end_line)| {
             let mut name: Vec<String> = found
                 .iter()
                 .filter(|(outer, outer_kind, ..)| {
@@ -161,13 +167,14 @@ pub fn test_blocks(path: &Path, text: &str) -> Vec<TestBlock> {
                         && outer.start < range.start
                         && range.end <= outer.end
                 })
-                .map(|(_, _, outer_title, _)| outer_title.clone())
+                .map(|(_, _, outer_title, ..)| outer_title.clone())
                 .collect();
             name.push(title.clone());
             TestBlock {
                 kind: *kind,
                 name,
                 line: *line,
+                end_line: *end_line,
             }
         })
         .collect()
@@ -182,6 +189,16 @@ mod tests {
             .into_iter()
             .map(|b| (b.kind, b.name.join(" > "), b.line))
             .collect()
+    }
+
+    #[test]
+    fn blocks_know_where_they_end() {
+        let text = "describe(\"math\", () => {\n  it(\"adds\", () => {\n    run();\n  });\n});\n";
+        let ends: Vec<(u32, u32)> = test_blocks(Path::new("a.test.js"), text)
+            .iter()
+            .map(|b| (b.line, b.end_line))
+            .collect();
+        assert_eq!(ends, [(0, 4), (1, 3)]);
     }
 
     #[test]
