@@ -9,6 +9,8 @@
 mod command;
 mod config;
 mod detect;
+#[cfg(feature = "testing")]
+pub mod fake;
 mod report;
 
 pub use command::{CommandError, CommandLine, Os, Tools, command_line, test_name_pattern};
