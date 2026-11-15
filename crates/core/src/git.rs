@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use ferrule_git::{
@@ -36,6 +36,15 @@ struct Inner {
     bases: HashMap<String, Option<Arc<str>>>,
 }
 
+/// Every Git status gets the next number, across projects: the view keeps
+/// the newest status it has seen, whichever way it arrived (an event or the
+/// answer to `git_status`) and whichever project's state came before.
+static GENERATION: AtomicU32 = AtomicU32::new(0);
+
+fn next_generation() -> u32 {
+    GENERATION.fetch_add(1, Ordering::Relaxed) + 1
+}
+
 /// The project's repository and its latest status.
 pub(crate) struct GitState {
     sink: Arc<dyn EventSink>,
@@ -45,7 +54,13 @@ pub(crate) struct GitState {
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// Set when the project closes: no refresh thread is started after it.
     stopped: AtomicBool,
-    generation: AtomicU32,
+    /// False once the project was replaced or closed: its statuses are no
+    /// longer sent to the view (a discovery or refresh still running would
+    /// otherwise overwrite the next project's state). Emitting holds the
+    /// read lock, so nothing is sent after `retire` returns.
+    current: RwLock<bool>,
+    /// True once discovery has finished (a repository or not).
+    discovered: tokio::sync::watch::Sender<bool>,
 }
 
 fn git_error(err: GitError) -> IpcError {
@@ -176,6 +191,7 @@ impl GitState {
             inner: Mutex::new(Inner {
                 status: ipc::GitStatus {
                     unavailable: Some("Looking for a Git repository…".into()),
+                    generation: next_generation(),
                     ..ipc::GitStatus::default()
                 },
                 ..Inner::default()
@@ -183,8 +199,32 @@ impl GitState {
             refresh: Mutex::new(None),
             thread: Mutex::new(None),
             stopped: AtomicBool::new(false),
-            generation: AtomicU32::new(0),
+            current: RwLock::new(true),
+            discovered: tokio::sync::watch::Sender::new(false),
         }
+    }
+
+    /// The project was replaced or closed: nothing more of it reaches the
+    /// view. Returns once a status being sent has been sent.
+    pub fn retire(&self) {
+        if let Ok(mut current) = self.current.write() {
+            *current = false;
+        }
+    }
+
+    fn emit(&self, status: ipc::GitStatus) {
+        if let Ok(current) = self.current.read()
+            && *current
+        {
+            self.sink.emit(SessionEvent::GitStatus(status));
+        }
+    }
+
+    /// Waits (at most `timeout`) until discovery has finished, so the
+    /// status says whether there is a repository instead of "looking".
+    pub async fn discovered(&self, timeout: Duration) {
+        let mut rx = self.discovered.subscribe();
+        let _ = tokio::time::timeout(timeout, rx.wait_for(|done| *done)).await;
     }
 
     /// Stops refreshing (the project is closing) and waits for a refresh
@@ -212,6 +252,11 @@ impl GitState {
     /// Finds the repository containing `dir` and starts refreshing.
     /// Blocking.
     pub fn start(self: &Arc<Self>, dir: &Path, program: PathBuf) {
+        self.discover(dir, program);
+        self.discovered.send_replace(true);
+    }
+
+    fn discover(self: &Arc<Self>, dir: &Path, program: PathBuf) {
         if self.stopped.load(Ordering::Acquire) {
             return;
         }
@@ -246,12 +291,13 @@ impl GitState {
         };
         let status = ipc::GitStatus {
             unavailable: Some(unavailable),
+            generation: next_generation(),
             ..ipc::GitStatus::default()
         };
         if let Ok(mut inner) = self.inner.lock() {
             inner.status = status.clone();
         }
-        self.sink.emit(SessionEvent::GitStatus(status));
+        self.emit(status);
     }
 
     /// Asks for a refresh soon (debounced; never blocks).
@@ -284,7 +330,7 @@ impl GitState {
         let Ok((repo, prefix)) = self.repo() else {
             return;
         };
-        let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let generation = next_generation();
         let raw = match repo.status() {
             Ok(raw) => raw,
             Err(err) => {
@@ -304,7 +350,7 @@ impl GitState {
             inner.status = status.clone();
             inner.bases.clear();
         }
-        self.sink.emit(SessionEvent::GitStatus(status));
+        self.emit(status);
     }
 
     pub fn status(&self) -> ipc::GitStatus {
@@ -382,8 +428,13 @@ impl Session {
     }
 
     /// The latest repository status.
+    /// The current status. Waits briefly for the repository discovery of a
+    /// project that was just opened, so the view's first question gets the
+    /// real status even if the discovery event was missed.
     pub async fn git_status(&self) -> Result<ipc::GitStatus, IpcError> {
-        Ok(self.git()?.status())
+        let git = self.git()?;
+        git.discovered(Duration::from_secs(10)).await;
+        Ok(git.status())
     }
 
     /// Asks for a status refresh (window focus); the result arrives as an

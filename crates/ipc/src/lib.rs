@@ -1249,7 +1249,7 @@ pub struct GitStatus {
     pub changed_dirs: Vec<String>,
     /// Ignored folders (everything below is ignored).
     pub ignored_dirs: Vec<String>,
-    /// Increases with every refresh.
+    /// Increases with every status, across projects: the newest wins.
     pub generation: u32,
 }
 
