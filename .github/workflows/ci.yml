@@ -23,10 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-latest, windows-latest]
-    # Linux runs on the self-hosted runner; pull requests from forks use
-    # GitHub's runner instead, so fork code never runs on that machine.
-    # macOS and Windows stay GitHub-hosted.
-    runs-on: ${{ matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux"]') || matrix.os }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
@@ -103,8 +100,7 @@ jobs:
 
   deny:
     name: cargo-deny
-    # Self-hosted (Linux), except pull requests from forks (see `check`).
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux"]') || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -119,8 +115,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-latest, windows-latest]
-    # Only pushes to main and tags reach this job: Linux self-hosted.
-    runs-on: ${{ matrix.os == 'ubuntu-24.04' && fromJSON('["self-hosted", "linux"]') || matrix.os }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
