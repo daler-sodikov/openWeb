@@ -11,7 +11,7 @@ import { DiffView } from "./diff-view";
 import { hunkAt } from "./gutter";
 import { HunkPopup } from "./hunk-popup";
 import { LogWindow } from "./log-window";
-import { GitStatusModel, type TreeGitClass } from "./status";
+import { branchLabel, GitStatusModel, isNewer, type TreeGitClass } from "./status";
 
 export const GIT_ACTIONS: ReadonlySet<KeyAction> = new Set<KeyAction>([
   "toggleCommit",
@@ -40,6 +40,8 @@ export class GitUi {
   readonly commit: CommitWindow;
   readonly log: LogWindow;
   readonly branch = document.createElement("button");
+  /** Generation of the status shown (-1: none yet). */
+  private shown = -1;
 
   constructor(private readonly host: GitHost) {
     this.commit = new CommitWindow({
@@ -93,21 +95,25 @@ export class GitUi {
       generation: 0,
     };
     this.model.update(none);
+    this.shown = -1;
     this.branch.hidden = true;
+    this.branch.textContent = "";
     this.commit.update(none);
     this.commit.toggle(false);
     this.log.element.hidden = true;
   }
 
   onStatus(status: GitStatus): void {
-    const previous = this.model.status?.generation ?? -1;
-    if (status.generation !== 0 && status.generation < previous) return;
+    if (!isNewer(this.shown, status)) return;
+    this.shown = status.generation;
     this.model.update(status);
     this.host.redrawTree();
     this.commit.update(status);
-    this.branch.hidden = status.unavailable !== null;
-    const name = status.branch ?? `detached ${status.head ?? ""}`;
-    this.branch.textContent = `⎇ ${name}`;
+    // Nothing until there is a real branch or commit (no "detached" with
+    // an empty name while the repository is still being looked for).
+    const name = branchLabel(status);
+    this.branch.hidden = name === "";
+    this.branch.textContent = name ? `⎇ ${name}` : "";
     const sync =
       status.ahead || status.behind
         ? ` (${String(status.ahead)} ahead, ${String(status.behind)} behind ${status.upstream ?? ""})`

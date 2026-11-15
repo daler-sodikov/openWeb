@@ -4,6 +4,22 @@ import type { GitFile, GitFileKind, GitStatus } from "../ipc/bindings";
 
 export type TreeGitClass = GitFileKind | "changed";
 
+/**
+ * Whether `next` is newer than the status generation already shown. Rust
+ * numbers every status across projects, so an answer to `gitStatus` that
+ * arrives after a newer event (or a late status of a closed project) loses.
+ */
+export function isNewer(shown: number, next: GitStatus): boolean {
+  return next.generation > shown;
+}
+
+/** The status bar text: the branch, else the detached commit, else nothing. */
+export function branchLabel(status: GitStatus): string {
+  if (status.unavailable !== null) return "";
+  if (status.branch) return status.branch;
+  return status.head ? `detached ${status.head}` : "";
+}
+
 export class GitStatusModel {
   status: GitStatus | null = null;
   private files = new Map<string, GitFile>();
