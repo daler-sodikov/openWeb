@@ -70,11 +70,30 @@ interface Panel {
   selected: TestTreeNode | null;
 }
 
-/** A view made before the run starts, so the PTY gets the right size. */
+/** The parts of a run's panel, built before the run starts. */
+interface Skeleton {
+  toolbar: HTMLElement;
+  rerun: HTMLButtonElement;
+  stop: HTMLButtonElement;
+  rerunFailed: HTMLButtonElement;
+  filters: HTMLElement;
+  status: HTMLElement;
+  command: HTMLElement;
+  summary: HTMLElement;
+  tests: HTMLElement;
+  details: HTMLElement;
+}
+
+/**
+ * A panel laid out before the run starts, so the program gets the output
+ * view's final size (measuring before the toolbar existed started every
+ * run a few rows too tall, then resized it).
+ */
 export interface PendingView {
   holder: HTMLElement;
   view: TerminalView;
   size: TerminalSize;
+  parts: Skeleton;
 }
 
 export class RunWindow {
@@ -150,6 +169,11 @@ export class RunWindow {
     this.host.onHide();
   }
 
+  /** Whether run `id` is a test run (its rerun will be one too). */
+  isTestRun(id: number): boolean {
+    return this.list.some((p) => p.info.id === id && p.info.tests);
+  }
+
   /** The selected run's id, if any. */
   get activeId(): number | null {
     return this.active?.info.id ?? null;
@@ -174,21 +198,29 @@ export class RunWindow {
     this.element.hidden = true;
   }
 
-  /** Shows the window with a fresh output view, sized, for a run to start. */
-  prepare(): PendingView {
+  /**
+   * Shows the window with a fresh panel (toolbar, command line, output view
+   * and, if `tests`, the result column) and measures the output view as it
+   * will stay, for a run to start.
+   */
+  prepare(tests = false): PendingView {
     this.element.hidden = false;
     this.empty.hidden = true;
     const view = new TerminalView(this.terminalHost);
+    const parts = skeleton();
     const holder = document.createElement("div");
-    holder.className = "run-panel";
+    holder.className = tests ? "run-panel run-tests-panel" : "run-panel";
+    parts.tests.hidden = !tests;
+    parts.rerunFailed.hidden = !tests;
+    parts.filters.hidden = !tests;
     const body = document.createElement("div");
     body.className = "run-body";
-    body.append(view.element);
-    holder.append(body);
+    body.append(parts.tests, view.element);
+    holder.append(parts.toolbar, parts.command, body);
     for (const panel of this.list) panel.element.hidden = true;
     this.panels.append(holder);
     const size = view.measure() ?? { cols: 120, rows: 20 };
-    return { holder, view, size };
+    return { holder, view, size, parts };
   }
 
   /** The run did not start: drop the prepared view. */
@@ -256,37 +288,12 @@ export class RunWindow {
     element.className = info.tests ? "run-panel run-tests-panel" : "run-panel";
     element.dataset.testid = "run-panel";
     element.dataset.id = String(info.id);
-
-    const toolbar = document.createElement("div");
-    toolbar.className = "run-toolbar";
-    const rerun = button("⟳ Rerun", "run-rerun", "Rerun");
-    const stop = button("■ Stop", "run-stop", "Stop");
-    const rerunFailed = button("Rerun Failed", "run-rerun-failed", "Rerun failed tests");
-    rerunFailed.disabled = true;
+    const { rerun, stop, rerunFailed, filters, status, command, summary, tests, details } =
+      pending.parts;
     rerunFailed.hidden = !info.tests;
-    const status = document.createElement("span");
-    status.className = "run-status";
-    status.dataset.testid = "run-status";
-    status.textContent = "Running…";
-    toolbar.append(rerun, stop, rerunFailed);
-
-    const command = document.createElement("div");
-    command.className = "run-command";
-    command.dataset.testid = "run-command";
-    command.textContent = info.command;
-
-    const summary = document.createElement("div");
-    summary.className = "run-summary";
-    summary.dataset.testid = "run-summary";
-    summary.textContent = "Running tests…";
-    summary.hidden = !info.tests;
-
-    const tests = document.createElement("div");
-    tests.className = "run-tests";
+    filters.hidden = !info.tests;
     tests.hidden = !info.tests;
-    const details = document.createElement("div");
-    details.className = "run-details";
-    details.dataset.testid = "run-details";
+    command.textContent = info.command;
 
     const tab = document.createElement("div");
     tab.className = "terminal-tab run-tab";
@@ -324,31 +331,17 @@ export class RunWindow {
     tree.element.tabIndex = 0;
     bindListKeys(tree.element, tree);
 
-    const filters = document.createElement("div");
-    filters.className = "run-filters";
-    filters.hidden = !info.tests;
     const shown = new Set<TestStatus>(FILTERS);
-    for (const filter of FILTERS) {
-      const toggle = button(
-        `${statusGlyph(filter)} ${filter.charAt(0).toUpperCase()}${filter.slice(1)}`,
-        `run-filter-${filter}`,
-        `Show ${filter} tests`,
-      );
-      toggle.setAttribute("aria-pressed", "true");
+    for (const toggle of filters.querySelectorAll<HTMLButtonElement>("button")) {
+      const filter = toggle.dataset.status as TestStatus;
       toggle.addEventListener("click", () => {
         if (shown.has(filter)) shown.delete(filter);
         else shown.add(filter);
         toggle.setAttribute("aria-pressed", String(shown.has(filter)));
         if (ref.panel) this.renderTree(ref.panel);
       });
-      filters.append(toggle);
     }
-    toolbar.append(filters, status);
-
-    tests.append(tree.element, details);
-    const body = pending.view.element.parentElement ?? document.createElement("div");
-    body.prepend(tests);
-    element.replaceChildren(toolbar, command, summary, body);
+    tests.replaceChildren(summary, tree.element, details);
 
     const panel: Panel = {
       info,
@@ -519,6 +512,50 @@ export class RunWindow {
     });
     return link;
   }
+}
+
+/** A run panel's toolbar, command line and result column, not yet filled. */
+function skeleton(): Skeleton {
+  const toolbar = document.createElement("div");
+  toolbar.className = "run-toolbar";
+  const rerun = button("⟳ Rerun", "run-rerun", "Rerun");
+  const stop = button("■ Stop", "run-stop", "Stop");
+  const rerunFailed = button("Rerun Failed", "run-rerun-failed", "Rerun failed tests");
+  rerunFailed.disabled = true;
+  const filters = document.createElement("div");
+  filters.className = "run-filters";
+  for (const filter of FILTERS) {
+    const toggle = button(
+      `${statusGlyph(filter)} ${filter.charAt(0).toUpperCase()}${filter.slice(1)}`,
+      `run-filter-${filter}`,
+      `Show ${filter} tests`,
+    );
+    toggle.dataset.status = filter;
+    toggle.setAttribute("aria-pressed", "true");
+    filters.append(toggle);
+  }
+  const status = document.createElement("span");
+  status.className = "run-status";
+  status.dataset.testid = "run-status";
+  status.textContent = "Running…";
+  toolbar.append(rerun, stop, rerunFailed, filters, status);
+  const command = document.createElement("div");
+  command.className = "run-command";
+  command.dataset.testid = "run-command";
+  // One line from the start (the command is known once the run starts).
+  command.textContent = "\u00a0";
+  // In the result column, so it never changes the output view's height.
+  const summary = document.createElement("div");
+  summary.className = "run-summary";
+  summary.dataset.testid = "run-summary";
+  summary.textContent = "Running tests…";
+  const tests = document.createElement("div");
+  tests.className = "run-tests";
+  const details = document.createElement("div");
+  details.className = "run-details";
+  details.dataset.testid = "run-details";
+  tests.append(summary, details);
+  return { toolbar, rerun, stop, rerunFailed, filters, status, command, summary, tests, details };
 }
 
 /** The node's failures, or those of the tests below it. */

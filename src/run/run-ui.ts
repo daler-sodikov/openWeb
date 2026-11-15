@@ -47,6 +47,11 @@ export interface RunHost {
 
 type Launch = (size: TerminalSize) => Promise<IpcResult<StartRun>>;
 
+/** A test configuration: its run gets the result column from the start. */
+function isTest(config: RunConfig): boolean {
+  return config.kind.type === "test";
+}
+
 export class RunUi {
   readonly window: RunWindow;
   /** Toolbar: the selected configuration, Run and Stop. */
@@ -69,13 +74,15 @@ export class RunUi {
         void this.stop(id);
       },
       rerun: (id) => {
-        void this.launch((size) => commands.rerun(id, size));
+        void this.launch((size) => commands.rerun(id, size), {
+          tests: this.window.isTestRun(id),
+        });
       },
       rerunFailed: (id) => {
-        void this.launch((size) => commands.rerunFailed(id, size));
+        void this.launch((size) => commands.rerunFailed(id, size), { tests: true });
       },
       rerunTests: (id, targets: TestTarget[]) => {
-        void this.launch((size) => commands.rerunTests(id, targets, size));
+        void this.launch((size) => commands.rerunTests(id, targets, size), { tests: true });
       },
       closeRun: (id) => {
         void commands.closeRun(id).then(() => {
@@ -118,7 +125,7 @@ export class RunUi {
       case "run":
         if (this.selected) {
           const config = this.selected;
-          void this.launch((size) => commands.startRun(config, size));
+          void this.launch((size) => commands.startRun(config, size), { tests: isTest(config) });
         } else {
           void this.choose();
         }
@@ -142,7 +149,11 @@ export class RunUi {
       case "rerun": {
         const id = this.window.activeId;
         if (id === null) this.run("run");
-        else void this.launch((size) => commands.rerun(id, size));
+        else {
+          void this.launch((size) => commands.rerun(id, size), {
+            tests: this.window.isTestRun(id),
+          });
+        }
         return;
       }
       case "chooseRunConfiguration":
@@ -167,7 +178,7 @@ export class RunUi {
   /** Runs the test block at zero-based `line` of a pane (gutter, Ctrl+Shift+F10). */
   runAt(pane: EditorPane, line: number | null): void {
     const docId = pane.doc.docId;
-    void this.launch((size) => commands.runAt(docId, line, size), true);
+    void this.launch((size) => commands.runAt(docId, line, size), { select: true });
   }
 
   onFrame(frame: TerminalFrame): void {
@@ -219,10 +230,13 @@ export class RunUi {
    * Starts a run: asks Rust, shows the trust question if the project is
    * not trusted yet (then asks again), and gives the run a tab.
    */
-  private async launch(call: Launch, select = false): Promise<void> {
+  private async launch(
+    call: Launch,
+    { select = false, tests = false }: { select?: boolean; tests?: boolean } = {},
+  ): Promise<void> {
     await this.host.saveAll();
     this.host.showBottom(this.window.element);
-    const pending = this.window.prepare();
+    const pending = this.window.prepare(tests);
     let result: StartRun;
     try {
       result = unwrap(await call(pending.size));
@@ -247,7 +261,7 @@ export class RunUi {
         this.host.notify(`Cannot trust the project: ${errorMessage(error)}`);
         return;
       }
-      await this.launch(call, select);
+      await this.launch(call, { select, tests });
       return;
     }
     this.window.adopt(pending, result.run);
@@ -270,7 +284,7 @@ export class RunUi {
         run: (config) => {
           this.selected = config;
           this.updateToolbar();
-          void this.launch((size) => commands.startRun(config, size));
+          void this.launch((size) => commands.startRun(config, size), { tests: isTest(config) });
         },
         edit: (config) => {
           this.host.showPopup(this.editor(config ?? emptyConfig(), manager));
@@ -306,7 +320,7 @@ export class RunUi {
       run: (edited) => {
         this.selected = edited;
         this.updateToolbar();
-        void this.launch((size) => commands.startRun(edited, size));
+        void this.launch((size) => commands.startRun(edited, size), { tests: isTest(edited) });
       },
     });
     return editor;
