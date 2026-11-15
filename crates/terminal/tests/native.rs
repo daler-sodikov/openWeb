@@ -25,8 +25,7 @@ use std::time::{Duration, Instant};
 
 use ferrule_terminal::native::NativeBackend;
 use ferrule_terminal::{
-    EventSink, SpawnSpec, TermSize, Terminal, TerminalEvent, TerminalOptions, Terminals,
-    terminal_env,
+    EventSink, SpawnSpec, TermSize, Terminal, TerminalEvent, TerminalOptions, terminal_env,
 };
 
 const SIZE: TermSize = TermSize { cols: 80, rows: 24 };
@@ -314,7 +313,9 @@ fn ps_report(pid: u32, group: u32) -> String {
 fn close_all_and_wait_returns_after_the_programs_ended() {
     let dir = tempfile::tempdir().unwrap();
     let pidfile = dir.path().join("pid");
-    let terminals = Terminals::new(
+    // Only this Unix test uses the registry (an import would be unused on
+    // Windows).
+    let terminals = ferrule_terminal::Terminals::new(
         Some(Arc::new(NativeBackend)),
         TerminalOptions::default(),
         Arc::new(|_| {}),
