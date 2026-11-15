@@ -82,6 +82,54 @@ async function output(page: Page): Promise<string> {
   return rows.join("\n");
 }
 
+/**
+ * Center of the character `offset` into `text` on the last output row of
+ * the visible run that shows it, from that character's own DOM rectangle.
+ * Found and measured in one step in the page (a row element replaced in
+ * between would have no box), retried until the row is laid out.
+ */
+async function outputPoint(
+  page: Page,
+  text: string,
+  offset: number,
+): Promise<{ x: number; y: number }> {
+  const rows = panel(page).locator('[data-testid="terminal-row"]', { hasText: text });
+  await expect(rows.last()).toBeVisible();
+  const found: { point: { x: number; y: number } | null } = { point: null };
+  await expect
+    .poll(async () => {
+      found.point = await panel(page).evaluate(
+        (el, { text, offset }) => {
+          const rows = [...el.querySelectorAll('[data-testid="terminal-row"]')].filter((r) =>
+            r.textContent.includes(text),
+          );
+          const row = rows[rows.length - 1];
+          if (!row) return null;
+          let index = row.textContent.lastIndexOf(text) + offset;
+          const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const length = node.textContent?.length ?? 0;
+            if (index < length) {
+              const range = document.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, index + 1);
+              const rect = range.getBoundingClientRect();
+              if (rect.width === 0 || rect.height === 0) return null;
+              return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+            }
+            index -= length;
+          }
+          return null;
+        },
+        { text, offset },
+      );
+      return found.point !== null;
+    })
+    .toBe(true);
+  if (!found.point) throw new Error(`no position for "${text}"`);
+  return found.point;
+}
+
 /** Runs a detected or stored configuration from the chooser. */
 async function choose(page: Page, name: string): Promise<void> {
   await page.keyboard.press(keys.choose);
@@ -237,18 +285,9 @@ test("a script runs with output links; Stop keeps the output; Rerun", async ({ p
   });
   await expect.poll(() => output(page)).toContain("see src/math.ts:5:10");
   // Ctrl/Cmd+click on the location opens it (position from the DOM).
-  const row = panel(page).locator('[data-testid="terminal-row"]', {
-    hasText: "src/math.ts:5:10",
-  });
-  const box = await row.boundingBox();
-  if (!box) throw new Error("output row not visible");
-  const text = (await row.textContent()) ?? "";
-  const cell = await panel(page)
-    .getByTestId("terminal-view")
-    .evaluate((el) => Number.parseFloat(getComputedStyle(el).getPropertyValue("--term-cell-w")));
-  const col = text.indexOf("src/math.ts") + 3;
+  const point = await outputPoint(page, "src/math.ts:5:10", 3);
   await page.keyboard.down(isMac ? "Meta" : "Control");
-  await page.mouse.click(box.x + cell * (col + 0.5), box.y + box.height / 2);
+  await page.mouse.click(point.x, point.y);
   await page.keyboard.up(isMac ? "Meta" : "Control");
   await expect(activeTab(page)).toHaveAttribute("data-path", "src/math.ts");
   await expect(page.getByTestId("status-position")).toHaveText("5:10");
