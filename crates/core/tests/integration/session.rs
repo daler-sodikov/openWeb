@@ -255,6 +255,48 @@ async fn closing_a_modified_tab_keeps_its_text() {
     assert_ne!(reopened.doc_id, DocId(0));
 }
 
+/// Closing a tab and opening the file again at once (the view does not wait
+/// for the close): the reopened document has the unsaved text and is
+/// usable. CI on Windows once reopened the saved text without it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reopening_while_closing_keeps_the_unsaved_text() {
+    let dir = project_dir();
+    // No autosave during the test: only closing writes the recovery file.
+    let session = Session::with_autosave_delay(
+        dir.path().join("data"),
+        Arc::new(NoEvents),
+        Duration::from_secs(600),
+    )
+    .unwrap();
+    session
+        .open_project(dir.path().join("demo").to_string_lossy().into_owned())
+        .await
+        .unwrap();
+    let mut doc = session.open_document("README.md".into()).await.unwrap();
+    let mut expected = doc.text.clone();
+    for round in 0..50 {
+        session
+            .apply_changes(doc.doc_id, doc.version, vec![typing(0, "x")])
+            .await
+            .unwrap();
+        expected.insert(0, 'x');
+        let closing = session.close_document(doc.doc_id);
+        let opening = async {
+            tokio::task::yield_now().await;
+            session.open_document("README.md".into()).await
+        };
+        let (closed, reopened) = tokio::join!(closing, opening);
+        closed.unwrap();
+        doc = reopened.unwrap();
+        assert_eq!(doc.text, expected, "round {round}: unsaved text lost");
+        // Still open: not the handle that was being closed.
+        session
+            .highlights(doc.doc_id, 0, 1)
+            .await
+            .unwrap_or_else(|e| panic!("round {round}: reopened document is closed: {e}"));
+    }
+}
+
 #[tokio::test]
 async fn opening_twice_returns_the_same_document() {
     let dir = project_dir();

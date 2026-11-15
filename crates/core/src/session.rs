@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrule_buffer::{
     Document, Edit, EditKind, IndentRules, LineEnding, Rope, Selection, Transaction,
@@ -106,6 +106,11 @@ pub(crate) struct DocHandle {
     language: Option<String>,
     state: Mutex<DocState>,
     autosave: Mutex<Option<CancellationToken>>,
+    /// Being closed: it stays registered until its recovery file is
+    /// written, and opening its path waits for that.
+    closing: AtomicBool,
+    /// Signalled once a closing document is unregistered.
+    closed: tokio::sync::Notify,
 }
 
 impl DocHandle {
@@ -536,7 +541,7 @@ impl Session {
         path: String,
         read_only: bool,
     ) -> Result<ipc::OpenedDocument, IpcError> {
-        if let Some(existing) = self.doc_by_path(&abs)? {
+        if let Some(existing) = self.open_or_closed(&abs).await? {
             return existing.opened();
         }
         let recent_path = path.clone();
@@ -613,31 +618,48 @@ impl Session {
             tokio::task::spawn_blocking(move || touch.touch_recent(&recent_path));
         }
 
-        let handle = {
+        /// What the registry holds for the path once the file is loaded.
+        enum Slot {
+            /// Another request opened it while we were loading.
+            Open(Arc<DocHandle>),
+            /// Opened and being closed meanwhile: what was loaded may miss
+            /// its unsaved text.
+            Closing,
+            /// Registered now.
+            New(Arc<DocHandle>),
+        }
+        let slot = {
             let mut s = lock(&self.state)?;
-            // Another request may have opened it while we were loading.
-            if let Some(id) = s.by_path.get(&abs).copied()
-                && let Some(existing) = s.docs.get(&id).cloned()
-            {
-                drop(s);
-                return existing.opened();
+            match s.by_path.get(&abs).and_then(|id| s.docs.get(id)).cloned() {
+                Some(existing) if existing.closing.load(Ordering::Acquire) => Slot::Closing,
+                Some(existing) => Slot::Open(existing),
+                None => {
+                    s.next_id += 1;
+                    let id = DocId(s.next_id);
+                    let handle = Arc::new(DocHandle {
+                        id,
+                        uri: ferrule_lsp_client::path_to_uri(&abs),
+                        lsp_language: runtime.lsp.language_id(&abs),
+                        read_only,
+                        path: abs.clone(),
+                        rel_path: path.clone(),
+                        language,
+                        state: Mutex::new(state),
+                        autosave: Mutex::new(None),
+                        closing: AtomicBool::new(false),
+                        closed: tokio::sync::Notify::new(),
+                    });
+                    s.docs.insert(id, handle.clone());
+                    s.by_path.insert(abs.clone(), id);
+                    Slot::New(handle)
+                }
             }
-            s.next_id += 1;
-            let id = DocId(s.next_id);
-            let handle = Arc::new(DocHandle {
-                id,
-                uri: ferrule_lsp_client::path_to_uri(&abs),
-                lsp_language: runtime.lsp.language_id(&abs),
-                read_only,
-                path: abs.clone(),
-                rel_path: path,
-                language,
-                state: Mutex::new(state),
-                autosave: Mutex::new(None),
-            });
-            s.docs.insert(id, handle.clone());
-            s.by_path.insert(abs, id);
-            handle
+        };
+        let handle = match slot {
+            Slot::Open(existing) => return existing.opened(),
+            // Start over once it is closed (its recovery file is written).
+            Slot::Closing => return Box::pin(self.open_path(runtime, abs, path, read_only)).await,
+            Slot::New(handle) => handle,
         };
         if handle.lsp_language.is_some() {
             // Start the server (if needed) and open the document on it in the
@@ -657,6 +679,30 @@ impl Session {
     fn doc_by_path(&self, abs: &Path) -> Result<Option<Arc<DocHandle>>, IpcError> {
         let s = lock(&self.state)?;
         Ok(s.by_path.get(abs).and_then(|id| s.docs.get(id)).cloned())
+    }
+
+    /// The open document at `abs`. One that is being closed is waited for
+    /// first: its recovery file is written then, so reopening right after
+    /// closing a tab shows the unsaved text.
+    async fn open_or_closed(&self, abs: &Path) -> Result<Option<Arc<DocHandle>>, IpcError> {
+        loop {
+            let Some(existing) = self.doc_by_path(abs)? else {
+                return Ok(None);
+            };
+            if !existing.closing.load(Ordering::Acquire) {
+                return Ok(Some(existing));
+            }
+            let notified = existing.closed.notified();
+            tokio::pin!(notified);
+            // Registered before the second look, so the signal is not missed.
+            notified.as_mut().enable();
+            if self
+                .doc_by_path(abs)?
+                .is_some_and(|h| Arc::ptr_eq(&h, &existing))
+            {
+                notified.await;
+            }
+        }
     }
 
     /// Applies view transactions based on `base_version`.
@@ -1124,28 +1170,48 @@ impl Session {
     /// Closes a document. Unsaved text is kept in its recovery file and
     /// restored when the file is opened again.
     pub async fn close_document(&self, doc_id: DocId) -> Result<(), IpcError> {
+        // Marked closing but still registered until the recovery file is
+        // written: a reopen meanwhile waits instead of loading the saved
+        // file without the unsaved text.
         let handle = {
-            let mut s = lock(&self.state)?;
-            let handle = s.docs.remove(&doc_id).ok_or_else(|| {
-                IpcError::new(
-                    IpcErrorKind::NotFound,
-                    format!("document {} is not open", doc_id.0),
-                )
-            })?;
-            s.by_path.remove(&handle.path);
-            handle
+            let s = lock(&self.state)?;
+            s.docs
+                .get(&doc_id)
+                .filter(|h| {
+                    h.closing
+                        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                        .is_ok()
+                })
+                .cloned()
+                .ok_or_else(|| {
+                    IpcError::new(
+                        IpcErrorKind::NotFound,
+                        format!("document {} is not open", doc_id.0),
+                    )
+                })?
         };
-        if let Some(lsp) = self.lsp_for(&handle) {
-            let doc = handle.clone();
-            blocking(move || {
-                let mut state = doc.lock()?;
-                lsp.closed(&doc, &mut state);
-                Ok(())
-            })
-            .await?;
+        let lsp_result = match self.lsp_for(&handle) {
+            Some(lsp) => {
+                let doc = handle.clone();
+                blocking(move || {
+                    let mut state = doc.lock()?;
+                    lsp.closed(&doc, &mut state);
+                    Ok(())
+                })
+                .await
+            }
+            None => Ok(()),
+        };
+        self.flush_closed(vec![handle.clone()]).await;
+        {
+            let mut s = lock(&self.state)?;
+            s.docs.remove(&doc_id);
+            if s.by_path.get(&handle.path) == Some(&doc_id) {
+                s.by_path.remove(&handle.path);
+            }
         }
-        self.flush_closed(vec![handle]).await;
-        Ok(())
+        handle.closed.notify_waiters();
+        lsp_result
     }
 
     /// Whether typing-path timing is on (`FERRULE_TYPING_TRACE`).
