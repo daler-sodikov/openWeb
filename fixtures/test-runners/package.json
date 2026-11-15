@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "dev": "node src/serve.js",
     "start": "node src/main.js",
     "test": "vitest run"
   },

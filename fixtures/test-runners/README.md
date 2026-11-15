@@ -1,7 +1,14 @@
 # test-runners fixture
 
 A small project for the run configuration and test runner tests (M5a).
-`src/math.test.ts` has one test that fails on purpose, one skipped test and a
-parameterized one; `e2e/math.spec.ts` is a Playwright spec that needs no
-browser. It has no `node_modules`: the tools are found in the repository's
-`node_modules` (Node resolution walks up), or the real-run tests skip.
+
+- `src/math.test.ts` (Vitest): one test fails on purpose, one is skipped,
+  one is parameterized.
+- `e2e/math.spec.ts` (Playwright): needs no browser; one test fails on
+  purpose.
+- `npm run start` (`src/main.js`) prints a file location and exits;
+  `npm run dev` (`src/serve.js`) runs until stopped.
+
+It has no `node_modules`. Tests that run the real tools copy the project and
+link the repository's `node_modules` into the copy (Vitest and Playwright are
+installed there for the frontend), or skip with a message.
