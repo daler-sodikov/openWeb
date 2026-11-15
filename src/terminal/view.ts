@@ -14,6 +14,7 @@ import {
 import { errorMessage, type IpcResult, unwrap } from "../ipc/result";
 import { type InputItem, InputQueue, routeKey } from "./input";
 import { runStyle, ScreenModel } from "./screen";
+import { copyWhenReady, OrderedCalls } from "./selection";
 
 export interface TerminalHost {
   readonly mac: boolean;
@@ -51,6 +52,8 @@ export class TerminalView {
   private wheelRemainder = 0;
   private composing = false;
   private readonly queue = new InputQueue((item) => this.sendInput(item));
+  /** Selection, scroll and copy calls, kept in order (see selection.ts). */
+  private readonly calls = new OrderedCalls();
   /** Removes the window listeners. */
   private readonly abort = new AbortController();
   private drag: { anchor: TerminalCell; kind: TerminalSelectionKind; moved: boolean } | null = null;
@@ -256,14 +259,16 @@ export class TerminalView {
     };
   }
 
-  private async copy(): Promise<void> {
-    const text = await this.call(commands.terminalSelectionText(this.id));
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch (error: unknown) {
+  /** Copies the selection; call it from the key press itself (WebKit). */
+  private copy(): void {
+    const text = this.calls.run(() => this.call(commands.terminalSelectionText(this.id)));
+    copyWhenReady(text).catch((error: unknown) => {
       this.host.notify(`Copy failed: ${errorMessage(error)}`);
-    }
+    });
+  }
+
+  private select(anchor: TerminalCell, head: TerminalCell, kind: TerminalSelectionKind): void {
+    this.calls.replace(() => this.call(commands.terminalSelect(this.id, anchor, head, kind)));
   }
 
   private async openLinkAt(cell: TerminalCell): Promise<void> {
@@ -311,7 +316,7 @@ export class TerminalView {
           return;
         case "copy":
           event.preventDefault();
-          void this.copy();
+          this.copy();
           return;
         case "newTab":
           event.preventDefault();
@@ -353,9 +358,7 @@ export class TerminalView {
       }
       const kind = SELECTION_KINDS[Math.min(event.detail, 3)] ?? "simple";
       this.drag = { anchor: cell, kind, moved: kind !== "simple" };
-      if (kind !== "simple") {
-        void this.call(commands.terminalSelect(this.id, cell, cell, kind));
-      }
+      if (kind !== "simple") this.select(cell, cell, kind);
     });
     this.element.addEventListener("mousemove", (event) => {
       if (!this.drag) void this.hoverLink(event);
@@ -374,7 +377,7 @@ export class TerminalView {
         const head = this.cellAt(event);
         if (!drag.moved && head.row === drag.anchor.row && head.col === drag.anchor.col) return;
         drag.moved = true;
-        void this.call(commands.terminalSelect(this.id, drag.anchor, head, drag.kind));
+        this.select(drag.anchor, head, drag.kind);
       },
       { signal: this.abort.signal },
     );
@@ -383,7 +386,9 @@ export class TerminalView {
       () => {
         const drag = this.drag;
         this.drag = null;
-        if (drag && !drag.moved) void this.call(commands.terminalClearSelection(this.id));
+        if (drag && !drag.moved) {
+          void this.calls.run(() => this.call(commands.terminalClearSelection(this.id)));
+        }
       },
       { signal: this.abort.signal },
     );
@@ -401,7 +406,8 @@ export class TerminalView {
             ? 0
             : (lines - whole) * (this.cell.height || 16);
         // Wheel up (negative delta) goes back into the scrollback.
-        if (whole !== 0) void this.call(commands.terminalScroll(this.id, -whole));
+        if (whole !== 0)
+          void this.calls.run(() => this.call(commands.terminalScroll(this.id, -whole)));
       },
       { passive: false },
     );
