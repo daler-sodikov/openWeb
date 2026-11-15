@@ -6,10 +6,14 @@ use std::time::Duration;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
-    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
+    JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+    SetInformationJobObject, TerminateJobObject,
 };
+
+/// Most process ids read from a job (diagnostics only).
+const MAX_IDS: usize = 256;
 
 /// A Job Object that kills its processes when its handle closes.
 pub(crate) struct Tree(HANDLE);
@@ -56,6 +60,41 @@ impl Tree {
 
     pub(crate) fn hang_up(&self, _grace: Duration) {
         self.kill();
+    }
+
+    pub(crate) fn process_ids(&self) -> Vec<u32> {
+        // A JOBOBJECT_BASIC_PROCESS_ID_LIST with room for MAX_IDS ids: the
+        // two u32 counts take at most two usizes, then one usize per id. A
+        // Vec<usize> is aligned for the struct, whose fields are u32/usize.
+        let mut buf = vec![0_usize; 2 + MAX_IDS];
+        let Ok(size) = u32::try_from(buf.len() * size_of::<usize>()) else {
+            return Vec::new();
+        };
+        let list = buf.as_mut_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>();
+        // SAFETY: `buf` is a writable buffer of `size` bytes, aligned for
+        // the struct; the returned-length pointer may be null.
+        let ok = unsafe {
+            QueryInformationJobObject(
+                self.0,
+                JobObjectBasicProcessIdList,
+                list.cast(),
+                size,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Vec::new();
+        }
+        // SAFETY: the call succeeded, so the header is initialized and the
+        // first `NumberOfProcessIdsInList` entries of the array (which fit
+        // in `buf`, sized for MAX_IDS) were written.
+        unsafe {
+            let count = ((*list).NumberOfProcessIdsInList as usize).min(MAX_IDS);
+            let ids = std::ptr::addr_of!((*list).ProcessIdList).cast::<usize>();
+            (0..count)
+                .filter_map(|i| u32::try_from(*ids.add(i)).ok())
+                .collect()
+        }
     }
 
     pub(crate) fn is_alive(&self) -> bool {

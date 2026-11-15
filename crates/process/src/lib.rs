@@ -67,6 +67,13 @@ impl ProcessTree {
         self.0.is_alive()
     }
 
+    /// The ids of the tree's running processes, for diagnostics: the job's
+    /// process list on Windows, the process group's members on Linux (from
+    /// `/proc`); empty where the system offers no cheap way (macOS).
+    pub fn process_ids(&self) -> Vec<u32> {
+        self.0.process_ids()
+    }
+
     /// Blocks until no process of the tree runs, at most `timeout`; returns
     /// whether the tree is gone.
     pub fn wait_gone(&self, timeout: Duration) -> bool {
@@ -109,6 +116,19 @@ mod tests {
     fn kill_ends_the_child_and_what_it_started() {
         let (mut child, tree) = spawn_tree("sleep 1000 & sleep 1000");
         assert!(tree.is_alive());
+        if cfg!(target_os = "linux") {
+            // The group leader (the shell, or the sleep it replaced itself
+            // with, under the same pid) and the background sleep, once the
+            // shell has started it.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut ids = tree.process_ids();
+            while ids.len() < 2 && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(20));
+                ids = tree.process_ids();
+            }
+            assert!(ids.contains(&child.id()), "{ids:?}");
+            assert!(ids.len() >= 2, "{ids:?}");
+        }
         tree.kill();
         let _ = child.wait();
         assert!(tree.wait_gone(LONG), "a process of the group survived");
@@ -152,6 +172,9 @@ mod tests {
         let tree = ProcessTree::job(child.as_raw_handle()).unwrap();
         std::thread::sleep(Duration::from_millis(500));
         assert!(tree.is_alive());
+        let ids = tree.process_ids();
+        assert!(ids.contains(&child.id()), "cmd is in the job: {ids:?}");
+        assert!(ids.len() >= 2, "and ping too: {ids:?}");
         tree.kill();
         let _ = child.wait();
         assert!(tree.wait_gone(LONG), "a process of the job survived");

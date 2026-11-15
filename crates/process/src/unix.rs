@@ -53,6 +53,26 @@ impl Tree {
         }
     }
 
+    pub(crate) fn process_ids(&self) -> Vec<u32> {
+        if !cfg!(target_os = "linux") || !self.is_alive() {
+            return Vec::new();
+        }
+        let Ok(entries) = std::fs::read_dir("/proc") else {
+            return Vec::new();
+        };
+        entries
+            .filter_map(|entry| {
+                let pid: u32 = entry.ok()?.file_name().to_str()?.parse().ok()?;
+                let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+                // `pid (comm) state ppid pgrp ...`; comm may contain spaces,
+                // so fields are counted after the last ')'.
+                let rest = &stat[stat.rfind(')')? + 1..];
+                let pgrp: libc::pid_t = rest.split_whitespace().nth(2)?.parse().ok()?;
+                (pgrp == self.group).then_some(pid)
+            })
+            .collect()
+    }
+
     pub(crate) fn is_alive(&self) -> bool {
         if self.ended.load(Ordering::Acquire) {
             return false;
