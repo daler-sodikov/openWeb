@@ -695,6 +695,104 @@ maintainer's fetch everything was compiled and run on Linux:
 | macOS and Windows                                                                              | **not run yet**: CI after the push                            |
 | Alternate screen (`less`, `vim`), 10 000-line scrollback, memory during a long `yes`           | **not tested** (no automated test; check by hand)             |
 
+### 4.10 Run configurations, tests and debugging (M5)
+
+**Who owns what.** Rust owns everything: the configurations, which command
+runs, the processes, their output, the parsing of test reports and the
+test tree. The view draws the run tool window, the configuration popup, the
+test tree and gutter icons, and sends commands. No process, test-parsing or
+debugger logic is in TypeScript.
+
+**Crates.** `run-debug` is pure logic and has no processes: the
+configuration model and its file, detection from `package.json`, building
+the exact command line, reporter parsing (Vitest, Jest, Playwright) and test
+filters. It is unit-tested offline with reporter JSON. `core` starts and
+supervises runs; tree-sitter discovery of test blocks lives in `lang-js`.
+The debugger (M5b) is a new crate, see below.
+
+**Configuration model and storage.** A configuration has an id, a name, a
+kind and options: Node (a file), npm script (a script name), Vitest, Jest
+or Playwright (a scope: everything, a file, or one test), a working
+directory (project-relative), arguments, environment variables and an
+optional package manager. They are stored in the project in
+`.ferrule/run.json` (never `.idea`), versioned (`"version": 1`), sorted, so
+the file can be committed and diffed. Detected configurations (one per
+`package.json` script; one per test framework found in `dependencies` or
+`devDependencies`) are shown next to the stored ones and become stored when
+edited. The package manager comes from `packageManager` in `package.json`,
+else from the lockfile (`bun.lock`/`bun.lockb` bun, `pnpm-lock.yaml` pnpm,
+`yarn.lock` yarn, `package-lock.json` npm), else npm.
+
+**Commands.** npm scripts run as `<pm> run <script>`. Test frameworks and
+Node files run as `node <script>`, where the framework's script is the
+`bin` entry of its `package.json`, found like Node finds packages (walking
+up `node_modules` from the working directory, so hoisted monorepo installs
+work): no `.cmd` shims on Windows, and the same command on every OS. On
+Windows a package manager that is a `.cmd`/`.bat` shim is started through
+`cmd.exe /d /s /c`. Each run gets the reporter flags for a JSON report in
+Ferrule's data folder (Vitest `--reporter=default --reporter=json
+--outputFile.json=<file>`, Jest `--json --outputFile=<file>`, Playwright
+`--reporter=list,json` with `PLAYWRIGHT_JSON_OUTPUT_NAME=<file>`); the
+human-readable output still goes to the run's terminal.
+
+**Safety.** Configurations in a project are data: nothing runs when a
+project opens, and nothing runs until the user has trusted the project. The
+first run in a project shows the exact command line (program, arguments,
+working directory, environment changes) and asks "Trust this project";
+the answer is stored in Ferrule's data folder (per project, never in the
+project itself, so a project cannot trust itself). Configurations changed
+on disk are re-read before every run, and the shown command is the one that
+runs.
+
+**Process lifecycle and cleanup.** A run is a program on a PTY, using the
+M4 terminal session (`ferrule-terminal`): ANSI colors, file links,
+scrollback, selection and copy come with it, and so does the cleanup of
+the whole process tree (`ferrule-process`: process group on Unix, Job
+Object on Windows). Runs live in their own `Terminals` registry in the
+project runtime, with ids that do not overlap the terminals', so the
+terminal commands (scroll, select, link, copy) work on run output. Stop
+ends the tree (SIGHUP then SIGKILL after 2 s on Unix; the job on Windows).
+The M4 Windows rules apply: `close_project` (and replacing a project) waits
+until every run process, the file watcher and every background task that
+uses the project folder as working directory has ended, and reports what
+did not.
+
+**Test results, from reporter to view.** When a test run's process exits,
+core reads its JSON report, parses it in `run-debug` into a test tree
+(file > suites > tests; status passed / failed / skipped; duration; failure
+messages; stack frames with file, line and column) and pushes a
+`run-finished` event with the exit code, the duration and the tree.
+Reporters write their JSON at the end, so while a run is going the tests it
+covers are shown as running (from the gutter's test blocks), not live one
+by one. The latest result of each test is kept per project for the gutter
+until the file's tests change. Re-run failed, run a file or one test become
+a new run with the framework's filter: Vitest and Jest `-t <anchored
+regex of the full name>` plus the file; Playwright `<file>:<line>`.
+
+**Gutter icons.** `lang-js` finds `describe`/`it`/`test` calls (with
+`.only`, `.skip`, `.each`) and their string titles with a tree-sitter
+query, giving each block its full name and line. The gutter shows a run
+icon, replaced by the last status of that test; clicking runs it.
+
+**Debugger (M5b).** Node is debugged through the Chrome DevTools Protocol
+directly: `node --inspect-brk=127.0.0.1:<random port>`, then a WebSocket to
+the inspector. Why not DAP for Node: Node speaks CDP natively; the DAP route
+needs an adapter (js-debug) that is a large download and a second process
+to supervise, while the CDP subset a debugger needs (Debugger._, Runtime._)
+is small. The client goes into a new crate `cdp-client` (the protocol is not
+DAP, so `dap-client` would be a misleading home); the debugger session model
+(breakpoints, frames, variables) is protocol-neutral so a DAP backend can be
+added for other languages. Details are written with M5b.
+
+**IPC (M5a).** Commands: `run_configurations` (stored + detected, with
+the package manager), `save_run_configuration`, `delete_run_configuration`,
+`run_command_line(config)` (what would run), `trust_project`,
+`start_run(config)` → `RunInfo` or `NeedsTrust { command_line }`,
+`stop_run(id)`, `rerun(id)`, `rerun_failed(id)`, `run_test(path, line)`,
+`run_test_file(path)`, `test_blocks(doc)` (gutter, with last statuses),
+`runs()`. Events: `run-started-event`, `run-finished-event` (exit code,
+duration, test tree); output uses the terminal frame events.
+
 ## 5. Editor view layer: CodeMirror 6 as a view only
 
 **Decision: CodeMirror 6 (MIT) is the input and rendering engine. Rust is
@@ -815,7 +913,7 @@ Detailed task lists live in [ROADMAP.md](ROADMAP.md).
 | **M2** Search and navigation   | File/symbol index with on-disk cache, Search Everywhere, Go to File/Symbol/Line, Recent Files, Find/Replace in Files (regex), file watching, Rust indentation.                                                                          | See [ROADMAP.md, M2](ROADMAP.md#m2-search-and-navigation). Breadcrumbs, folding and the rest moved to M2b.                                                                 |
 | **M3** TypeScript intelligence | `lsp-client`, `typescript-language-server` integration, completion, parameter hints, quick docs, go to definition/type/implementation, find usages, rename, diagnostics, Alt+Enter quick fixes, auto-import. In two parts, M3a and M3b. | See [ROADMAP.md, M3](ROADMAP.md#m3-typescript-intelligence).                                                                                                               |
 | **M4** Terminal and Git        | Integrated terminal (PTY), Git status in tree, commit, diff, blame, branches, log.                                                                                                                                                      | A shell runs in the terminal tool window on all three OSes; a change can be committed and its diff and log entry viewed from the UI; Git tests use temporary repositories. |
-| **M5** Run, debug, tests       | Run configurations (Node, npm scripts), Jest/Vitest/Playwright runners with gutter icons, debugger UI over DAP/CDP.                                                                                                                     | An npm script and a Vitest suite run from the gutter; a breakpoint in a Node script stops and shows variables.                                                             |
+| **M5** Run, debug, tests       | Run configurations (Node, npm scripts), Jest/Vitest/Playwright runners with gutter icons, debugger UI over CDP (Node). In two parts, M5a and M5b.                                                                                       | See [ROADMAP.md, M5](ROADMAP.md#m5-run-debug-tests).                                                                                                                       |
 
 The rest of the feature scope in `CLAUDE.md` (HTTP client, local history,
 frameworks, settings UI, themes, plugins, auto-update, i18n) follows M5 and

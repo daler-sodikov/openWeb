@@ -570,9 +570,76 @@ run yet.
 
 ## M5: Run, debug, tests
 
-- [ ] `run-debug`: run configurations (Node, npm scripts)
-- [ ] Test runners (Jest, Vitest, Playwright) with gutter icons
-- [ ] `dap-client` + CDP: debugger UI (breakpoints, stepping, variables)
+Design: [ARCHITECTURE.md, 4.10](ARCHITECTURE.md#410-run-configurations-tests-and-debugging-m5).
+Functional UI only (M6 does the visuals); new panels go into the bottom
+tool window. In two parts; M5b starts after the maintainer says "continue
+with M5b". Work happens on the `m5a` branch until CI on `main` is green.
+
+### M5a: Run configurations and test runner
+
+**Done when:**
+
+1. **Configurations.** Node file, npm script, Vitest, Jest and Playwright
+   configurations are stored in `.ferrule/run.json` (versioned, sorted) and
+   edited in the UI: name, kind, file/script/scope, working directory,
+   arguments, environment variables, package manager.
+2. **Detection.** One configuration per `package.json` script and per test
+   framework found in the dependencies is offered; the package manager
+   comes from `packageManager`, else the lockfile, and the npm-script
+   command uses it (`bun run`, `pnpm run`, `yarn run`, `npm run`).
+3. **Run popup and keys.** A popup lists stored and detected
+   configurations; Run (Shift+F10, macOS Ctrl+R), Run Current File
+   (Ctrl+Shift+F10, macOS Ctrl+Shift+R), Stop (Ctrl+F2, macOS Cmd+F2),
+   Rerun (Ctrl+F5, macOS Cmd+R), the popup (Alt+Shift+F10, macOS Ctrl+Alt+R).
+4. **Run tool window.** One tab per run; output with ANSI colors, scrollback,
+   selection and clickable `file:line:col` links (the M4 terminal emulator);
+   running / exit code and duration; Stop and Rerun buttons.
+5. **Trust.** Nothing runs on open. The first run in a project shows the
+   exact command line and asks "Trust this project"; the answer is stored
+   per project in Ferrule's data folder; configurations are re-read before
+   every run.
+6. **Cleanup.** Stop, closing a tab, closing or replacing the project and
+   quitting end the whole process tree (process group / Job Object);
+   `close_project` waits for run processes; a test proves no process
+   survives, on every OS in CI, with programs started directly (no shell).
+7. **Test runner.** Vitest, Jest and Playwright run with their JSON
+   reporter; the results become a tree (file > suites > tests) with status,
+   duration, failure messages and stack frames with clickable locations;
+   re-run failed, run one test or one file, filter by status, a summary bar.
+8. **Gutter.** Run icons next to `describe`/`it`/`test` blocks (tree-sitter,
+   in Rust); clicking runs that test; the icon shows its last status.
+9. **Tests.** Parsers tested offline with reporter JSON for each framework
+   (recorded from the real tool where it is installed: Vitest and
+   Playwright; Jest written from its documented format, labeled as such);
+   command building and detection unit-tested; cleanup tests on every OS;
+   UI tests against a fixture project with an in-memory runner (test-only);
+   real runs against the fixture where the tools can be found, else skipped
+   with a message; all checks pass with zero warnings.
+
+### M5b: Node debugger (after M5a)
+
+**Done when:**
+
+1. **Protocol.** A Chrome DevTools Protocol client (new crate `cdp-client`)
+   over a WebSocket to `node --inspect-brk=127.0.0.1:<random port>`; no
+   external debug adapter; a protocol-neutral session model leaves room
+   for DAP.
+2. **Breakpoints.** Toggle in the gutter (click, Ctrl+F8), conditional and
+   log-point breakpoints, persisted per project, verified/unverified state;
+   TypeScript source maps resolved so breakpoints in `.ts` files hit.
+3. **Stepping.** Debug (Shift+F9), Resume (F9), Step Over (F8), Step Into
+   (F7), Step Out (Shift+F8), Pause, Stop.
+4. **Debug tool window.** Call stack (click to select a frame and jump),
+   variables with lazy expansion, watches, a console with evaluate; the
+   execution line highlighted in the editor; inline values if cheap.
+5. **Tests from the gutter.** Debug a single test.
+6. **Safety and cleanup.** Inspector on 127.0.0.1 only, random port; no
+   debuggee left running; `close_project` ends debug sessions.
+7. **Tests.** Client against a scripted fake CDP server (offline); real
+   Node tests when available (breakpoint hit, step, variables, stop); UI
+   tests with a fake backend.
+
+Follow-ups, not M5: browser (Chrome) debugging, DAP for other languages.
 
 ## M6: UI design (not started)
 
