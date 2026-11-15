@@ -414,6 +414,9 @@ impl Session {
             )
         };
         if let Some(old) = previous_runtime {
+            // Nothing of the old project's Git state may reach the view
+            // after this (the new project's discovery starts below).
+            old.git.retire();
             // The same shutdown as close_project, in the background so the
             // new project opens at once.
             tokio::spawn(async move {
@@ -473,6 +476,9 @@ impl Session {
             )
         };
         self.flush_closed(docs).await;
+        if let Some(runtime) = &runtime {
+            runtime.git.retire();
+        }
         let still_running = match runtime {
             Some(runtime) => runtime.shut_down().await,
             None => Vec::new(),

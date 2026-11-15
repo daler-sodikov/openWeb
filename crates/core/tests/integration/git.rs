@@ -422,3 +422,81 @@ async fn closing_waits_for_git_started_with_the_project() {
     );
     crate::cleanup::remove_project_dir(&repo, &report.still_running);
 }
+
+/// A repository at `dir/name` on branch `branch`, with one commit.
+fn make_branch_repo(dir: &Path, name: &str, branch: &str) -> std::path::PathBuf {
+    let root = dir.join(name);
+    fs::create_dir_all(&root).unwrap();
+    git(&root, &["init", "-q", "-b", branch]);
+    git(&root, &["config", "user.name", "Test User"]);
+    git(&root, &["config", "user.email", "test@example.com"]);
+    git(&root, &["config", "commit.gpgsign", "false"]);
+    write(&root, "a.ts", "a\n");
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-q", "-m", "Initial commit"]);
+    root
+}
+
+/// Switching projects (as each UI test does on a shared backend): right
+/// after `open_project` the view asks for the status and listens for
+/// events, in no guaranteed order. The answer must be the new project's
+/// real status (not the "looking" placeholder, which would stick if the
+/// discovery event were lost or overtaken it), no event of the old
+/// project may follow, and generations only grow, so the view can always
+/// keep the newest. CI once left the view without any Git state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn switching_projects_always_ends_with_the_new_git_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = make_branch_repo(dir.path(), "a", "other");
+    let b = make_branch_repo(dir.path(), "b", "main");
+    let events = Arc::new(Events::default());
+    let s =
+        Session::with_config(SessionConfig::new(dir.path().join("data")), events.clone()).unwrap();
+    for round in 0..50 {
+        s.open_project(a.to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        if round % 2 == 0 {
+            wait_status(&s, "of A", |st| st.branch.as_deref() == Some("other")).await;
+        }
+        let before = events.0.lock().unwrap().len();
+        s.open_project(b.to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        let answer = s.git_status().await.unwrap();
+        assert_eq!(
+            answer.branch.as_deref(),
+            Some("main"),
+            "round {round}: the view's first question got {answer:?}"
+        );
+        wait_status(&s, "of B", |st| st.branch.as_deref() == Some("main")).await;
+        // Give a late event of A time to arrive.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let after: Vec<GitStatus> = events.0.lock().unwrap()[before..]
+            .iter()
+            .filter_map(|e| match e {
+                SessionEvent::GitStatus(st) => Some(st.clone()),
+                _ => None,
+            })
+            .collect();
+        for st in &after {
+            assert_ne!(
+                st.branch.as_deref(),
+                Some("other"),
+                "round {round}: an event of the old project after the switch: {after:?}"
+            );
+        }
+        let generations: Vec<u32> = after.iter().map(|st| st.generation).collect();
+        assert!(
+            generations.windows(2).all(|w| w[0] < w[1]),
+            "round {round}: generations {generations:?}"
+        );
+        assert!(
+            after.iter().all(|st| st.generation <= answer.generation)
+                || after
+                    .last()
+                    .is_some_and(|st| st.generation >= answer.generation),
+            "round {round}"
+        );
+    }
+}
