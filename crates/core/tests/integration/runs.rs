@@ -489,6 +489,11 @@ async fn stopping_keeps_the_output_and_closing_the_project_ends_runs() {
     )
     .await;
 
+    // Quitting the app ends running programs too.
+    s.shutdown_terminals();
+    let quit = wait_finished(&events, again.id, Duration::from_secs(10)).await;
+    assert_eq!(quit.exit_code, None);
+
     s.close_run(run.id).await.unwrap();
     assert!(!s.runs().await.unwrap().iter().any(|r| r.id == run.id));
 

@@ -337,6 +337,8 @@ impl Session {
     pub fn shutdown_terminals(&self) {
         if let Ok(runtime) = self.runtime() {
             runtime.terminals.close_all();
+            // Runs are PTY sessions too (their own registry).
+            runtime.runs.terminals.close_all();
         }
     }
 }

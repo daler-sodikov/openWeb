@@ -1190,7 +1190,7 @@ pub fn run() -> anyhow::Result<()> {
     .build(tauri::generate_context!())?
     .run(|app, event| {
         if let tauri::RunEvent::Exit = event {
-            // Shells and their children end with the app.
+            // Shells, runs and their children end with the app.
             if let Some(session) = app.try_state::<Arc<Session>>() {
                 session.shutdown_terminals();
             }
