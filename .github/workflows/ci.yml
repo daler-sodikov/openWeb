@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # Check and cargo-deny run on every branch push and pull request; the
+  # Bundle jobs only on main and release tags (see `bundle.if`).
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["v*"]
   pull_request:
 
@@ -108,7 +110,7 @@ jobs:
   bundle:
     name: Bundle (${{ matrix.os }})
     needs: [check, deny]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     strategy:
       fail-fast: false
       matrix:
