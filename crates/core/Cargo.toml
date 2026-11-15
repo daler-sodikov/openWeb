@@ -37,6 +37,10 @@ tracing.workspace = true
 thiserror.workspace = true
 pulldown-cmark.workspace = true
 
+# Test diagnostics only (Restart Manager, see tests/integration/cleanup.rs).
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_RestartManager"] }
+
 [dev-dependencies]
 ferrule-terminal = { workspace = true, features = ["testing"] }
 tempfile.workspace = true

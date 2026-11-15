@@ -529,4 +529,8 @@ async fn closing_the_project_stops_its_language_server() {
     let reopened = f.session.open_document("a.ts".into()).await.unwrap();
     assert!(reopened.restored);
     assert_eq!(reopened.text, "// x\nlet a = 1;\n");
+    // With the server running again, closing leaves nothing in the folder.
+    ready(&f).await;
+    let report = f.session.close_project().await.unwrap();
+    crate::cleanup::remove_project_dir(&f.root, &report.still_running);
 }

@@ -4,6 +4,7 @@
 //! are slow and timing-sensitive, and would otherwise run in parallel with
 //! everything here.
 
+mod cleanup;
 mod git;
 mod lsp_fake;
 mod m2;
