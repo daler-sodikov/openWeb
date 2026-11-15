@@ -9,6 +9,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::config::TestRef;
+use crate::paths;
 
 /// A test's (or a group's) outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,7 +36,7 @@ pub enum NodeKind {
 /// A stack frame of a failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StackFrame {
-    /// The file, as the reporter wrote it (absolute; `file://` removed).
+    /// The file, absolute, with `/` separators (see [`crate::paths`]).
     pub file: String,
     /// One-based line.
     pub line: u32,
@@ -66,7 +67,7 @@ pub struct TestNode {
     pub status: TestStatus,
     /// Milliseconds, if reported.
     pub duration_ms: Option<f64>,
-    /// The file it is in (absolute).
+    /// The file it is in (absolute, with `/` separators).
     pub file: String,
     /// One-based line, if reported.
     pub line: Option<u32>,
@@ -137,18 +138,16 @@ impl TestReport {
 }
 
 fn relative(file: &str, cwd: &Path) -> String {
-    Path::new(file).strip_prefix(cwd).map_or_else(
-        |_| file.to_owned(),
-        |p| p.to_string_lossy().replace('\\', "/"),
-    )
+    paths::relative_to(file, cwd).unwrap_or_else(|| paths::normalize(file))
 }
 
 static ANSI: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"\x1b\[[0-9;?]*[ -/]*[@-~]").ok());
 
-// `at fn (path:line:col)`, `at path:line:col`, with optional `file://`.
+// `at fn (path:line:col)`, `at path:line:col`; the path may be a
+// `file://` URL, Unix (`/x`), Windows (`C:\x`, `C:/x`) or UNC (`\\s\x`).
 static FRAME: LazyLock<Option<Regex>> = LazyLock::new(|| {
-    Regex::new(r"^\s*at (?:.*? \()?(?:file://)?((?:[A-Za-z]:)?[^():]+):(\d+):(\d+)\)?\s*$").ok()
+    Regex::new(r"^\s*at (?:.*? \()?((?:file://)?/?(?:[A-Za-z]:)?[^():]+):(\d+):(\d+)\)?\s*$").ok()
 });
 
 fn strip_ansi(text: &str) -> String {
@@ -168,7 +167,7 @@ fn failure(message: &str, stack: Option<&str>) -> Failure {
         .filter_map(|line| {
             let caps = FRAME.as_ref()?.captures(line)?;
             Some(StackFrame {
-                file: caps.get(1)?.as_str().to_owned(),
+                file: paths::normalize(caps.get(1)?.as_str()),
                 line: caps.get(2)?.as_str().parse().ok()?,
                 column: caps.get(3)?.as_str().parse().ok()?,
             })
@@ -263,7 +262,7 @@ pub fn parse_jest_report(json: &str) -> Result<TestReport, String> {
         .ok_or("no testResults in the report")?;
     let mut files = Vec::new();
     for result in results {
-        let path = str_of(result, "name");
+        let path = &paths::normalize(str_of(result, "name"));
         let mut file = group(NodeKind::File, path, Vec::new(), path);
         let message = str_of(result, "message");
         let assertions = result
@@ -330,18 +329,19 @@ pub fn parse_jest_report(json: &str) -> Result<TestReport, String> {
 /// are relative to `config.rootDir` (the test directory).
 pub fn parse_playwright_report(json: &str) -> Result<TestReport, String> {
     let root: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let root_dir = root
-        .get("config")
-        .map(|c| str_of(c, "rootDir"))
-        .unwrap_or_default();
+    // Data from the tool's OS: joined as strings, never with the host's
+    // Path (which would insert `\` on Windows into a Linux report).
+    let root_dir = paths::normalize(
+        root.get("config")
+            .map(|c| str_of(c, "rootDir"))
+            .unwrap_or_default(),
+    );
     let absolute = |file: &str| {
-        if root_dir.is_empty() || Path::new(file).is_absolute() {
-            file.to_owned()
+        let file = paths::normalize(file);
+        if root_dir.is_empty() || paths::is_absolute(&file) {
+            file
         } else {
-            Path::new(root_dir)
-                .join(file)
-                .to_string_lossy()
-                .into_owned()
+            paths::join(&root_dir, &file)
         }
     };
     let suites = root
@@ -615,6 +615,75 @@ mod tests {
                 line: Some(8)
             }]
         );
+    }
+
+    /// Reports written on Windows parse the same on every host: native
+    /// file names with drive letters, stack frames with `\`, `file://`
+    /// URLs and UNC paths (the Linux CI would have caught the Windows
+    /// separator bug with this).
+    #[test]
+    fn windows_reports_parse_on_every_os() {
+        let jest = serde_json::json!({
+            "testResults": [{
+                "name": r"C:\work\p\src\a.test.ts",
+                "message": "",
+                "assertionResults": [{
+                    "ancestorTitles": ["math"],
+                    "title": "divides",
+                    "status": "failed",
+                    "failureMessages": [concat!(
+                        "Error: expected 1\n",
+                        r"    at Object.<anonymous> (C:\work\p\src\a.test.ts:12:26)", "\n",
+                        "    at file:///C:/work/p/node_modules/vitest/dist/run.js:5:7\n",
+                        r"    at \\server\share\lib\x.js:3:4",
+                    )],
+                }],
+            }],
+        });
+        let report = parse_jest_report(&jest.to_string()).unwrap();
+        let file = &report.files[0];
+        assert_eq!(file.file, "C:/work/p/src/a.test.ts");
+        let frames: Vec<(&str, u32, u32)> = file.children[0].children[0].failures[0]
+            .frames
+            .iter()
+            .map(|f| (f.file.as_str(), f.line, f.column))
+            .collect();
+        assert_eq!(
+            frames,
+            [
+                ("C:/work/p/src/a.test.ts", 12, 26),
+                ("C:/work/p/node_modules/vitest/dist/run.js", 5, 7),
+                ("//server/share/lib/x.js", 3, 4),
+            ]
+        );
+        // The project folder as Windows prints it; the drive letter's case
+        // may differ from the report's.
+        let failed = report.failed_tests(Path::new(r"c:\work\p"));
+        assert_eq!(failed[0].file, "src/a.test.ts");
+
+        let playwright = serde_json::json!({
+            "config": { "rootDir": "C:/work/p/e2e" },
+            "suites": [{
+                "title": r"sub\math.spec.ts",
+                "file": "sub/math.spec.ts",
+                "specs": [{
+                    "title": "fails",
+                    "line": 3,
+                    "tests": [{ "results": [{
+                        "status": "failed",
+                        "errors": [{
+                            "message": "Error: no",
+                            "stack": r"Error: no
+        at C:\work\p\e2e\sub\math.spec.ts:4:9",
+                        }],
+                    }], "status": "unexpected" }],
+                }],
+            }],
+        });
+        let report = parse_playwright_report(&playwright.to_string()).unwrap();
+        assert_eq!(report.files[0].file, "C:/work/p/e2e/sub/math.spec.ts");
+        let failed = report.failed_tests(Path::new(r"C:\work\p"));
+        assert_eq!(failed[0].file, "e2e/sub/math.spec.ts");
     }
 
     #[test]
