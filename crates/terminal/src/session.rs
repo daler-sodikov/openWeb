@@ -316,6 +316,13 @@ impl Terminal {
         self.shared.process.process_ids()
     }
 
+    /// Ends the program and everything it started, but keeps the terminal:
+    /// its last output stays readable and the exit is reported as usual.
+    /// Does not wait.
+    pub fn stop(&self) {
+        self.shared.process.terminate();
+    }
+
     /// Ends the shell and everything it started, and stops the threads.
     /// Does not wait for them.
     pub fn close(&self) {
@@ -484,11 +491,22 @@ impl Terminals {
         options: TerminalOptions,
         sink: EventSink,
     ) -> Self {
+        Self::with_first_id(backend, options, sink, 1)
+    }
+
+    /// Like [`Terminals::new`], numbering terminals from `first_id` (so two
+    /// sets can share one id space, e.g. shells and runs).
+    pub fn with_first_id(
+        backend: Option<Arc<dyn Backend>>,
+        options: TerminalOptions,
+        sink: EventSink,
+        first_id: u32,
+    ) -> Self {
         Self {
             backend,
             options,
             sink,
-            next_id: AtomicU32::new(1),
+            next_id: AtomicU32::new(first_id),
             open: Mutex::new(Vec::new()),
         }
     }
@@ -776,6 +794,28 @@ mod tests {
         assert_eq!(terminals.list().len(), 1);
         terminals.close_all();
         assert!(terminals.list().is_empty());
+    }
+
+    #[test]
+    fn stop_ends_the_process_and_keeps_the_terminal() {
+        let backend: Arc<dyn Backend> = Arc::new(FakeBackend::default());
+        let (sink, rx) = channel_sink();
+        let terminals = Terminals::with_first_id(Some(backend), options(), sink, 500);
+        let info = terminals.open(&spec(), TermSize::new(20, 4)).unwrap();
+        assert_eq!(info.id, 500);
+        let terminal = terminals.get(500).unwrap();
+        terminal.stop();
+        let exited = rx
+            .iter()
+            .find_map(|e| match e {
+                TerminalEvent::Exited { id, .. } => Some(id),
+                TerminalEvent::Frame(_) => None,
+            })
+            .unwrap();
+        assert_eq!(exited, 500);
+        assert!(terminals.get(500).is_ok(), "still listed after stopping");
+        // The exit is recorded before the event is sent.
+        assert!(terminal.exited().is_some());
     }
 
     #[test]
