@@ -242,7 +242,7 @@ fn find_bin(start: &Path, package: &str, bin: &str) -> Result<PathBuf, CommandEr
             _ => None,
         };
         return entry
-            .map(|path| package_dir.join(path))
+            .map(|path| crate::paths::join_native(&package_dir, path))
             .ok_or_else(|| CommandError::NoBin {
                 package: package.into(),
                 bin: bin.into(),
@@ -460,11 +460,13 @@ mod tests {
         let line = command_line(&c, dir.path(), Some(report), &tools).unwrap();
         assert_eq!(line.program, PathBuf::from("/usr/bin/node"));
         assert_eq!(line.cwd, dir.path().join("app"));
+        // The bin entry is "./vitest.mjs": joined per component, no "./".
         assert_eq!(
-            line.args[0],
+            Path::new(&line.args[0]),
             dir.path()
-                .join("node_modules/vitest/./vitest.mjs")
-                .to_string_lossy()
+                .join("node_modules")
+                .join("vitest")
+                .join("vitest.mjs")
         );
         assert_eq!(
             &line.args[1..],
@@ -483,7 +485,8 @@ mod tests {
             *framework = TestFramework::Jest;
         }
         let line = command_line(&c, dir.path(), Some(report), &tools).unwrap();
-        assert!(line.args[0].ends_with("bin/jest.js"));
+        // Path::ends_with compares components, so this holds on every OS.
+        assert!(Path::new(&line.args[0]).ends_with(Path::new("bin").join("jest.js")));
         assert_eq!(
             &line.args[1..4],
             ["--runTestsByPath", "src/math.test.ts", "-t"]
@@ -494,7 +497,7 @@ mod tests {
             *framework = TestFramework::Playwright;
         }
         let line = command_line(&c, dir.path(), Some(report), &tools).unwrap();
-        assert!(line.args[0].ends_with("cli.js"));
+        assert!(Path::new(&line.args[0]).ends_with("cli.js"));
         assert_eq!(
             &line.args[1..],
             ["test", "src/math.test.ts:4", "--reporter=list,json"]
