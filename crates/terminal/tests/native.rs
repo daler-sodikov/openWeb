@@ -16,7 +16,7 @@
 //! typed-ahead input itself and echoes it after its prompt.
 
 #![cfg(feature = "native")]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -271,6 +271,45 @@ fn a_flood_is_batched_into_few_frames() {
     t.close();
 }
 
+/// One `ps` field of a process (`None` if it is gone or `ps` failed).
+#[cfg(unix)]
+fn ps_field(pid: u32, field: &str) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .args(["-o", &format!("{field}="), "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    (!text.is_empty()).then_some(text)
+}
+
+/// What `ps` says about `pid` and the members of process group `group`.
+#[cfg(unix)]
+fn ps_report(pid: u32, group: u32) -> String {
+    let run = |args: &[&str]| {
+        std::process::Command::new("ps")
+            .args(args)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_else(|e| format!("(ps failed: {e})"))
+    };
+    let one = run(&[
+        "-o",
+        "pid,ppid,pgid,sess,stat,command",
+        "-p",
+        &pid.to_string(),
+    ]);
+    let all = run(&["-axo", "pid,ppid,pgid,stat,command"]);
+    let members: Vec<&str> = all
+        .lines()
+        .filter(|l| l.split_whitespace().nth(2) == Some(group.to_string().as_str()))
+        .collect();
+    format!(
+        "ps -p {pid}:\n{one}\nmembers of group {group}:\n{}",
+        members.join("\n")
+    )
+}
+
+#[cfg(unix)]
 #[test]
 fn close_all_and_wait_returns_after_the_programs_ended() {
     let dir = tempfile::tempdir().unwrap();
@@ -280,25 +319,70 @@ fn close_all_and_wait_returns_after_the_programs_ended() {
         TerminalOptions::default(),
         Arc::new(|_| {}),
     );
-    let script = format!(r#"sleep 1000 & echo "$!" > '{}'; wait"#, pidfile.display());
-    if cfg!(windows) {
-        // The Windows path is covered by closing_ends_the_running_program.
-        return;
-    }
+    // The shell's pid (its process group and session: portable-pty calls
+    // setsid) and the background child's pid.
+    let script = format!(
+        r#"sleep 1000 & echo "$$ $!" > '{}'; wait"#,
+        pidfile.display()
+    );
     terminals.open(&program(dir.path(), &script), SIZE).unwrap();
     let deadline = Instant::now() + Duration::from_secs(20);
-    let pid = loop {
-        if let Some(pid) = std::fs::read_to_string(&pidfile)
-            .ok()
-            .and_then(|t| t.trim().parse::<u32>().ok())
-        {
-            break pid;
+    let (shell, pid) = loop {
+        let ids: Vec<u32> = std::fs::read_to_string(&pidfile)
+            .unwrap_or_default()
+            .split_whitespace()
+            .filter_map(|n| n.parse().ok())
+            .collect();
+        if let [shell, pid] = ids[..] {
+            break (shell, pid);
         }
-        assert!(Instant::now() < deadline, "no pid written");
+        assert!(Instant::now() < deadline, "no pids written");
         std::thread::sleep(Duration::from_millis(50));
     };
     assert!(alive(pid));
+    // The child is in the shell's group (no job control in `sh -c`), and
+    // that group is not ours: killing it cannot hit the test process.
+    let group = ps_field(pid, "pgid");
+    assert_eq!(
+        group.as_deref(),
+        Some(shell.to_string().as_str()),
+        "{}",
+        ps_report(pid, shell)
+    );
+    // SAFETY: getpgrp only returns the caller's process group id.
+    let own = unsafe { libc::getpgrp() };
+    assert_ne!(
+        i64::from(own),
+        i64::from(shell),
+        "the shell has its own group"
+    );
+
     let left = terminals.close_all_and_wait(Duration::from_secs(10));
     assert!(left.is_empty(), "terminals still running: {left:?}");
-    assert!(!alive(pid), "the background child survived");
+    // Ended now. A child whose parent died before it is reparented (to
+    // launchd on macOS) and can stay a zombie until that parent reaps it;
+    // kill(pid, 0) still succeeds on a zombie. So poll briefly: gone or a
+    // zombie both mean it ended; a sleeping or running process did not.
+    let closed = Instant::now();
+    let mut polls = 0u32;
+    let state = loop {
+        polls += 1;
+        let state = ps_field(pid, "stat");
+        let ended = state.as_deref().is_none_or(|s| s.starts_with('Z'));
+        if ended || closed.elapsed() > Duration::from_secs(2) {
+            break state;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let ended = state.as_deref().is_none_or(|s| s.starts_with('Z'));
+    eprintln!(
+        "background child {pid} after close_all_and_wait: {} after {polls} poll(s), {:?}",
+        state.as_deref().unwrap_or("gone"),
+        closed.elapsed()
+    );
+    assert!(
+        ended,
+        "the background child survived (state {state:?})\n{}",
+        ps_report(pid, shell)
+    );
 }
