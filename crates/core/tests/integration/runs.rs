@@ -413,11 +413,30 @@ async fn test_results_fill_the_tree_and_the_gutter() {
         RunKind::Test { scope, .. } => assert_eq!(scope.files, ["src/math.test.ts"]),
         other => panic!("{other:?}"),
     }
-    let err = s
-        .rerun_tests(run.id, vec![target("../elsewhere.test.ts", &[])], SIZE)
-        .await
-        .unwrap_err();
-    assert_eq!(err.kind, IpcErrorKind::InvalidArgument);
+    // Outside the project in any OS's spelling: refused on every host.
+    for outside in [
+        "../elsewhere.test.ts",
+        r"..\elsewhere.test.ts",
+        r"C:\elsewhere.test.ts",
+        "/etc/elsewhere.test.ts",
+        r"\\server\share\a.test.ts",
+    ] {
+        let err = s
+            .rerun_tests(run.id, vec![target(outside, &[])], SIZE)
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, IpcErrorKind::InvalidArgument, "{outside}");
+    }
+    // A Windows-style separator from the view is the same file.
+    let backslash = started(
+        s.rerun_tests(run.id, vec![target(r"src\math.test.ts", &[])], SIZE)
+            .await
+            .unwrap(),
+    );
+    match &backslash.config.kind {
+        RunKind::Test { scope, .. } => assert_eq!(scope.files, ["src/math.test.ts"]),
+        other => panic!("{other:?}"),
+    }
 
     // The "adds" test (zero-based line 5) alone.
     let one = started(s.run_at(doc, Some(5), SIZE).await.unwrap());

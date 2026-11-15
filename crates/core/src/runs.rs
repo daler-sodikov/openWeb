@@ -41,8 +41,9 @@ struct State {
     entries: HashMap<u32, Entry>,
     /// Exits reported before the run was registered (a very short program).
     early_exits: HashMap<u32, (Option<i32>, Instant)>,
-    /// Last status of each test: absolute file → full name → status.
-    results: HashMap<PathBuf, HashMap<Vec<String>, TestStatus>>,
+    /// Last status of each test: project-relative file (`/`) → full name →
+    /// status.
+    results: HashMap<String, HashMap<Vec<String>, TestStatus>>,
 }
 
 /// The project's runs.
@@ -162,7 +163,7 @@ impl Runs {
         };
         if let Ok(mut state) = self.state.lock() {
             if let Some(report) = &tests {
-                record_results(&mut state.results, report);
+                record_results(&mut state.results, report, &self.root);
             }
             if let Some(entry) = state.entries.get_mut(&id) {
                 entry.tests = tests;
@@ -186,15 +187,13 @@ impl Runs {
         }
     }
 
+    /// A report path (data from the tool, `/` separators) for the view:
+    /// project-relative when inside the project.
     fn location(&self, file: &str, line: u32, column: u32) -> ipc::TestLocation {
-        let path = Path::new(file);
-        let relative = path
-            .strip_prefix(&self.root)
-            .ok()
-            .map(|p| p.to_string_lossy().replace('\\', "/"));
+        let relative = rd::paths::relative_to(file, &self.root);
         ipc::TestLocation {
             in_project: relative.is_some(),
-            path: relative.unwrap_or_else(|| file.to_owned()),
+            path: relative.unwrap_or_else(|| rd::paths::normalize(file)),
             line,
             column,
         }
@@ -274,8 +273,9 @@ fn fill_lines(report: &mut TestReport) {
 }
 
 fn record_results(
-    results: &mut HashMap<PathBuf, HashMap<Vec<String>, TestStatus>>,
+    results: &mut HashMap<String, HashMap<Vec<String>, TestStatus>>,
     report: &TestReport,
+    root: &Path,
 ) {
     fn walk(node: &TestNode, out: &mut HashMap<Vec<String>, TestStatus>) {
         if node.kind == NodeKind::Test {
@@ -286,8 +286,10 @@ fn record_results(
         }
     }
     for file in &report.files {
-        let entry = results.entry(PathBuf::from(&file.file)).or_default();
-        walk(file, entry);
+        // Files outside the project have no gutter.
+        if let Some(rel) = rd::paths::relative_to(&file.file, root) {
+            walk(file, results.entry(rel).or_default());
+        }
     }
 }
 
@@ -656,16 +658,27 @@ impl Session {
         let root = self.runtime()?.project.root().to_path_buf();
         let runs = self.project_runs()?;
         let cwd = known(&*lock(&runs.state)?, id)?.cwd.clone();
+        // The run's folder relative to the project ("" for the root).
+        let cwd_rel = if rd::paths::normalize(&cwd.to_string_lossy()).trim_end_matches('/')
+            == rd::paths::normalize(&root.to_string_lossy()).trim_end_matches('/')
+        {
+            Some(String::new())
+        } else {
+            rd::paths::relative_to(&cwd.to_string_lossy(), &root)
+        };
         let mut refs = Vec::new();
         for test in tests {
-            let plain = Path::new(&test.path)
-                .components()
-                .all(|c| matches!(c, std::path::Component::Normal(_)));
-            let full = plain.then(|| root.join(&test.path));
-            let file = full
-                .as_deref()
-                .and_then(|p| p.strip_prefix(&cwd).ok())
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
+            // Project-relative, never absolute or `..` (as strings: the
+            // view's paths use `/` whatever the OS).
+            let file = rd::paths::safe_relative(&test.path)
+                .zip(cwd_rel.as_deref())
+                .and_then(|(rel, dir)| {
+                    if dir.is_empty() {
+                        Some(rel)
+                    } else {
+                        rel.strip_prefix(dir)?.strip_prefix('/').map(str::to_owned)
+                    }
+                })
                 .ok_or_else(|| {
                     IpcError::new(
                         IpcErrorKind::InvalidArgument,
@@ -814,7 +827,7 @@ impl Session {
                 Some(Some(files)) => files.iter().any(|f| f == &path),
                 None => false,
             });
-            let results = state.results.get(&path);
+            let results = state.results.get(&rd::paths::normalize(&rel));
             let blocks = test_blocks(&path, &text)
                 .into_iter()
                 .map(|b| ipc::TestBlock {
