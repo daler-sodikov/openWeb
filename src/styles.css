@@ -1512,3 +1512,222 @@ input:-webkit-autofill {
 .vlist-row.selected .commit-letter {
   color: var(--fr-text);
 }
+
+/* Runs and tests (M5a). Functional only; M6 does the visual design. */
+.run-toolbar-main {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.run-toolbar-main .toolbar-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.run-panels {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+}
+.run-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.run-panel[hidden],
+.run-tests[hidden],
+.run-filters[hidden],
+.run-summary[hidden] {
+  display: none;
+}
+.run-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+}
+.run-action,
+.popup-button {
+  padding: 1px 8px;
+  border: 1px solid var(--fr-border);
+  border-radius: 3px;
+  background: var(--fr-surface-2);
+  color: var(--fr-text);
+  font: inherit;
+  cursor: pointer;
+}
+.run-action:disabled,
+.popup-button:disabled,
+.run-frame:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.run-action[aria-pressed="false"] {
+  color: var(--fr-text-muted);
+  text-decoration: line-through;
+}
+.run-filters {
+  display: flex;
+  gap: 2px;
+  margin-left: 8px;
+}
+.run-status {
+  margin-left: auto;
+  color: var(--fr-text-muted);
+}
+.run-command {
+  padding: 0 8px;
+  overflow: hidden;
+  color: var(--fr-text-muted);
+  font-family: var(--fr-font-code);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.run-summary {
+  padding: 2px 8px;
+}
+.run-summary[data-state="failed"],
+.run-status[data-state="failed"],
+.run-tab[data-state="failed"] .run-tab-status,
+.test-failed .run-test-status,
+.run-details-title.test-failed,
+.test-marker.test-failed {
+  color: var(--fr-danger);
+}
+.run-summary[data-state="ok"],
+.run-status[data-state="ok"],
+.run-tab[data-state="ok"] .run-tab-status,
+.test-passed .run-test-status,
+.run-details-title.test-passed,
+.test-marker.test-passed {
+  color: var(--fr-git-added);
+}
+.test-skipped .run-test-status,
+.test-marker.test-skipped {
+  color: var(--fr-text-muted);
+}
+.test-marker.test-running {
+  color: var(--fr-info);
+}
+.run-body {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+}
+.run-tests-panel .run-body {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+}
+.run-tests {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--fr-border);
+}
+.run-tests .vlist {
+  max-height: none;
+  min-height: 0;
+}
+.run-test-row {
+  padding-left: calc(var(--depth, 0) * 1.2em + 4px);
+  white-space: nowrap;
+}
+.run-test-row.current {
+  background: var(--fr-selection-inactive);
+}
+.run-test-toggle {
+  width: 1em;
+  cursor: pointer;
+}
+.run-test-duration {
+  margin-left: auto;
+  padding-right: 8px;
+  color: var(--fr-text-muted);
+}
+.run-details {
+  max-height: 45%;
+  overflow: auto;
+  border-top: 1px solid var(--fr-border);
+}
+.run-details:empty {
+  display: none;
+}
+.run-details-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+}
+.run-details-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-failure {
+  margin: 0;
+  padding: 4px 8px;
+  font-family: var(--fr-font-code);
+  white-space: pre-wrap;
+}
+.run-frame {
+  display: block;
+  padding: 0 8px 0 24px;
+  border: none;
+  background: none;
+  color: var(--fr-link);
+  font-family: var(--fr-font-code);
+  text-align: left;
+  cursor: pointer;
+}
+.run-frame:disabled {
+  color: var(--fr-text-muted);
+}
+.cm-test-gutter .test-marker {
+  padding: 0 2px;
+  color: var(--fr-text-muted);
+  cursor: pointer;
+}
+.popup-buttons {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+}
+.trust-text,
+.trust-cwd {
+  margin: 4px 12px;
+}
+.trust-command {
+  margin: 4px 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--fr-border);
+  border-radius: 4px;
+  background: var(--fr-bg);
+  font-family: var(--fr-font-code);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.run-form {
+  display: grid;
+  gap: 4px;
+  padding: 6px 12px;
+  overflow: auto;
+}
+.run-form-row {
+  display: grid;
+  grid-template-columns: minmax(8em, 1fr) 3fr;
+  align-items: start;
+  gap: 8px;
+}
+.run-form-row[hidden] {
+  display: none;
+}
+.run-form-input {
+  padding: 3px 6px;
+  border: 1px solid var(--fr-border);
+  border-radius: 3px;
+  background: var(--fr-bg);
+  color: var(--fr-text);
+  font: inherit;
+}
+.run-config-error {
+  color: var(--fr-danger);
+}

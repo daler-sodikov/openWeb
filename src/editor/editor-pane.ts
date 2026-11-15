@@ -56,8 +56,10 @@ import {
   type KeyBinding,
   type NavKind,
   type SignatureView_Serialize as SignatureView,
+  type TestBlock,
 } from "../ipc/bindings";
 import { blameGutter, gitGutter, setBlame, setGitHunks } from "../git/gutter";
+import { setTestBlocks, testGutter } from "../run/gutter";
 import { errorMessage, unwrap } from "../ipc/result";
 import { keyPressed, mark, markNextFrame, takeKey } from "../perf/typing-trace";
 import { type DocModel, type DocPane, mirrored } from "./doc-model";
@@ -125,6 +127,8 @@ export interface PaneHost {
   notify(message: string): void;
   /** A Git change marker was clicked. */
   showHunk(pane: EditorPane, hunk: GitHunk, event: MouseEvent): void;
+  /** A test run marker was clicked: run the block at zero-based `line`. */
+  runTest(pane: EditorPane, line: number): void;
 }
 
 // Folding ranges from Rust, mapped through edits until fresh ones arrive.
@@ -253,6 +257,10 @@ export class EditorPane implements DocPane {
 
   setBlame(lines: readonly GitBlameLine[] | null): void {
     this.view.dispatch({ effects: setBlame.of(lines) });
+  }
+
+  setTestBlocks(blocks: readonly TestBlock[]): void {
+    this.view.dispatch({ effects: setTestBlocks.of(blocks) });
   }
 
   setCaretInfo(info: CaretInfo | null): void {
@@ -557,6 +565,9 @@ export class EditorPane implements DocPane {
         editorChrome,
         blameGutter,
         lineNumbers(),
+        testGutter((block) => {
+          this.host.runTest(this, block.line);
+        }),
         gitGutter((hunk, event) => {
           this.host.showHunk(this, hunk, event);
         }),
