@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M5a: run configurations and test runner)
+
+- Run configurations for Node files, npm scripts, Vitest, Jest and
+  Playwright, stored in `.ferrule/run.json` and edited in the app; scripts
+  and test frameworks in `package.json` are offered automatically, and npm
+  scripts use the project's package manager (`packageManager` field, else
+  the lockfile).
+- Run (Shift+F10), Run Context (Ctrl+Shift+F10), Stop (Ctrl+F2), Rerun
+  (Ctrl+F5), the configuration popup (Alt+Shift+F10) and the Run window
+  (Alt+4); macOS bindings in the IntelliJ-style macOS keymap.
+- Run window: a tab per run with its output in the terminal view
+  (clickable `file:line:col`), exit code, duration, Stop and Rerun.
+- Test runner: Vitest, Jest and Playwright results as a tree with status,
+  durations, failure messages and clickable stack locations; Rerun Failed,
+  run one test or file again, status filters, a summary.
+- Gutter markers on `describe`/`it`/`test` blocks: click to run, last
+  status shown.
+- Nothing runs before the project is trusted: the first run shows the exact
+  command and asks; the answer is kept in Ferrule's data folder, not in the
+  project. Stopping, closing the project and quitting end the whole process
+  tree.
+
+### Fixed
+
+- Terminal: a double click could leave nothing selected and copy could
+  read the selection before it was made (selection calls overtook each
+  other); copy now writes to the clipboard during the key press, which
+  WebKit (the Linux and macOS app) requires.
+
 ### Added (M4a: terminal)
 
 - Terminal tool window (Alt+F12, macOS Option+F12): shells in the project

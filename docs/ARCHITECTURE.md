@@ -729,7 +729,9 @@ Node files run as `node <script>`, where the framework's script is the
 up `node_modules` from the working directory, so hoisted monorepo installs
 work): no `.cmd` shims on Windows, and the same command on every OS. On
 Windows a package manager that is a `.cmd`/`.bat` shim is started through
-`cmd.exe /d /s /c`. Each run gets the reporter flags for a JSON report in
+`cmd.exe /d /c <name> run …`; arguments with characters `cmd.exe` would
+interpret (`& | < > ^ % ! " ( )`, spaces, empty) are refused with an error
+instead of being mangled. Each run gets the reporter flags for a JSON report in
 Ferrule's data folder (Vitest `--reporter=default --reporter=json
 --outputFile.json=<file>`, Jest `--json --outputFile=<file>`, Playwright
 `--reporter=list,json` with `PLAYWRIGHT_JSON_OUTPUT_NAME=<file>`); the
@@ -784,14 +786,36 @@ DAP, so `dap-client` would be a misleading home); the debugger session model
 (breakpoints, frames, variables) is protocol-neutral so a DAP backend can be
 added for other languages. Details are written with M5b.
 
-**IPC (M5a).** Commands: `run_configurations` (stored + detected, with
-the package manager), `save_run_configuration`, `delete_run_configuration`,
-`run_command_line(config)` (what would run), `trust_project`,
-`start_run(config)` → `RunInfo` or `NeedsTrust { command_line }`,
-`stop_run(id)`, `rerun(id)`, `rerun_failed(id)`, `run_test(path, line)`,
-`run_test_file(path)`, `test_blocks(doc)` (gutter, with last statuses),
-`runs()`. Events: `run-started-event`, `run-finished-event` (exit code,
-duration, test tree); output uses the terminal frame events.
+**IPC (M5a, as built).** Commands: `run_configurations` (stored +
+detected, the package manager, trust), `save_run_configuration`,
+`delete_run_configuration`, `trust_project`, `start_run(config, size)` →
+`Started { run }` or `NeedsTrust { command, cwd }` (the trust question
+shows exactly this), `stop_run(id)`, `close_run(id)`, `rerun(id)`,
+`rerun_failed(id)`, `rerun_tests(id, targets)` (files, suites or tests from
+the tree; paths outside the run's folder are refused), `run_at(doc, line)`
+(the innermost test block containing the line, else the test file, else
+the file with Node), `test_blocks(doc)` (gutter, with last statuses),
+`runs()`. Event: `run-finished-event` (exit code, whether the user stopped
+it, duration, test tree, counts, or why there is no report); output uses
+the terminal frame events with ids from `RUN_ID_BASE`.
+
+**What M5a verified, and decisions to review.**
+
+- Name filters: Vitest's `-t` matches the full name joined with `" > "`,
+  Jest's with spaces (checked against Vitest 5.1.0; Jest from its docs).
+  Parameterized titles (`%i`, `$name`) become `.*`.
+- Vitest's JSON has no test lines; they are taken from the tree-sitter
+  blocks of the file, so a click on a Vitest test opens it.
+- `RunFinished.stopped`: npm exits with code 1 after forwarding the stop
+  signal, so the exit code alone cannot say "stopped".
+- UI tests use the in-memory run backend through the headless server's
+  `--fake-runs` (the default in `playwright.config.ts`) while terminals
+  stay real; `FERRULE_E2E_REAL_RUNS=1` runs the same spec against real
+  Node and Vitest with the repository's `node_modules` linked into the
+  project copy. The core tests start real Node, Vitest and Playwright.
+- Runs save unsaved documents first (the tools read the files on disk).
+- Trust is per project folder, stored as `trusted` in Ferrule's
+  `projects/<hash>.json`; there is no UI to revoke it yet.
 
 ## 5. Editor view layer: CodeMirror 6 as a view only
 

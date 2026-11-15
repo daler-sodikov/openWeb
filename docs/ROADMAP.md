@@ -616,6 +616,46 @@ with M5b". Work happens on the `m5a` branch until CI on `main` is green.
    real runs against the fixture where the tools can be found, else skipped
    with a message; all checks pass with zero warnings.
 
+**Status (2026-11-15):** built and tested on Linux (Node 24.19, Vitest
+5.1.0, Playwright 1.64.1); macOS and Windows on CI after the push. "Core
+fake" means `crates/core/tests/integration/runs.rs` with the in-memory run
+backend, "core real" the same file starting real programs, "UI" means
+`e2e/ui/run.spec.ts` (fake run backend by default; "UI real" with
+`FERRULE_E2E_REAL_RUNS=1`).
+
+- [x] 1 Configurations: stored in `.ferrule/run.json`, created, edited,
+      deleted and run from the editor (core fake, UI, UI real).
+- [x] 2 Detection: scripts and test frameworks from `package.json`;
+      package manager from `packageManager`, then the lockfile (unit tests).
+- [x] 3 Popup and keys: Alt+Shift+F10 popup, Shift+F10, Ctrl+Shift+F10,
+      Ctrl+F2, Ctrl+F5 (UI); Alt+4 toggles the window (not covered by a test).
+      macOS bindings are defined but not run.
+- [x] 4 Run window: a tab per run, exit code and duration, Stop and Rerun,
+      Ctrl/Cmd+click on `file:line:col` in the output (UI, UI real). Colors
+      and selection come from the M4 terminal view; not asserted for runs.
+- [x] 5 Trust: the exact command and folder are shown, Cancel runs nothing,
+      the answer is stored outside the project and remembered (core fake,
+      UI).
+- [ ] 6 Cleanup: Stop, closing the project and quitting end the process
+      tree (core fake; core real on Linux: a Node run with its own child,
+      the folder is deleted after `close_project`; UI real: Stop of
+      `npm run dev`). Closing a running tab uses the M4 terminal close,
+      not separately tested. macOS and Windows: CI pending.
+- [x] 7 Test runner: Vitest and Playwright reports from the real tools
+      (core real) and recorded (core fake, UI); tree, durations, failures
+      with clickable stack frames, Rerun Failed, one test or one file again,
+      status filters, summary (UI). Jest: parser tested with a handwritten
+      report only; Jest is not installed here, so no real Jest run.
+- [x] 8 Gutter: markers from tree-sitter blocks, click runs the block, the
+      caret anywhere in a test body runs it, last status shown (core fake,
+      UI, UI real).
+- [ ] 9 Tests: as listed; all checks pass on Linux. CI on macOS and Windows
+      has not run M5a yet.
+
+Open M5a items: Jest against the real tool; CI on macOS and Windows
+(Windows `.cmd` shims and Job Objects for runs); a UI test for Alt+4; typing
+latency with gutter markers not measured.
+
 ### M5b: Node debugger (after M5a)
 
 **Done when:**
