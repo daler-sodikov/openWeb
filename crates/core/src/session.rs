@@ -34,6 +34,16 @@ use crate::convert::{
     selection_from_ipc, selection_to_ipc, to_u32, to_usize, token_to_ipc, vfs_error,
 };
 
+/// "terminal 3 (processes 120, 121)" for a close report.
+fn terminal_still_running(id: u32, pids: &[u32]) -> String {
+    if pids.is_empty() {
+        format!("terminal {id}")
+    } else {
+        let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
+        format!("terminal {id} (processes {})", pids.join(", "))
+    }
+}
+
 /// How long closing a project waits for each kind of work to stop.
 const CLOSE_WAIT: Duration = Duration::from_secs(5);
 
@@ -461,8 +471,10 @@ impl Session {
         };
         runtime.cancel.cancel();
         let terminals = runtime.clone();
-        for id in blocking(move || Ok(terminals.terminals.close_all_and_wait(CLOSE_WAIT))).await? {
-            still_running.push(format!("terminal {id}"));
+        for (id, pids) in
+            blocking(move || Ok(terminals.terminals.close_all_and_wait(CLOSE_WAIT))).await?
+        {
+            still_running.push(terminal_still_running(id, &pids));
         }
         // Waits for the server and the processes it started.
         if tokio::time::timeout(CLOSE_WAIT, runtime.lsp.stop())

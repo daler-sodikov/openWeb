@@ -311,6 +311,11 @@ impl Terminal {
         self.shared.process.running()
     }
 
+    /// Ids of the processes still running (diagnostics; may be empty).
+    pub fn process_ids(&self) -> Vec<u32> {
+        self.shared.process.process_ids()
+    }
+
     /// Ends the shell and everything it started, and stops the threads.
     /// Does not wait for them.
     pub fn close(&self) {
@@ -336,6 +341,12 @@ fn read_loop(shared: &Shared, mut reader: Box<dyn Read + Send>) {
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(_) => break,
         };
+        if lock(&shared.state).closed {
+            // Keep reading (and discarding) until the PTY ends: on Windows
+            // the console host blocks writing into a full pipe, and closing
+            // the pseudo console can then wait for it.
+            continue;
+        }
         while shared.frame_waiting.load(Ordering::Acquire) {
             thread::yield_now();
         }
@@ -351,9 +362,6 @@ fn read_loop(shared: &Shared, mut reader: Box<dyn Read + Send>) {
             }
         }
         shared.changed(false);
-        if lock(&shared.state).closed {
-            break;
-        }
     }
 }
 
@@ -555,19 +563,19 @@ impl Terminals {
     }
 
     /// Closes every terminal and waits (blocking) until their processes
-    /// have ended, at most `timeout`. Returns the ids of terminals whose
-    /// processes still ran then.
-    pub fn close_all_and_wait(&self, timeout: Duration) -> Vec<u32> {
+    /// have ended, at most `timeout`. Returns the terminals whose processes
+    /// still ran then, each with the ids of those processes (when known).
+    pub fn close_all_and_wait(&self, timeout: Duration) -> Vec<(u32, Vec<u32>)> {
         let entries: Vec<Entry> = lock(&self.open).drain(..).collect();
         for entry in &entries {
             entry.terminal.close();
         }
         let deadline = Instant::now() + timeout;
         loop {
-            let left: Vec<u32> = entries
+            let left: Vec<(u32, Vec<u32>)> = entries
                 .iter()
                 .filter(|e| e.terminal.running())
-                .map(|e| e.terminal.id())
+                .map(|e| (e.terminal.id(), e.terminal.process_ids()))
                 .collect();
             if left.is_empty() || Instant::now() >= deadline {
                 return left;

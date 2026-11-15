@@ -121,7 +121,20 @@ impl Process for PtyProcess {
         if let Err(err) = inner.killer.kill() {
             tracing::debug!(%err, "terminal shell already gone");
         }
-        inner.master = None;
+        // Dropping the master closes the PTY (ClosePseudoConsole on
+        // Windows), which may wait for the console host: do it after
+        // releasing the lock, so exit checks are not blocked meanwhile.
+        let master = inner.master.take();
+        drop(inner);
+        drop(master);
+    }
+
+    fn process_ids(&self) -> Vec<u32> {
+        lock(&self.inner)
+            .tree
+            .as_ref()
+            .map(ProcessTree::process_ids)
+            .unwrap_or_default()
     }
 
     fn running(&self) -> bool {

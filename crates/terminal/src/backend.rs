@@ -58,6 +58,11 @@ pub trait Process: Send + Sync {
     fn running(&self) -> bool {
         self.exit_status().is_none()
     }
+    /// Ids of the processes still running, for diagnostics (by default
+    /// none known).
+    fn process_ids(&self) -> Vec<u32> {
+        Vec::new()
+    }
 }
 
 /// A started shell: its output, its input and its process.
