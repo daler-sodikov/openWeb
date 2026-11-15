@@ -169,6 +169,12 @@ pub(crate) fn action_to_ipc(action: ferrule_settings::Action) -> ipc::KeyAction 
         A::ShowDiff => K::ShowDiff,
         A::ToggleBlame => K::ToggleBlame,
         A::RollbackHunk => K::RollbackHunk,
+        A::Run => K::Run,
+        A::RunContext => K::RunContext,
+        A::StopRun => K::StopRun,
+        A::Rerun => K::Rerun,
+        A::ChooseRunConfiguration => K::ChooseRunConfiguration,
+        A::ToggleRunWindow => K::ToggleRunWindow,
     }
 }
 
