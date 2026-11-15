@@ -135,10 +135,13 @@ impl Backend for FakeRunBackend {
         let mut lines = vec![format!("fake run: {command}")];
         match plan(spec) {
             Plan::Report { path, json, name } => {
-                let root = spec.cwd.to_string_lossy();
+                // Inside JSON strings: escaped (Windows paths have `\`).
+                let quoted = serde_json::to_string(&spec.cwd.to_string_lossy())
+                    .map_err(|e| TerminalError::Io(e.to_string()))?;
+                let root = quoted.trim_matches('"');
                 let report = json
-                    .replace("__ROOT__", &root)
-                    .replace("__REPO__", &root)
+                    .replace("__ROOT__", root)
+                    .replace("__REPO__", root)
                     .replace("__NODE__", "node");
                 if let Some(dir) = Path::new(&path).parent() {
                     let _ = std::fs::create_dir_all(dir);
