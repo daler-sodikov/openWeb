@@ -13,8 +13,8 @@ use std::time::Duration;
 mod events;
 
 pub use events::{
-    FsChanged, GitStatusEvent, IndexStatus, ProblemsChanged, ServerStatusChanged, TauriSink,
-    TerminalExitedEvent, TerminalFrameEvent, encode as encode_event,
+    FsChanged, GitStatusEvent, IndexStatus, ProblemsChanged, RunFinishedEvent, ServerStatusChanged,
+    TauriSink, TerminalExitedEvent, TerminalFrameEvent, encode as encode_event,
 };
 
 use ferrule_core::{Session, SessionConfig};
@@ -24,11 +24,11 @@ use ferrule_ipc::{
     DocumentReplace, EditorSelection, FileProblems, FindResults, FoldRanges, FrontendReadyReport,
     GitBlame, GitBranch, GitCommit, GitDeleteResult, GitDiff, GitDiffMode, GitLineChanges,
     GitStatus, Highlights, HoverResult, IpcError, KeyBinding, NavKind, NavTarget, OpenedDocument,
-    PROTOCOL_VERSION, ProjectCloseReport, ProjectInfo, RefactoringPreview, RemoteUpdate,
-    RenameTarget, ReplaceResult, SaveResult, SearchResults, SearchTab, ServerStatus, SignatureView,
-    StartupTarget, TERMINAL_FLAGS, TerminalCell, TerminalInfo, TerminalKey, TerminalLink,
-    TerminalList, TerminalSelectionKind, TerminalSize, TextSearch, TraceSample, UsageResults,
-    WorkspaceEditResult,
+    PROTOCOL_VERSION, ProjectCloseReport, ProjectInfo, RUN_ID_BASE, RefactoringPreview,
+    RemoteUpdate, RenameTarget, ReplaceResult, RunConfig, RunConfigurations, RunInfo, SaveResult,
+    SearchResults, SearchTab, ServerStatus, SignatureView, StartRun, StartupTarget, TERMINAL_FLAGS,
+    TerminalCell, TerminalInfo, TerminalKey, TerminalLink, TerminalList, TerminalSelectionKind,
+    TerminalSize, TestBlocks, TextSearch, TraceSample, UsageResults, WorkspaceEditResult,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -862,6 +862,110 @@ async fn git_last_commit_message(session: SessionState<'_>) -> Result<Option<Str
     session.git_last_commit_message().await
 }
 
+/// Stored and detected run configurations.
+#[tauri::command]
+#[specta::specta]
+async fn run_configurations(session: SessionState<'_>) -> Result<RunConfigurations, IpcError> {
+    session.run_configurations().await
+}
+
+/// Stores a run configuration.
+#[tauri::command]
+#[specta::specta]
+async fn save_run_configuration(
+    session: SessionState<'_>,
+    config: RunConfig,
+) -> Result<RunConfig, IpcError> {
+    session.save_run_configuration(config).await
+}
+
+/// Removes a stored run configuration.
+#[tauri::command]
+#[specta::specta]
+async fn delete_run_configuration(session: SessionState<'_>, id: String) -> Result<(), IpcError> {
+    session.delete_run_configuration(id).await
+}
+
+/// Trusts the project to run commands.
+#[tauri::command]
+#[specta::specta]
+async fn trust_project(session: SessionState<'_>) -> Result<(), IpcError> {
+    session.trust_project().await
+}
+
+/// Starts a run (or says the project must be trusted first).
+#[tauri::command]
+#[specta::specta]
+async fn start_run(
+    session: SessionState<'_>,
+    config: RunConfig,
+    size: TerminalSize,
+) -> Result<StartRun, IpcError> {
+    session.start_run(config, size).await
+}
+
+/// Stops a run's processes (its output stays).
+#[tauri::command]
+#[specta::specta]
+async fn stop_run(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.stop_run(id).await
+}
+
+/// Closes a run's tab.
+#[tauri::command]
+#[specta::specta]
+async fn close_run(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.close_run(id).await
+}
+
+/// Runs a run's configuration again.
+#[tauri::command]
+#[specta::specta]
+async fn rerun(
+    session: SessionState<'_>,
+    id: u32,
+    size: TerminalSize,
+) -> Result<StartRun, IpcError> {
+    session.rerun(id, size).await
+}
+
+/// Runs the failed tests of a test run again.
+#[tauri::command]
+#[specta::specta]
+async fn rerun_failed(
+    session: SessionState<'_>,
+    id: u32,
+    size: TerminalSize,
+) -> Result<StartRun, IpcError> {
+    session.rerun_failed(id, size).await
+}
+
+/// Runs the test at a line, the test file, or the file with Node.
+#[tauri::command]
+#[specta::specta]
+async fn run_at(
+    session: SessionState<'_>,
+    doc_id: DocId,
+    line: Option<u32>,
+    size: TerminalSize,
+) -> Result<StartRun, IpcError> {
+    session.run_at(doc_id, line, size).await
+}
+
+/// Test blocks of a document, with their last statuses.
+#[tauri::command]
+#[specta::specta]
+async fn test_blocks(session: SessionState<'_>, doc_id: DocId) -> Result<TestBlocks, IpcError> {
+    session.test_blocks(doc_id).await
+}
+
+/// The project's runs.
+#[tauri::command]
+#[specta::specta]
+async fn runs(session: SessionState<'_>) -> Result<Vec<RunInfo>, IpcError> {
+    session.runs().await
+}
+
 /// Builds the tauri-specta registry of every IPC command and constant.
 ///
 /// The same builder serves the runtime invoke handler and the TypeScript
@@ -947,6 +1051,18 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             git_unstage,
             git_commit,
             git_last_commit_message,
+            run_configurations,
+            save_run_configuration,
+            delete_run_configuration,
+            trust_project,
+            start_run,
+            stop_run,
+            close_run,
+            rerun,
+            rerun_failed,
+            run_at,
+            test_blocks,
+            runs,
         ])
         .events(tauri_specta::collect_events![
             FsChanged,
@@ -955,10 +1071,12 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             ProblemsChanged,
             TerminalFrameEvent,
             TerminalExitedEvent,
-            GitStatusEvent
+            GitStatusEvent,
+            RunFinishedEvent
         ])
         .constant("PROTOCOL_VERSION", PROTOCOL_VERSION)
         .constant("TERMINAL_FLAGS", TERMINAL_FLAGS)
+        .constant("RUN_ID_BASE", RUN_ID_BASE)
 }
 
 /// Writes the generated TypeScript bindings to `path`.

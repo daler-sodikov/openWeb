@@ -914,6 +914,7 @@ dependencies = [
  "anyhow",
  "ferrule-core",
  "ferrule-ipc",
+ "ferrule-run-debug",
  "ferrule-terminal",
  "serde",
  "serde_json",

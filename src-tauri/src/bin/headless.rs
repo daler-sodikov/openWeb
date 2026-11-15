@@ -11,8 +11,10 @@
 //!
 //! Usage: `ferrule-headless --port 1431 --data-dir <dir> [--fake-terminals]`.
 //! `--fake-terminals` replaces real shells by the in-memory backend from
-//! `ferrule-terminal` (its shells echo what is typed), so the terminal UI
-//! can be tested on machines without the native backend. Test-only: built
+//! `ferrule-terminal` (its shells echo what is typed) and runs by the one
+//! from `ferrule-run-debug` (it writes recorded test reports), so the
+//! terminal and run UI can be tested without the native backend or real
+//! tools. Test-only: built
 //! only with the `headless` feature, never bundled.
 
 use std::path::PathBuf;
@@ -106,7 +108,8 @@ fn main() -> anyhow::Result<()> {
     let events = Arc::new(EventQueue::default());
     let mut config = SessionConfig::new(args.data_dir);
     config.terminal_backend = if args.fake_terminals {
-        tracing::info!("terminals use the in-memory test backend");
+        tracing::info!("terminals and runs use the in-memory test backends");
+        config.run_backend = Some(Arc::new(ferrule_run_debug::fake::FakeRunBackend));
         Some(Arc::new(ferrule_terminal::fake::FakeBackend::default()))
     } else {
         terminal_backend()

@@ -176,6 +176,8 @@ pub struct SessionConfig {
     /// PTY and terminal emulator; `None` when the build has none (terminals
     /// then report why they cannot start).
     pub terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
+    /// PTY and emulator for runs; `None`: the terminal backend.
+    pub run_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
 }
 
 impl std::fmt::Debug for SessionConfig {
@@ -186,6 +188,7 @@ impl std::fmt::Debug for SessionConfig {
             .field("autosave_delay", &self.autosave_delay)
             .field("typing_trace", &self.typing_trace)
             .field("terminal_backend", &self.terminal_backend.is_some())
+            .field("run_backend", &self.run_backend.is_some())
             .finish()
     }
 }
@@ -201,6 +204,7 @@ impl SessionConfig {
             autosave_delay: DEFAULT_AUTOSAVE_DELAY,
             typing_trace: None,
             terminal_backend: None,
+            run_backend: None,
         }
     }
 }
@@ -216,6 +220,7 @@ pub struct Session {
     data_dir: PathBuf,
     pub(crate) settings_file: PathBuf,
     terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
+    run_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
     pub(crate) trace: Option<Arc<TypingTrace>>,
     pub(crate) sink: Arc<dyn EventSink>,
     /// Incremented by every Find in Files request; older requests stop.
@@ -292,6 +297,7 @@ impl Session {
             autosave_delay,
             typing_trace,
             terminal_backend,
+            run_backend,
         } = config;
         let registry = Arc::new(languages()?);
         Ok(Arc::new_cyclic(move |weak| Self {
@@ -303,6 +309,7 @@ impl Session {
             started: Instant::now(),
             data_dir,
             settings_file,
+            run_backend: run_backend.or_else(|| terminal_backend.clone()),
             terminal_backend,
             trace: typing_trace.map(|path| Arc::new(TypingTrace::new(path))),
             sink,
@@ -378,6 +385,7 @@ impl Session {
         let settings_file = self.settings_file.clone();
         let session = Arc::downgrade(self);
         let terminal_backend = self.terminal_backend.clone();
+        let run_backend = self.run_backend.clone();
         let runtime = blocking(move || {
             let project = Project::open(Path::new(&path)).map_err(project_error)?;
             Ok(Arc::new(ProjectRuntime::new(
@@ -387,6 +395,7 @@ impl Session {
                 settings_file,
                 session,
                 terminal_backend,
+                run_backend,
             )))
         })
         .await?;

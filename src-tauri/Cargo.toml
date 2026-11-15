@@ -33,8 +33,15 @@ default = ["native"]
 # Real terminals (PTY + VT emulator). Off only for offline tooling that does
 # not need them (exporting the IPC bindings).
 native = ["ferrule-terminal/native"]
-# The test backend; also offers the in-memory terminal (`--fake-terminals`).
-headless = ["tauri/test", "dep:tiny_http", "ferrule-terminal/testing"]
+# The test backend; also offers the in-memory terminal and run backends
+# (`--fake-terminals`).
+headless = [
+  "tauri/test",
+  "dep:tiny_http",
+  "ferrule-terminal/testing",
+  "dep:ferrule-run-debug",
+  "ferrule-run-debug/testing",
+]
 
 [build-dependencies]
 tauri-build.workspace = true
@@ -43,6 +50,7 @@ tauri-build.workspace = true
 ferrule-core.workspace = true
 ferrule-ipc.workspace = true
 ferrule-terminal.workspace = true
+ferrule-run-debug = { workspace = true, optional = true }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
