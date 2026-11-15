@@ -1042,6 +1042,8 @@ dependencies = [
  "oxc_parser",
  "oxc_semantic",
  "oxc_span",
+ "streaming-iterator",
+ "tree-sitter",
  "tree-sitter-javascript",
  "tree-sitter-json",
  "tree-sitter-typescript",
