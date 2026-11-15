@@ -32,6 +32,8 @@ struct Entry {
     running_files: Option<Option<Vec<PathBuf>>>,
     /// The parsed report once finished.
     tests: Option<TestReport>,
+    /// The user stopped it.
+    stopped: bool,
 }
 
 #[derive(Default)]
@@ -105,10 +107,10 @@ impl Runs {
             (
                 entry.report.take(),
                 at.duration_since(entry.started),
-                entry.cwd.clone(),
+                entry.stopped,
             )
         };
-        let (report, duration, _cwd) = entry;
+        let (report, duration, stopped) = entry;
         let (tests, report_error) = match report {
             None => (None, None),
             Some((path, framework)) => {
@@ -149,6 +151,7 @@ impl Runs {
         let finished = ipc::RunFinished {
             id,
             exit_code: code,
+            stopped,
             duration_ms: duration.as_secs_f64() * 1000.0,
             tests: tests.as_ref().map(|r| self.tree(r)),
             counts: tests.as_ref().map(|r| {
@@ -570,6 +573,9 @@ impl Session {
     /// Stops a run's process tree (its output stays).
     pub async fn stop_run(&self, id: u32) -> Result<(), IpcError> {
         let terminal = self.run_terminal(id)?;
+        if let Some(entry) = lock(&self.project_runs()?.state)?.entries.get_mut(&id) {
+            entry.stopped = true;
+        }
         terminal.stop();
         Ok(())
     }
@@ -721,13 +727,12 @@ impl Session {
         let framework = framework_for(&root, &path, &text);
         let config = match framework {
             Some(framework) if is_test_file(&path) || !blocks.is_empty() => {
-                // The innermost block starting at or above the line.
+                // The innermost block containing the line.
                 let block = line.and_then(|line| {
                     blocks
                         .iter()
-                        .filter(|b| b.line <= line)
+                        .filter(|b| b.line <= line && line <= b.end_line)
                         .max_by_key(|b| b.line)
-                        .filter(|b| b.line == line || b.kind == TestBlockKind::Suite)
                         .cloned()
                 });
                 let (name, scope) = match &block {
@@ -781,11 +786,14 @@ impl Session {
         blocking(move || {
             let root = runtime.project.root().to_path_buf();
             let path = root.join(&rel);
-            let framework = framework_for(&root, &path, &text);
-            if framework.is_none() || !is_test_file(&path) && !text.contains("@playwright/test") {
+            // Asked after edits of every document: the cheap check first.
+            let framework = (is_test_file(&path) || text.contains("@playwright/test"))
+                .then(|| framework_for(&root, &path, &text))
+                .flatten();
+            if framework.is_none() {
                 return Ok(ipc::TestBlocks {
                     version,
-                    framework: framework.map(fw_to_ipc),
+                    framework: None,
                     blocks: Vec::new(),
                 });
             }
@@ -921,6 +929,7 @@ fn start(
             report: report.zip(framework),
             running_files,
             tests: None,
+            stopped: false,
         },
     );
     Ok(ipc::StartRun::Started { run: info })

@@ -410,6 +410,9 @@ async fn test_results_fill_the_tree_and_the_gutter() {
         other => panic!("{other:?}"),
     }
     assert_eq!(one.name, "adds");
+    // Inside the body of "adds" (zero-based line 6) too.
+    let inside = started(s.run_at(doc, Some(6), SIZE).await.unwrap());
+    assert_eq!(inside.name, "adds");
 }
 
 #[tokio::test]
@@ -468,6 +471,8 @@ async fn stopping_keeps_the_output_and_closing_the_project_ends_runs() {
     s.stop_run(run.id).await.unwrap();
     let stopped = wait_finished(&events, run.id, Duration::from_secs(10)).await;
     assert_eq!(stopped.exit_code, None, "ended by a signal");
+    assert!(stopped.stopped);
+    assert!(!finished.stopped);
     assert!(
         s.runs().await.unwrap().iter().any(|r| r.id == run.id),
         "a stopped run keeps its tab"

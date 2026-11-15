@@ -1660,6 +1660,9 @@ pub struct RunFinished {
     pub id: u32,
     /// Exit code, if known.
     pub exit_code: Option<i32>,
+    /// Whether it ended because the user stopped it (its exit code is then
+    /// whatever the program chose on the signal).
+    pub stopped: bool,
     /// Milliseconds from start to exit.
     pub duration_ms: f64,
     /// Test results (test runs whose report was read).
