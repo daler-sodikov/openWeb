@@ -8,6 +8,7 @@ import type { Page } from "@playwright/test";
 import { BACKEND_DATA } from "../paths";
 import {
   activeTab,
+  backend,
   editor,
   expect,
   keys,
@@ -19,6 +20,12 @@ import {
   test,
   tsServerMissing,
 } from "./harness";
+
+/** A document as the backend has it (`open_document` on an open file). */
+interface Doc {
+  text: string;
+  version: number;
+}
 
 /** The visible editor's caret line (1-based) from the status bar. */
 async function caretLine(page: Page): Promise<number> {
@@ -300,10 +307,20 @@ test.describe("M3b with typescript-language-server", () => {
     const tab = activeTab(page);
     await expect(tab).toHaveAttribute("data-path", /node_modules\/@types\/react\/index\.d\.ts$/);
     await expect(tab.getByTestId("tab-read-only")).toHaveText("RO");
-    const before = await editor(page).textContent();
+    // Compare the document and the caret's line, not the editor's DOM:
+    // CodeMirror renders only the lines around the viewport, and that
+    // window may still move after Go to Declaration scrolled (macOS CI
+    // saw the same text starting a few lines earlier).
+    const docPath = (await tab.getAttribute("data-path")) ?? "";
+    const before = (await backend("open_document", { path: docPath })) as Doc;
+    const caretLine = editor(page).locator(".cm-activeLine");
+    const lineBefore = await caretLine.textContent();
     await page.keyboard.type("typed");
     await expect(tab.getByTestId("tab-dirty")).toHaveText("");
-    expect(await editor(page).textContent()).toBe(before);
+    expect(await caretLine.textContent()).toBe(lineBefore);
+    const after = (await backend("open_document", { path: docPath })) as Doc;
+    expect(after.version).toBe(before.version);
+    expect(after.text).toBe(before.text);
   });
 });
 
