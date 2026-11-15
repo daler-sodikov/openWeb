@@ -28,7 +28,8 @@ use ferrule_ipc::{
     RemoteUpdate, RenameTarget, ReplaceResult, RunConfig, RunConfigurations, RunInfo, SaveResult,
     SearchResults, SearchTab, ServerStatus, SignatureView, StartRun, StartupTarget, TERMINAL_FLAGS,
     TerminalCell, TerminalInfo, TerminalKey, TerminalLink, TerminalList, TerminalSelectionKind,
-    TerminalSize, TestBlocks, TextSearch, TraceSample, UsageResults, WorkspaceEditResult,
+    TerminalSize, TestBlocks, TestTarget, TextSearch, TraceSample, UsageResults,
+    WorkspaceEditResult,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -940,6 +941,18 @@ async fn rerun_failed(
     session.rerun_failed(id, size).await
 }
 
+/// Runs files, suites or tests of a test run again.
+#[tauri::command]
+#[specta::specta]
+async fn rerun_tests(
+    session: SessionState<'_>,
+    id: u32,
+    tests: Vec<TestTarget>,
+    size: TerminalSize,
+) -> Result<StartRun, IpcError> {
+    session.rerun_tests(id, tests, size).await
+}
+
 /// Runs the test at a line, the test file, or the file with Node.
 #[tauri::command]
 #[specta::specta]
@@ -1060,6 +1073,7 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             close_run,
             rerun,
             rerun_failed,
+            rerun_tests,
             run_at,
             test_blocks,
             runs,

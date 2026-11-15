@@ -597,11 +597,7 @@ impl Session {
     fn run_config(&self, id: u32) -> Result<RunConfig, IpcError> {
         let runs = self.project_runs()?;
         let state = lock(&runs.state)?;
-        state
-            .entries
-            .get(&id)
-            .map(|e| e.config.clone())
-            .ok_or_else(|| IpcError::new(IpcErrorKind::NotFound, format!("run {id} is not known")))
+        Ok(known(&state, id)?.config.clone())
     }
 
     /// Runs a run's configuration again (in a new tab).
@@ -617,31 +613,88 @@ impl Session {
         size: ipc::TerminalSize,
     ) -> Result<ipc::StartRun, IpcError> {
         let runs = self.project_runs()?;
-        let (config, failed) = {
+        let failed = {
             let state = lock(&runs.state)?;
-            let entry = state.entries.get(&id).ok_or_else(|| {
-                IpcError::new(IpcErrorKind::NotFound, format!("run {id} is not known"))
-            })?;
-            let failed = entry
+            let entry = known(&state, id)?;
+            entry
                 .tests
                 .as_ref()
                 .map(|t| t.failed_tests(&entry.cwd))
-                .unwrap_or_default();
-            (entry.config.clone(), failed)
+                .unwrap_or_default()
         };
+        if failed.is_empty() {
+            return Err(IpcError::new(IpcErrorKind::Conflict, "No failed tests."));
+        }
+        self.rerun_scope(id, failed, "failed", size).await
+    }
+
+    /// Runs some tests of a test run again: files (an empty name), suites
+    /// or tests, with paths relative to the project.
+    pub async fn rerun_tests(
+        &self,
+        id: u32,
+        tests: Vec<ipc::TestTarget>,
+        size: ipc::TerminalSize,
+    ) -> Result<ipc::StartRun, IpcError> {
+        let root = self.runtime()?.project.root().to_path_buf();
+        let runs = self.project_runs()?;
+        let cwd = known(&*lock(&runs.state)?, id)?.cwd.clone();
+        let mut refs = Vec::new();
+        for test in tests {
+            let plain = Path::new(&test.path)
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+            let full = plain.then(|| root.join(&test.path));
+            let file = full
+                .as_deref()
+                .and_then(|p| p.strip_prefix(&cwd).ok())
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .ok_or_else(|| {
+                    IpcError::new(
+                        IpcErrorKind::InvalidArgument,
+                        format!("{} is outside the run's folder", test.path),
+                    )
+                })?;
+            refs.push(rd::TestRef {
+                file,
+                name: test.name,
+                line: None,
+            });
+        }
+        if refs.is_empty() {
+            return Err(IpcError::new(IpcErrorKind::InvalidArgument, "No tests."));
+        }
+        let label = match refs.as_slice() {
+            [one] => one.name.last().cloned().unwrap_or_else(|| one.file.clone()),
+            _ => "selected".to_owned(),
+        };
+        self.rerun_scope(id, refs, &label, size).await
+    }
+
+    /// Runs a test run's configuration again, narrowed to `refs`
+    /// (relative to its working directory).
+    async fn rerun_scope(
+        &self,
+        id: u32,
+        refs: Vec<rd::TestRef>,
+        label: &str,
+        size: ipc::TerminalSize,
+    ) -> Result<ipc::StartRun, IpcError> {
+        let config = self.run_config(id)?;
         let RunKind::Test { framework, .. } = config.kind else {
             return Err(IpcError::new(
                 IpcErrorKind::InvalidArgument,
                 "not a test run",
             ));
         };
-        if failed.is_empty() {
-            return Err(IpcError::new(IpcErrorKind::Conflict, "No failed tests."));
-        }
-        let mut again = config;
-        again.id = format!("adhoc:rerun-failed:{id}");
-        again.name = format!("{} (failed)", again.name.trim_end_matches(" (failed)"));
-        let (files, tests): (Vec<_>, Vec<_>) = failed.into_iter().partition(|t| t.name.is_empty());
+        let base = match config.name.rfind(" (") {
+            Some(i) if config.name.ends_with(')') => &config.name[..i],
+            _ => config.name.as_str(),
+        };
+        let mut again = config.clone();
+        again.id = format!("adhoc:rerun:{id}");
+        again.name = format!("{base} ({label})");
+        let (files, tests): (Vec<_>, Vec<_>) = refs.into_iter().partition(|t| t.name.is_empty());
         again.kind = RunKind::Test {
             framework,
             scope: rd::TestScope {
@@ -776,6 +829,13 @@ impl Session {
         infos.sort_by_key(|i| i.id);
         Ok(infos)
     }
+}
+
+fn known(state: &State, id: u32) -> Result<&Entry, IpcError> {
+    state
+        .entries
+        .get(&id)
+        .ok_or_else(|| IpcError::new(IpcErrorKind::NotFound, format!("run {id} is not known")))
 }
 
 /// Builds the command and, if trusted, starts it. Blocking.

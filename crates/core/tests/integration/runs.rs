@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use ferrule_core::{EventSink, Session, SessionConfig, SessionEvent};
 use ferrule_ipc::{
     IpcErrorKind, PackageManager, RunConfig, RunFinished, RunInfo, RunKind, StartRun,
-    TerminalFrame, TerminalSize, TestFramework, TestStatus, TestTreeNode,
+    TerminalFrame, TerminalSize, TestFramework, TestStatus, TestTarget, TestTreeNode,
 };
 use ferrule_run_debug::fake::FakeRunBackend;
 
@@ -351,7 +351,7 @@ async fn test_results_fill_the_tree_and_the_gutter() {
     assert!(reports.is_empty(), "{reports:?}");
 
     let failed = started(s.rerun_failed(run.id, SIZE).await.unwrap());
-    assert!(failed.name.ends_with("(failed)"), "{}", failed.name);
+    assert_eq!(failed.name, "src/math.test.ts (failed)");
     match &failed.config.kind {
         RunKind::Test { scope, .. } => {
             assert!(scope.files.is_empty());
@@ -362,6 +362,43 @@ async fn test_results_fill_the_tree_and_the_gutter() {
     }
     assert!(failed.command.contains("-t"), "{}", failed.command);
     wait_finished(&events, failed.id, Duration::from_secs(10)).await;
+
+    // From the test tree: one test, and a whole file.
+    let target = |path: &str, name: &[&str]| TestTarget {
+        path: path.into(),
+        name: name.iter().map(|n| (*n).to_owned()).collect(),
+    };
+    let one = started(
+        s.rerun_tests(
+            run.id,
+            vec![target("src/math.test.ts", &["math", "adds"])],
+            SIZE,
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(one.name, "src/math.test.ts (adds)");
+    match &one.config.kind {
+        RunKind::Test { scope, .. } => {
+            assert_eq!(scope.tests[0].file, "src/math.test.ts");
+            assert_eq!(scope.tests[0].name, ["math", "adds"]);
+        }
+        other => panic!("{other:?}"),
+    }
+    let file = started(
+        s.rerun_tests(run.id, vec![target("src/math.test.ts", &[])], SIZE)
+            .await
+            .unwrap(),
+    );
+    match &file.config.kind {
+        RunKind::Test { scope, .. } => assert_eq!(scope.files, ["src/math.test.ts"]),
+        other => panic!("{other:?}"),
+    }
+    let err = s
+        .rerun_tests(run.id, vec![target("../elsewhere.test.ts", &[])], SIZE)
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, IpcErrorKind::InvalidArgument);
 
     // The "adds" test (zero-based line 5) alone.
     let one = started(s.run_at(doc, Some(5), SIZE).await.unwrap());

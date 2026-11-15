@@ -1472,6 +1472,16 @@ pub struct TestRef {
     pub line: Option<u32>,
 }
 
+/// A file, suite or test of a finished run, to run again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestTarget {
+    /// File relative to the project root.
+    pub path: String,
+    /// Titles from the outermost suite (empty: the whole file).
+    pub name: Vec<String>,
+}
+
 /// Which tests a test configuration runs (all if both lists are empty).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
