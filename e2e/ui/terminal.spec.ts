@@ -53,6 +53,12 @@ async function cellOf(page: Page, text: string, offset = 0): Promise<{ x: number
   return { x: box.x + cell * (col + 0.5), y: box.y + box.height / 2 };
 }
 
+/** The visible terminal's own selection, as the backend has it. */
+async function selectionText(page: Page): Promise<string | null> {
+  const id = Number(await view(page).getAttribute("data-id"));
+  return (await backend("terminal_selection_text", { id })) as string | null;
+}
+
 /** Types a command and presses Enter. */
 async function run(page: Page, command: string): Promise<void> {
   await page.keyboard.type(command);
@@ -211,6 +217,8 @@ test("selection copies, paste sends text, resize follows the window", async ({
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 4 });
   await page.mouse.up();
+  // What is selected first, then what the copy put on the clipboard.
+  await expect.poll(() => selectionText(page)).toBe(word);
   await page.keyboard.press(isMac ? "Meta+c" : "Control+Shift+C");
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(word);
   if (!fake) {
@@ -218,6 +226,7 @@ test("selection copies, paste sends text, resize follows the window", async ({
     await page.evaluate(() => navigator.clipboard.writeText(""));
     const middle = await cellOf(page, word, 5);
     await page.mouse.dblclick(middle.x, middle.y);
+    await expect.poll(() => selectionText(page)).toBe(word);
     await page.keyboard.press(isMac ? "Meta+c" : "Control+Shift+C");
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(word);
   }
