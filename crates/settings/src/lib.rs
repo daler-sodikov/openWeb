@@ -115,6 +115,8 @@ pub enum Action {
     ChooseRunConfiguration,
     /// Show or hide the Run tool window.
     ToggleRunWindow,
+    /// Forget that the project is trusted: the next run asks again.
+    RevokeProjectTrust,
 }
 
 /// Modifier used in double-tap gestures.
@@ -210,11 +212,12 @@ pub fn action_name(action: Action) -> &'static str {
         Action::Rerun => "Rerun",
         Action::ChooseRunConfiguration => "Run…",
         Action::ToggleRunWindow => "Run Tool Window",
+        Action::RevokeProjectTrust => "Revoke Project Trust",
     }
 }
 
 /// Every action, in display order.
-pub const ALL_ACTIONS: [Action; 50] = [
+pub const ALL_ACTIONS: [Action; 51] = [
     Action::GotoFile,
     Action::GotoSymbol,
     Action::GotoLine,
@@ -265,6 +268,7 @@ pub const ALL_ACTIONS: [Action; 50] = [
     Action::Rerun,
     Action::ChooseRunConfiguration,
     Action::ToggleRunWindow,
+    Action::RevokeProjectTrust,
 ];
 
 /// IntelliJ-style default bindings (from the publicly documented default

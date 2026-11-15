@@ -364,6 +364,7 @@ pub enum KeyAction {
     Rerun,
     ChooseRunConfiguration,
     ToggleRunWindow,
+    RevokeProjectTrust,
 }
 
 /// Modifier used in double-tap gestures.

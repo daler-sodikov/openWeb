@@ -251,9 +251,9 @@ impl ProjectRuntime {
         self.trusted.load(Ordering::Acquire)
     }
 
-    /// Trusts the project (persisted). Blocking.
-    pub fn set_trusted(&self) {
-        self.trusted.store(true, Ordering::Release);
+    /// Trusts the project or revokes the trust (persisted). Blocking.
+    pub fn set_trusted(&self, trusted: bool) {
+        self.trusted.store(trusted, Ordering::Release);
         let recent = self.recent.lock().map(|r| r.clone()).unwrap_or_default();
         self.save_project_file(recent);
     }

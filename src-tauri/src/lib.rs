@@ -894,6 +894,13 @@ async fn trust_project(session: SessionState<'_>) -> Result<(), IpcError> {
     session.trust_project().await
 }
 
+/// Forgets the project's trust: the next run asks again.
+#[tauri::command]
+#[specta::specta]
+async fn revoke_project_trust(session: SessionState<'_>) -> Result<(), IpcError> {
+    session.revoke_project_trust().await
+}
+
 /// Starts a run (or says the project must be trusted first).
 #[tauri::command]
 #[specta::specta]
@@ -1068,6 +1075,7 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             save_run_configuration,
             delete_run_configuration,
             trust_project,
+            revoke_project_trust,
             start_run,
             stop_run,
             close_run,

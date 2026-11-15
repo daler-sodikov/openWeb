@@ -11,7 +11,16 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 
 import { repoRoot } from "../paths";
-import { activeTab, backend, expect, isMac, openApp, openFile, test } from "./harness";
+import {
+  activeTab,
+  backend,
+  expect,
+  isMac,
+  keys as appKeys,
+  openApp,
+  openFile,
+  test,
+} from "./harness";
 
 test.use({ fixture: "test-runners" });
 
@@ -123,6 +132,33 @@ test("the first run shows the command and asks for trust", async ({ page, projec
   await panel(page).getByTestId("run-rerun").click();
   await expect(page.getByTestId("run-tab")).toHaveCount(2);
   await expect(page.getByTestId("trust-dialog")).toHaveCount(0);
+});
+
+test("Revoke Project Trust makes the next run ask again", async ({ page, project }) => {
+  prepareTools(project);
+  await openApp(page, project);
+  await backend("trust_project", {});
+  await choose(page, "Vitest");
+  await expect(page.getByTestId("run-tab")).toHaveCount(1);
+  await expect(page.getByTestId("trust-dialog")).toHaveCount(0);
+
+  // The run's output has the focus and, like a terminal, keeps typed keys
+  // for the program; Go to Action works from the rest of the window.
+  await page.getByTestId("project-tree").click();
+  await page.keyboard.press(appKeys.gotoAction);
+  await page.getByTestId("se-input").fill("Revoke Project Trust");
+  await expect(page.locator('[data-type="action"]').first()).toContainText("Revoke Project Trust");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("status-notice")).toContainText("trust revoked");
+  const configs = (await backend("run_configurations", {})) as { trusted: boolean };
+  expect(configs.trusted).toBe(false);
+
+  // Shift+F10 reruns the selected configuration: the question is back.
+  await page.keyboard.press(keys.run);
+  await expect(page.getByTestId("trust-dialog")).toBeVisible();
+  await expect(page.getByTestId("trust-command")).toContainText("vitest.mjs run");
+  await page.getByTestId("trust-cancel").click();
+  await expect(page.getByTestId("run-tab")).toHaveCount(1);
 });
 
 test("gutter markers run single tests and show their status", async ({ page, project }) => {

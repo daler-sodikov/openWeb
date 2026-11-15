@@ -634,8 +634,8 @@ backend, "core real" the same file starting real programs, "UI" means
       Ctrl/Cmd+click on `file:line:col` in the output (UI, UI real). Colors
       and selection come from the M4 terminal view; not asserted for runs.
 - [x] 5 Trust: the exact command and folder are shown, Cancel runs nothing,
-      the answer is stored outside the project and remembered (core fake,
-      UI).
+      the answer is stored outside the project and remembered; "Revoke
+      Project Trust" makes the next run ask again (core fake, UI, UI real).
 - [ ] 6 Cleanup: Stop, closing the project and quitting end the process
       tree (core fake; core real on Linux: a Node run with its own child,
       the folder is deleted after `close_project`; UI real: Stop of

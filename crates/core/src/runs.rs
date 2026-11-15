@@ -540,7 +540,18 @@ impl Session {
     pub async fn trust_project(&self) -> Result<(), IpcError> {
         let runtime = self.runtime()?;
         blocking(move || {
-            runtime.set_trusted();
+            runtime.set_trusted(true);
+            Ok(())
+        })
+        .await
+    }
+
+    /// Forgets the project's trust: the next run shows its command and
+    /// asks again. Runs already going are not stopped.
+    pub async fn revoke_project_trust(&self) -> Result<(), IpcError> {
+        let runtime = self.runtime()?;
+        blocking(move || {
+            runtime.set_trusted(false);
             Ok(())
         })
         .await

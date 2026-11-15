@@ -788,7 +788,8 @@ added for other languages. Details are written with M5b.
 
 **IPC (M5a, as built).** Commands: `run_configurations` (stored +
 detected, the package manager, trust), `save_run_configuration`,
-`delete_run_configuration`, `trust_project`, `start_run(config, size)` →
+`delete_run_configuration`, `trust_project`, `revoke_project_trust`,
+`start_run(config, size)` →
 `Started { run }` or `NeedsTrust { command, cwd }` (the trust question
 shows exactly this), `stop_run(id)`, `close_run(id)`, `rerun(id)`,
 `rerun_failed(id)`, `rerun_tests(id, targets)` (files, suites or tests from
@@ -815,7 +816,10 @@ the terminal frame events with ids from `RUN_ID_BASE`.
   project copy. The core tests start real Node, Vitest and Playwright.
 - Runs save unsaved documents first (the tools read the files on disk).
 - Trust is per project folder, stored as `trusted` in Ferrule's
-  `projects/<hash>.json`; there is no UI to revoke it yet.
+  `projects/<hash>.json`; the "Revoke Project Trust" action (Go to Action,
+  no default shortcut) clears it, and runs already going are not stopped.
+- Keys typed while a run's output has the focus go to the program, like in
+  the terminal; only the run actions and Alt+F12 are handled by Ferrule.
 
 ## 5. Editor view layer: CodeMirror 6 as a view only
 

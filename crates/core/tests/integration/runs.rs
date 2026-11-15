@@ -229,6 +229,25 @@ async fn nothing_runs_before_the_project_is_trusted() {
         .await
         .unwrap();
     assert!(again.run_configurations().await.unwrap().trusted);
+
+    // Revoked: the next run asks again, and the answer is stored too.
+    again.revoke_project_trust().await.unwrap();
+    assert!(!again.run_configurations().await.unwrap().trusted);
+    let vitest = detected(&configs.detected, "detected:test:vitest");
+    assert!(matches!(
+        again.start_run(vitest, SIZE).await.unwrap(),
+        StartRun::NeedsTrust { .. }
+    ));
+    let third = Session::with_config(
+        SessionConfig::new(dir.path().join("data")),
+        Arc::new(Events::default()),
+    )
+    .unwrap();
+    third
+        .open_project(root.to_string_lossy().into_owned())
+        .await
+        .unwrap();
+    assert!(!third.run_configurations().await.unwrap().trusted);
 }
 
 #[tokio::test]

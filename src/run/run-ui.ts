@@ -28,6 +28,7 @@ export const RUN_ACTIONS: ReadonlySet<KeyAction> = new Set<KeyAction>([
   "rerun",
   "chooseRunConfiguration",
   "toggleRunWindow",
+  "revokeProjectTrust",
 ]);
 
 export interface RunHost {
@@ -147,6 +148,9 @@ export class RunUi {
       case "chooseRunConfiguration":
         void this.choose();
         return;
+      case "revokeProjectTrust":
+        void this.revokeTrust();
+        return;
       case "toggleRunWindow":
         if (this.window.visible && this.window.hasFocus()) {
           this.window.hide();
@@ -192,6 +196,15 @@ export class RunUi {
     this.chooser.title = "Run configurations (Alt+Shift+F10)";
     this.runButton.title = this.selected ? `Run '${this.selected.name}'` : "Run…";
     this.stopButton.disabled = this.window.runningId() === null;
+  }
+
+  private async revokeTrust(): Promise<void> {
+    try {
+      unwrap(await commands.revokeProjectTrust());
+      this.host.notify("Project trust revoked: the next run asks again.");
+    } catch (error: unknown) {
+      this.host.notify(`Cannot revoke trust: ${errorMessage(error)}`);
+    }
   }
 
   private async stop(id: number): Promise<void> {

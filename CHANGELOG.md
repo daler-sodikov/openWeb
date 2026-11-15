@@ -25,7 +25,7 @@ All notable changes to this project are documented here. The format follows
   status shown.
 - Nothing runs before the project is trusted: the first run shows the exact
   command and asks; the answer is kept in Ferrule's data folder, not in the
-  project. Stopping, closing the project and quitting end the whole process
+  project, and "Revoke Project Trust" (Go to Action) takes it back. Stopping, closing the project and quitting end the whole process
   tree.
 
 ### Fixed
