@@ -391,3 +391,34 @@ async fn branches_and_the_checkout_guard() {
     let err = s.git_create_branch(" ".into(), false).await.unwrap_err();
     assert_eq!(err.kind, IpcErrorKind::InvalidArgument);
 }
+
+/// Closing waits for Git work started with the project. A wrapper makes
+/// every git call take 0.5 s, as process start-up and status can on a busy
+/// Windows machine; afterwards nothing may still use the folder (on Windows
+/// it could not be deleted).
+#[cfg(unix)]
+#[tokio::test]
+async fn closing_waits_for_git_started_with_the_project() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let repo = make_repo(dir.path());
+    let slow_git = dir.path().join("slow-git");
+    fs::write(&slow_git, "#!/bin/sh\nsleep 0.5\nexec git \"$@\"\n").unwrap();
+    fs::set_permissions(&slow_git, fs::Permissions::from_mode(0o755)).unwrap();
+    let data = dir.path().join("data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(
+        data.join("settings.json"),
+        serde_json::json!({ "git": { "path": slow_git } }).to_string(),
+    )
+    .unwrap();
+    let (s, _) = open(dir.path(), &repo).await;
+    // Close at once: discovery and the first status are still running.
+    let report = s.close_project().await.unwrap();
+    assert!(
+        report.still_running.is_empty(),
+        "{:?}",
+        report.still_running
+    );
+    crate::cleanup::remove_project_dir(&repo, &report.still_running);
+}

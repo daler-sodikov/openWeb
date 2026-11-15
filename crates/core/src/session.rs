@@ -34,19 +34,6 @@ use crate::convert::{
     selection_from_ipc, selection_to_ipc, to_u32, to_usize, token_to_ipc, vfs_error,
 };
 
-/// "terminal 3 (processes 120, 121)" for a close report.
-fn terminal_still_running(id: u32, pids: &[u32]) -> String {
-    if pids.is_empty() {
-        format!("terminal {id}")
-    } else {
-        let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
-        format!("terminal {id} (processes {})", pids.join(", "))
-    }
-}
-
-/// How long closing a project waits for each kind of work to stop.
-const CLOSE_WAIT: Duration = Duration::from_secs(5);
-
 /// Default delay between the last edit and writing the recovery file.
 pub const DEFAULT_AUTOSAVE_DELAY: Duration = Duration::from_secs(1);
 
@@ -413,10 +400,14 @@ impl Session {
             )
         };
         if let Some(old) = previous_runtime {
-            old.cancel.cancel();
-            old.terminals.close_all();
-            // Shut the old project's server down in the background.
-            tokio::spawn(old.lsp.stop());
+            // The same shutdown as close_project, in the background so the
+            // new project opens at once.
+            tokio::spawn(async move {
+                let still_running = old.shut_down().await;
+                if !still_running.is_empty() {
+                    tracing::warn!(?still_running, "the previous project did not stop in time");
+                }
+            });
         }
         self.flush_closed(previous_docs).await;
         let project = runtime.project.clone();
@@ -426,7 +417,10 @@ impl Session {
         let git = runtime.git.clone();
         let root = project.root().to_path_buf();
         let program = self.git_program();
-        tokio::task::spawn_blocking(move || git.start(&root, program));
+        let discovery = tokio::task::spawn_blocking(move || git.start(&root, program));
+        if let Ok(mut slot) = runtime.git_start.lock() {
+            *slot = Some(discovery);
+        }
 
         // Index in the background; the tree is usable immediately.
         self.sink
@@ -465,42 +459,10 @@ impl Session {
             )
         };
         self.flush_closed(docs).await;
-        let mut still_running = Vec::new();
-        let Some(runtime) = runtime else {
-            return Ok(ipc::ProjectCloseReport { still_running });
+        let still_running = match runtime {
+            Some(runtime) => runtime.shut_down().await,
+            None => Vec::new(),
         };
-        runtime.cancel.cancel();
-        let terminals = runtime.clone();
-        for (id, pids) in
-            blocking(move || Ok(terminals.terminals.close_all_and_wait(CLOSE_WAIT))).await?
-        {
-            still_running.push(terminal_still_running(id, &pids));
-        }
-        // Waits for the server and the processes it started.
-        if tokio::time::timeout(CLOSE_WAIT, runtime.lsp.stop())
-            .await
-            .is_err()
-        {
-            still_running.push("the TypeScript language server".to_owned());
-        }
-        // The index build creates the watcher when it ends: wait for it
-        // before stopping the watcher.
-        let task = runtime.index_task.lock().ok().and_then(|mut t| t.take());
-        if let Some(task) = task
-            && tokio::time::timeout(CLOSE_WAIT, task).await.is_err()
-        {
-            still_running.push("indexing".to_owned());
-        }
-        runtime.stop_watching();
-        let git = runtime.git.clone();
-        if !blocking(move || Ok(git.stop(CLOSE_WAIT))).await? {
-            still_running.push("a Git status refresh".to_owned());
-        }
-        if still_running.is_empty() {
-            tracing::info!(root = ?runtime.project.root(), "project closed");
-        } else {
-            tracing::warn!(?still_running, "project closed; some work had not stopped");
-        }
         Ok(ipc::ProjectCloseReport { still_running })
     }
 

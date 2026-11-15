@@ -193,8 +193,14 @@ async fn rename_close_and_project_switch_end_terminals() {
     s.open_project(other.to_string_lossy().into_owned())
         .await
         .unwrap();
-    assert_eq!(*backend.log.terminated.lock().unwrap(), 2);
     assert!(s.terminals().await.unwrap().terminals.is_empty());
+    // The previous project shuts down in the background (it waits for its
+    // processes), so its last terminal ends shortly after the switch.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while *backend.log.terminated.lock().unwrap() < 2 {
+        assert!(Instant::now() < deadline, "the old terminal was not ended");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 #[tokio::test]
@@ -254,5 +260,5 @@ async fn closing_the_project_ends_terminals_and_frees_the_folder() {
         s.git_status().await.unwrap_err().kind,
         IpcErrorKind::Conflict
     );
-    fs::remove_dir_all(&root).unwrap();
+    crate::cleanup::remove_project_dir(&root, &report.still_running);
 }

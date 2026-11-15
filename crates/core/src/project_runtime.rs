@@ -48,6 +48,32 @@ pub(crate) struct ProjectRuntime {
     pub git: Arc<crate::git::GitState>,
     /// The background index build (awaited when the project closes).
     pub index_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// The Git repository discovery and first status, which run `git` in
+    /// the project folder (awaited when the project closes).
+    pub git_start: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+/// How long closing a project waits for each kind of work to stop.
+const CLOSE_WAIT: Duration = Duration::from_secs(5);
+
+/// "terminal 3 (processes 120, 121)" for a close report.
+fn terminal_still_running(id: u32, pids: &[u32]) -> String {
+    if pids.is_empty() {
+        format!("terminal {id}")
+    } else {
+        let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
+        format!("terminal {id} (processes {})", pids.join(", "))
+    }
+}
+
+/// Awaits a background task, at most [`CLOSE_WAIT`]; `false` if it was
+/// still running then.
+async fn finished(slot: &Mutex<Option<tokio::task::JoinHandle<()>>>) -> bool {
+    let task = slot.lock().ok().and_then(|mut t| t.take());
+    match task {
+        Some(task) => tokio::time::timeout(CLOSE_WAIT, task).await.is_ok(),
+        None => true,
+    }
 }
 
 impl Drop for ProjectRuntime {
@@ -96,14 +122,65 @@ impl ProjectRuntime {
             terminals,
             git,
             index_task: Mutex::new(None),
+            git_start: Mutex::new(None),
         }
     }
 
-    /// Stops watching the project's files (it is closing).
-    pub fn stop_watching(&self) {
-        if let Ok(mut slot) = self.watcher.lock() {
-            slot.take();
+    /// Ends everything this project started and waits until it has
+    /// stopped (each kind of work at most a few seconds): terminals and
+    /// their processes, the language server and the processes it started,
+    /// Git discovery and refresh (which run `git` in the project folder),
+    /// indexing and the file watcher (including its handles on Windows).
+    /// Returns what was still running when the waits ran out.
+    pub async fn shut_down(self: &Arc<Self>) -> Vec<String> {
+        let mut still_running = Vec::new();
+        self.cancel.cancel();
+        let me = self.clone();
+        match tokio::task::spawn_blocking(move || me.terminals.close_all_and_wait(CLOSE_WAIT)).await
+        {
+            Ok(left) => still_running.extend(
+                left.iter()
+                    .map(|(id, pids)| terminal_still_running(*id, pids)),
+            ),
+            Err(_) => still_running.push("terminals (closing failed)".to_owned()),
         }
+        // Waits for the server and the processes it started.
+        if tokio::time::timeout(CLOSE_WAIT, self.lsp.stop())
+            .await
+            .is_err()
+        {
+            still_running.push("the TypeScript language server".to_owned());
+        }
+        if !finished(&self.git_start).await {
+            still_running.push("Git repository discovery".to_owned());
+        }
+        // The index build creates the watcher when it ends: wait for it
+        // before stopping the watcher.
+        if !finished(&self.index_task).await {
+            still_running.push("indexing".to_owned());
+        }
+        // Taken out of the mutex first: the watcher's batch thread locks it,
+        // and Watcher::stop waits for that thread.
+        let watcher = self.watcher.lock().ok().and_then(|mut w| w.take());
+        if let Some(watcher) = watcher {
+            let stopped = tokio::task::spawn_blocking(move || watcher.stop(CLOSE_WAIT)).await;
+            if !matches!(stopped, Ok(true)) {
+                still_running.push("the file watcher".to_owned());
+            }
+        }
+        let git = self.git.clone();
+        if !matches!(
+            tokio::task::spawn_blocking(move || git.stop(CLOSE_WAIT)).await,
+            Ok(true)
+        ) {
+            still_running.push("a Git status refresh".to_owned());
+        }
+        if still_running.is_empty() {
+            tracing::info!(root = ?self.project.root(), "project closed");
+        } else {
+            tracing::warn!(?still_running, "project closed; some work had not stopped");
+        }
+        still_running
     }
 
     pub fn index_state(&self) -> IndexState {
