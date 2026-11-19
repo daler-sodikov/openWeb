@@ -673,10 +673,11 @@ backend, "core real" the same file starting real programs, "UI" means
       has not run M5a yet.
 
 Open M5a items: CI on macOS and Windows (Windows `.cmd` shims and Job
-Objects for runs); typing latency with gutter markers not measured; CI must
-install the fixture's Jest (`bun install --frozen-lockfile --cwd
-fixtures/test-runners`, like the react-ts step) or `real_jest_run` skips
-there. Closed: Jest against the real tool (Linux), a UI test for Alt+4.
+Objects for runs); typing latency with gutter markers not measured; the CI
+step that installs the fixture's Jest (`bun install --frozen-lockfile --cwd
+fixtures/test-runners`) has not run on GitHub yet, so `real_jest_run` is
+unconfirmed there. Closed: Jest against the real tool (Linux), a UI test for
+Alt+4.
 
 ### M5b: Node debugger (after M5a)
 
