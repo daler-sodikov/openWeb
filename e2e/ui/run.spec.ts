@@ -31,6 +31,7 @@ const keys = {
   stop: isMac ? "Meta+F2" : "Control+F2",
   rerun: isMac ? "Meta+r" : "Control+F5",
   choose: isMac ? "Control+Alt+r" : "Alt+Shift+F10",
+  toggleWindow: isMac ? "Meta+4" : "Alt+4",
 };
 
 function hasNode(): boolean {
@@ -180,6 +181,41 @@ test("the first run shows the command and asks for trust", async ({ page, projec
   await panel(page).getByTestId("run-rerun").click();
   await expect(page.getByTestId("run-tab")).toHaveCount(2);
   await expect(page.getByTestId("trust-dialog")).toHaveCount(0);
+});
+
+test("Alt+4 shows, focuses and hides the Run window", async ({ page, project }) => {
+  prepareTools(project);
+  await openApp(page, project);
+  await backend("trust_project", {});
+  const runWindow = page.getByTestId("run-window");
+  await expect(runWindow).toBeHidden();
+
+  // Nothing has run yet: the window opens and says so.
+  await page.keyboard.press(keys.toggleWindow);
+  await expect(runWindow).toBeVisible();
+  await expect(page.getByTestId("run-empty")).toBeVisible();
+
+  // With a run in it, Alt+4 hides the window while it has the focus ...
+  await choose(page, "Vitest");
+  await expect(page.getByTestId("run-tab")).toHaveCount(1);
+  await expect(panel(page).getByTestId("run-status")).toContainText("Exit code 1", {
+    timeout: 60_000,
+  });
+  await page.keyboard.press(keys.toggleWindow);
+  await expect(runWindow).toBeHidden();
+
+  // ... and shows it again with the run still there.
+  await page.keyboard.press(keys.toggleWindow);
+  await expect(runWindow).toBeVisible();
+  await expect(page.getByTestId("run-tab")).toHaveCount(1);
+
+  // While the focus is elsewhere, Alt+4 brings the window to the front
+  // instead of hiding it; the next Alt+4 hides it.
+  await page.getByTestId("project-tree").click();
+  await page.keyboard.press(keys.toggleWindow);
+  await expect(runWindow).toBeVisible();
+  await page.keyboard.press(keys.toggleWindow);
+  await expect(runWindow).toBeHidden();
 });
 
 test("Revoke Project Trust makes the next run ask again", async ({ page, project }) => {
