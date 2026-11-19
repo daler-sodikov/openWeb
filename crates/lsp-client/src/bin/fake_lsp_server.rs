@@ -19,6 +19,8 @@
 //!   in each open document.
 //! - `textDocument/completion` → every distinct word of the open documents
 //!   (trigger character `.`); the word `slow` waits for `$/cancelRequest`.
+//!   With `FAKE_LSP_SNIPPETS` set it answers one snippet item instead
+//!   (`forof`, `for (const ${1:item} of ${2:items}) { $0 }`).
 //! - `textDocument/rename` → every whole-word occurrence in the open
 //!   documents (`changes`).
 //! - `fake/crash` (notification) exits with code 1; `exit` with code 0.
@@ -236,6 +238,15 @@ impl Server {
                 if word == "slow" {
                     self.slow.push(id);
                     return Ok(());
+                }
+                if std::env::var_os("FAKE_LSP_SNIPPETS").is_some() {
+                    let snippet = json!({
+                        "label": "forof",
+                        "kind": 15,
+                        "insertTextFormat": 2,
+                        "insertText": "for (const ${1:item} of ${2:items}) {\n\t$0\n}",
+                    });
+                    return self.reply(&id, json!({ "isIncomplete": false, "items": [snippet] }));
                 }
                 // Every distinct word of the open documents.
                 let mut labels: Vec<String> = self

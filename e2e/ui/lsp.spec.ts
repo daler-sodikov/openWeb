@@ -1,11 +1,12 @@
 // M3a: diagnostics, Problems, Quick Documentation and navigation with the
 // real typescript-language-server, and the status when it is missing.
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 import type { Page } from "@playwright/test";
 
-import { BACKEND_DATA } from "../paths";
+import { BACKEND_DATA, repoRoot } from "../paths";
 import {
   activeTab,
   backend,
@@ -380,4 +381,100 @@ test("a missing server is reported and editing keeps working", async ({ page, pr
   } finally {
     fs.rmSync(settings, { force: true });
   }
+});
+
+// Snippet tab stops, end to end. typescript-language-server rarely sends
+// snippets, so the project's `node_modules/.bin/typescript-language-server`
+// (the first place the backend looks) is a script that starts the scripted
+// `fake-lsp-server`, which answers one `forof` snippet completion.
+test.describe("snippet tab stops", () => {
+  test.skip(process.platform === "win32", "the server launcher is a shell script");
+
+  const SNIPPET_FILE = "src/snippet.ts";
+
+  test.beforeAll(() => {
+    execFileSync(
+      "cargo",
+      ["build", "--quiet", "-p", "ferrule-lsp-client", "--bin", "fake-lsp-server"],
+      {
+        cwd: repoRoot,
+      },
+    );
+  });
+
+  /** Opens a file with a `forof` line, accepts the snippet and returns the editor. */
+  async function acceptSnippet(page: Page, project: string): Promise<void> {
+    const targetDir = process.env.CARGO_TARGET_DIR ?? path.join(repoRoot, "target");
+    const fake = path.join(targetDir, "debug", "fake-lsp-server");
+    const bin = path.join(project, "node_modules", ".bin");
+    fs.mkdirSync(bin, { recursive: true });
+    const launcher = path.join(bin, "typescript-language-server");
+    fs.writeFileSync(launcher, `#!/bin/sh\nFAKE_LSP_SNIPPETS=1 exec "${fake}" "$@"\n`, {
+      mode: 0o755,
+    });
+    fs.writeFileSync(path.join(project, SNIPPET_FILE), "export const a = 1;\n");
+    await openApp(page, project);
+    await openFile(page, SNIPPET_FILE);
+    await editor(page).click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type("forof");
+    await page.keyboard.press("Control+Space");
+    await expect(page.locator(".cm-tooltip-autocomplete li", { hasText: "forof" })).toBeVisible({
+      timeout: 15_000,
+    });
+    // CodeMirror ignores Enter for 75 ms after the list (re)appears.
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Enter");
+  }
+
+  test("Tab walks the stops with placeholders selected; $0 ends the session", async ({
+    page,
+    project,
+  }) => {
+    await acceptSnippet(page, project);
+    // Inserted without its placeholder markers; `item` is selected.
+    await expect(editor(page)).toContainText("for (const item of items) {");
+    await page.keyboard.type("entry");
+    await expect(editor(page)).toContainText("for (const entry of items) {");
+    // Tab: `items` is selected.
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("list");
+    await expect(editor(page)).toContainText("for (const entry of list) {");
+    // Tab: the caret is at $0, inside the body, nothing selected.
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("use(entry);");
+    await expect(editor(page)).toContainText("use(entry);");
+    // The session is over: Tab no longer jumps back to a stop, it indents
+    // (the typed text stays where it is and `list` is not selected).
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("Z");
+    await expect(editor(page)).toContainText("of list) {");
+    await expect(editor(page)).not.toContainText("of Z");
+  });
+
+  test("Escape leaves the session", async ({ page, project }) => {
+    await acceptSnippet(page, project);
+    await expect(editor(page)).toContainText("for (const item of items) {");
+    await page.keyboard.press("Escape");
+    // `item` is still selected, but Tab is not a stop jump any more.
+    await page.keyboard.type("a");
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("B");
+    await expect(editor(page)).toContainText("of items) {");
+    await expect(editor(page)).not.toContainText("of B");
+  });
+
+  test("Shift+Tab goes back and one undo removes the whole snippet", async ({ page, project }) => {
+    await acceptSnippet(page, project);
+    await expect(editor(page)).toContainText("for (const item of items) {");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.type("x");
+    await expect(editor(page)).toContainText("for (const x of items) {");
+    await page.keyboard.press("ControlOrMeta+z");
+    await page.keyboard.press("ControlOrMeta+z");
+    // Back to the text before accepting: the typed word, no snippet.
+    await expect(editor(page)).toContainText("forof");
+    await expect(editor(page)).not.toContainText("for (const");
+  });
 });
