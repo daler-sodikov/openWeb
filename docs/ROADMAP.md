@@ -244,6 +244,15 @@ read-only paging for files over 20 MB.
       (53 ms median), memory (308 MiB PSS) and "ready" miss the budget.
       Measure on a GPU desktop, then reduce the editor's idle repaint cost
       (caret blink), typing-path work and memory.
+- [ ] Thin view (CLAUDE.md, architecture rule 1; from the project review):
+      view-model logic still lives in the frontend and should move to Rust
+      behind typed IPC: problem sorting and counts (`src/app/problems.ts`),
+      tree flattening and visible ranges (`src/tree/tree-model.ts`), the
+      newest-Git-status check and branch labels (`src/git/status.ts`), and on the
+      unmerged `m5a` branch test rows and summaries (`src/run/format.ts`:
+      `visibleRows`, `summaryText`)
+- [ ] Typed IPC (CLAUDE.md, architecture rule 2; from the project review):
+      `src/ipc/result.ts` hand-writes `IpcResult`; generate it from Rust
 
 ## M3: TypeScript intelligence
 
