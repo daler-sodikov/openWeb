@@ -239,11 +239,18 @@ read-only paging for files over 20 MB.
 - [ ] `perf/` on macOS and Windows; comparison runs against other IDEs with
       the same method
 - [ ] Search-latency benchmark
-- [ ] Performance (from `perf/RESULTS.md`, M2b run on Xvfb): idle CPU with an
-      open editor (21 % of a core; ~0 % without one), typing latency
-      (53 ms median), memory (308 MiB PSS) and "ready" miss the budget.
-      Measure on a GPU desktop, then reduce the editor's idle repaint cost
-      (caret blink), typing-path work and memory.
+- [ ] Performance (from `perf/RESULTS.md`, Xvfb, software rendering). Idle
+      CPU with an open editor: the cause was the caret blink (CodeMirror's
+      CSS animation keeps WebKitGTK producing frames), measured 2026-11-20
+      with `ferrule-perf`, 3 runs per build: 21-26 % of a core with the
+      blink, ~1 % with it off, ~2 % with the timer-driven blink now in the
+      editor, so that budget (< 5 %) is met on Xvfb. Still missed: "Ready"
+      (< 2 s; 4-18 s with the timer blink, never with the CSS blink),
+      typing latency (< 8 ms; 22-25 ms median now, 53 ms before) and memory
+      (< 250 MB; 308 MiB in the 2026-11-04 run, 660-680 MiB in the
+      2026-11-20 runs, difference not investigated). Not measured on a GPU
+      desktop, macOS or Windows; measure there next, then work on the
+      typing path, "Ready" and memory.
 - [ ] Thin view (CLAUDE.md, architecture rule 1; from the project review):
       view-model logic still lives in the frontend and should move to Rust
       behind typed IPC: problem sorting and counts (`src/app/problems.ts`),
