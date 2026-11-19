@@ -632,6 +632,46 @@ async fn real_node_vitest_and_playwright_runs() {
     crate::cleanup::remove_project_dir(&root, &report.still_running);
 }
 
+/// What Jest does when started directly in the project copy (no terminal),
+/// for a failure message: how it ended, what it printed, and what
+/// `node_modules` looks like.
+fn jest_diagnosis(root: &Path) -> String {
+    let script = root.join("node_modules/jest/bin/jest.js");
+    let report = root.join("diagnosis.json");
+    let ran = std::process::Command::new("node")
+        .arg(&script)
+        .args(["--json", "--testLocationInResults"])
+        .arg(format!("--outputFile={}", report.display()))
+        .current_dir(root)
+        .output();
+    let mut out = format!(
+        "root {}\nscript {} exists: {}\nreport written: {}\n",
+        root.display(),
+        script.display(),
+        script.is_file(),
+        report.is_file()
+    );
+    match ran {
+        Ok(o) => out.push_str(&format!(
+            "direct run: {}\nstdout:\n{}\nstderr:\n{}\n",
+            o.status,
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        )),
+        Err(err) => out.push_str(&format!("direct run failed to start: {err}\n")),
+    }
+    let modules: Vec<String> = fs::read_dir(root.join("node_modules"))
+        .map(|d| {
+            d.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .take(12)
+                .collect()
+        })
+        .unwrap_or_default();
+    out.push_str(&format!("node_modules (first 12): {modules:?}\n"));
+    out
+}
+
 /// Jest is not a dependency of the repository itself: the fixture has its
 /// own (`bun install --cwd fixtures/test-runners`), linked into the copy.
 #[tokio::test]
@@ -653,7 +693,16 @@ async fn real_jest_run() {
     let jest = detected(&configs.detected, "detected:test:jest");
     let run = started(s.start_run(jest, SIZE).await.unwrap());
     let finished = wait_finished(&events, run.id, Duration::from_secs(120)).await;
-    let output = events.output(run.id);
+    let mut output = events.output(run.id);
+    if finished.report_error.is_some() {
+        // The terminal may show nothing (ConPTY): say what Jest does when
+        // started directly, and how the run ended.
+        output = format!(
+            "{output}\nexit code {:?}\n{}",
+            finished.exit_code,
+            jest_diagnosis(&root)
+        );
+    }
     assert_eq!(finished.report_error, None, "{output}");
     assert_eq!(finished.exit_code, Some(1), "{output}");
     assert_eq!(finished.counts, Some((3, 1, 1)), "{output}");
