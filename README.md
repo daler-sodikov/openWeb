@@ -7,10 +7,18 @@ Rust core with a thin Tauri v2 + TypeScript view layer.
 
 **Not affiliated with JetBrains.**
 
-> Status: **Milestone 3b (TypeScript intelligence)**. Language server-powered
-> completion, parameter hints, find usages, rename with preview, Alt+Enter quick
-> fixes, formatting, and organize imports. Diagnostics, hover, and navigation
-> (Go to Definition/Type/Implementation) from M3a. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: **Milestones 0 to 4 built; M5 (run, debug, tests) not started.**
+> Working: project tree, tabs, split editors, Search Everywhere and Go to
+> File/Symbol/Line, Find/Replace in Files, folding, EditorConfig and syntax
+> highlighting (M1, M2, M2b); language server-powered diagnostics, hover, Go to
+> Definition/Type/Implementation, completion, parameter hints, find usages,
+> rename with preview, Alt+Enter quick fixes, formatting and organize imports
+> (M3a, M3b); an integrated terminal (M4a) and Git basics: status, gutter
+> markers, diff, commit, log, branches and blame (M4b). Verified locally on
+> Linux only; macOS and Windows CI confirmation is still open. Known gaps
+> include hover links that do not open, diagnostics only for open files, and
+> four missed performance budgets. See [docs/ROADMAP.md](docs/ROADMAP.md) for
+> the full list of open items.
 
 ## Requirements
 
