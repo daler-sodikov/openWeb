@@ -19,7 +19,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -52,6 +52,8 @@ fn program(cwd: &Path, unix_script: &str) -> SpawnSpec {
 /// Acknowledges every frame (like the view) and records exits.
 struct Recorder {
     frames: AtomicUsize,
+    /// Lines of scrollback in the latest frame.
+    history: AtomicU32,
     exited: Mutex<Option<Option<i32>>>,
     terminal: Mutex<Option<Arc<Terminal>>>,
 }
@@ -59,6 +61,7 @@ struct Recorder {
 fn start(spec: &SpawnSpec) -> (Arc<Terminal>, Arc<Recorder>) {
     let recorder = Arc::new(Recorder {
         frames: AtomicUsize::new(0),
+        history: AtomicU32::new(0),
         exited: Mutex::new(None),
         terminal: Mutex::new(None),
     });
@@ -66,6 +69,7 @@ fn start(spec: &SpawnSpec) -> (Arc<Terminal>, Arc<Recorder>) {
     let sink: EventSink = Arc::new(move |event| match event {
         TerminalEvent::Frame(frame) => {
             r.frames.fetch_add(1, Ordering::Relaxed);
+            r.history.store(frame.history, Ordering::Relaxed);
             if let Some(t) = r.terminal.lock().unwrap().as_ref() {
                 t.ack(frame.seq);
             }
@@ -386,4 +390,93 @@ fn close_all_and_wait_returns_after_the_programs_ended() {
         "the background child survived (state {state:?})\n{}",
         ps_report(pid, shell)
     );
+}
+
+/// Waits until the latest frame reports `want` lines of scrollback.
+#[cfg(unix)]
+fn wait_history(recorder: &Recorder, want: u32) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while recorder.history.load(Ordering::Relaxed) != want {
+        assert!(
+            Instant::now() < deadline,
+            "scrollback is {} lines, expected {want}",
+            recorder.history.load(Ordering::Relaxed)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+// Unix only: the program switches screens with `printf` escape sequences,
+// which `cmd.exe` cannot print without a helper program.
+#[cfg(unix)]
+#[test]
+fn the_alternate_screen_leaves_the_normal_screen_and_scrollback_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    // 40 lines fill the 24 rows and push 17 into the scrollback (the cursor
+    // waits on a 41st, empty line). Then the program does what `less` and
+    // `vim` do: ESC[?1049h, clear, draw; ESC[?1049l on exit.
+    let (t, recorder) = start(&program(
+        dir.path(),
+        r#"i=0; while [ "$i" -lt 40 ]; do i=$((i+1)); echo "norm $i"; done
+printf '\033[?1049h\033[H\033[2Jin-alt-screen'
+IFS= read -r _
+printf '\033[?1049l'
+echo after-alt
+IFS= read -r _"#,
+    ));
+    wait_line(&t, SIZE.rows, "in the alternate screen", |l| {
+        l == "in-alt-screen"
+    });
+    let alt = screen(&t, SIZE.rows);
+    assert!(
+        !alt.contains("norm "),
+        "the normal screen shows through:\n{alt}"
+    );
+    type_line(&t, "");
+    wait_line(&t, SIZE.rows, "after leaving the alternate screen", |l| {
+        l == "after-alt"
+    });
+    let back = screen(&t, SIZE.rows);
+    assert!(
+        !back.contains("in-alt-screen"),
+        "the alternate screen's text stayed:\n{back}"
+    );
+    // The last normal lines are where they were (`after-alt` took the cursor's
+    // line and scrolled the screen by one).
+    assert!(back.contains("norm 40"), "{back}");
+    assert!(back.contains("norm 19"), "{back}");
+    // 17 lines before the alternate screen, one more for `after-alt`: the
+    // alternate screen added none and lost none.
+    wait_history(&recorder, 18);
+    t.scroll(1000);
+    assert_eq!(t.row_text(0).trim_end(), "norm 1");
+    t.close();
+}
+
+#[cfg(unix)]
+#[test]
+fn scrollback_keeps_10_000_lines_and_drops_the_oldest() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = 30_000;
+    // The default options, as the app uses them.
+    assert_eq!(TerminalOptions::default().scrollback, 10_000);
+    let (t, recorder) = start(&program(
+        dir.path(),
+        &format!(
+            r#"i=0; while [ "$i" -lt {lines} ]; do i=$((i+1)); echo "sb $i"; done; IFS= read -r _"#
+        ),
+    ));
+    wait_line(&t, SIZE.rows, "with the last line", |l| {
+        l == format!("sb {lines}")
+    });
+    // The 24 rows show the last 23 lines and the cursor's empty line; the
+    // scrollback holds the 10 000 lines before them and nothing older.
+    let history = 10_000;
+    wait_history(&recorder, history);
+    t.scroll(i32::MAX / 2);
+    let oldest = lines - 23 - history + 1;
+    assert_eq!(t.row_text(0).trim_end(), format!("sb {oldest}"));
+    // More output after the limit was reached does not grow it.
+    assert_eq!(recorder.history.load(Ordering::Relaxed), history);
+    t.close();
 }

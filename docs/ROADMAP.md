@@ -508,9 +508,14 @@ push.
       program unless renamed, exit code shown.
 - [ ] 3 Terminal behavior: colors, attributes, cursor, wide characters,
       resize (the program sees the new size, tested), wheel scrollback,
-      mouse and word selection, copy/paste (tested with a real shell). Not
-      tested: alternate screen (`less`, `vim`) and the 10 000-line
-      scrollback limit.
+      mouse and word selection, copy/paste (tested with a real shell).
+      Tested on Linux with a real PTY (`crates/terminal/tests/native.rs`):
+      the alternate screen (`ESC[?1049h`/`l` sent by `printf`, not `less` or
+      `vim`: the normal screen and its scrollback come back unchanged) and
+      the 10 000-line scrollback limit (30 000 lines leave exactly 10 000,
+      the oldest dropped). Not tested: memory use under the limit (not
+      measured), macOS/Windows (the tests are Unix only), a Playwright test
+      of either.
 - [x] 4 Keys: everything goes to the shell except Alt+F12 and the
       terminal's copy/paste/new-tab keys (history with the arrow keys
       tested in a real shell).
