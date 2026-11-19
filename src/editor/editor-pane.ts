@@ -64,6 +64,7 @@ import { type DocModel, type DocPane, mirrored } from "./doc-model";
 import { DoubleModifierGesture } from "./gesture";
 import { highlightField, setHighlights } from "./highlight";
 import {
+  caretBlink,
   colorScheme,
   colorSchemeFlag,
   editorChrome,
@@ -569,7 +570,10 @@ export class EditorPane implements DocPane {
         codeFolding(),
         highlightActiveLineGutter(),
         highlightActiveLine(),
-        drawSelection(),
+        // The blink is a timer (`caretBlink`): CodeMirror's CSS animation
+        // keeps WebKitGTK repainting all the time.
+        drawSelection({ cursorBlinkRate: 0 }),
+        caretBlink,
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
         EditorState.readOnly.of(doc.readOnly),
