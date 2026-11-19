@@ -68,6 +68,11 @@ export class Workbench implements PaneHost, DocHost {
   /** Open documents by path; panes in any group share them. */
   private readonly docs = new Map<string, DocModel>();
   private readonly opening = new Map<string, Promise<DocModel | null>>();
+  /**
+   * Closes still on their way to Rust, by path. Opening the path waits for
+   * them: an open sent first would get the document the close then releases.
+   */
+  private readonly closing = new Map<string, Promise<void>>();
   private readonly tree: TreeView;
   private readonly groupsEl = el("div", "editor-groups", "editor-groups");
   private readonly welcome = el("div", "welcome", "welcome");
@@ -618,6 +623,7 @@ export class Workbench implements PaneHost, DocHost {
     if (pending) return pending;
     const task = (async () => {
       try {
+        await this.closing.get(path);
         const opened = unwrap(await openDocumentAt(path));
         const doc = new DocModel(opened, this);
         this.docs.set(path, doc);
@@ -878,16 +884,24 @@ export class Workbench implements PaneHost, DocHost {
     this.updateChrome();
     if (doc.panes.size === 0) {
       this.docs.delete(doc.path);
-      void (async () => {
+      const close = (async () => {
+        await this.closing.get(doc.path);
         // Let queued edits reach Rust first (unsaved text stays recoverable).
         await doc.idle();
         doc.destroy();
         try {
-          unwrap(await commands.closeDocument(doc.docId));
+          const result = await commands.closeDocument(doc.docId);
+          // Not open any more (e.g. the project was switched): nothing to close.
+          if (result.status === "error" && result.error.kind !== "notFound")
+            this.notify(result.error.message);
         } catch (error: unknown) {
           this.notify(errorMessage(error));
         }
       })();
+      this.closing.set(doc.path, close);
+      void close.finally(() => {
+        if (this.closing.get(doc.path) === close) this.closing.delete(doc.path);
+      });
     }
   }
 

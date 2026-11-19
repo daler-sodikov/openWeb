@@ -244,6 +244,15 @@ read-only paging for files over 20 MB.
       (53 ms median), memory (308 MiB PSS) and "ready" miss the budget.
       Measure on a GPU desktop, then reduce the editor's idle repaint cost
       (caret blink), typing-path work and memory.
+- [ ] Thin view (CLAUDE.md, architecture rule 1; from the project review):
+      view-model logic still lives in the frontend and should move to Rust
+      behind typed IPC: problem sorting and counts (`src/app/problems.ts`),
+      tree flattening and visible ranges (`src/tree/tree-model.ts`), the
+      newest-Git-status check and branch labels (`src/git/status.ts`), and on the
+      unmerged `m5a` branch test rows and summaries (`src/run/format.ts`:
+      `visibleRows`, `summaryText`)
+- [ ] Typed IPC (CLAUDE.md, architecture rule 2; from the project review):
+      `src/ipc/result.ts` hand-writes `IpcResult`; generate it from Rust
 
 ## M3: TypeScript intelligence
 
@@ -499,9 +508,14 @@ push.
       program unless renamed, exit code shown.
 - [ ] 3 Terminal behavior: colors, attributes, cursor, wide characters,
       resize (the program sees the new size, tested), wheel scrollback,
-      mouse and word selection, copy/paste (tested with a real shell). Not
-      tested: alternate screen (`less`, `vim`) and the 10 000-line
-      scrollback limit.
+      mouse and word selection, copy/paste (tested with a real shell).
+      Tested on Linux with a real PTY (`crates/terminal/tests/native.rs`):
+      the alternate screen (`ESC[?1049h`/`l` sent by `printf`, not `less` or
+      `vim`: the normal screen and its scrollback come back unchanged) and
+      the 10 000-line scrollback limit (30 000 lines leave exactly 10 000,
+      the oldest dropped). Not tested: memory use under the limit (not
+      measured), macOS/Windows (the tests are Unix only), a Playwright test
+      of either.
 - [x] 4 Keys: everything goes to the shell except Alt+F12 and the
       terminal's copy/paste/new-tab keys (history with the arrow keys
       tested in a real shell).

@@ -662,6 +662,8 @@ export class DocModel {
     });
     if (box.at === null) return null;
     const result = await call(box.at.version, box.at.offset);
+    // Closed while the call was out: its answer (or "not open") is stale.
+    if (this.destroyed) return null;
     if (result.status === "error") {
       if (result.error.kind === "cancelled") return null;
       throw new BackendError(result.error);

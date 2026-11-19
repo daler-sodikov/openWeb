@@ -112,6 +112,49 @@ test("undo and redo run in Rust and group typing", async ({ page, project }) => 
   await expect(page.getByTestId("status-position")).toHaveText("1:9");
 });
 
+test("reopening a tab whose close is still on its way keeps its text", async ({
+  page,
+  project,
+}) => {
+  // The view closes a document in the background. Hold that close back so a
+  // reopen can run while it is pending: the reopen must wait for the close
+  // (and its recovery file) instead of sharing the document the close then
+  // releases ("document N is not open" in the status bar, no restore).
+  await openApp(page, project);
+  await openFile(page, "src/utils/format.ts");
+  await caretToStart(page);
+  await page.keyboard.type("// draft\n");
+
+  let reopened: () => void = () => undefined;
+  const reopen = new Promise<void>((resolve) => {
+    reopened = resolve;
+  });
+  await page.route("**/invoke/open_document", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response });
+    reopened();
+  });
+  await page.route("**/invoke/close_document", async (route) => {
+    // Released once a reopen got its answer, or after a second when the
+    // view does not reopen before the close is done.
+    await Promise.race([reopen, new Promise((resolve) => setTimeout(resolve, 1000))]);
+    await route.continue();
+  });
+
+  await activeTab(page).getByTestId("tab-close").click();
+  await expect(page.getByTestId("tab")).toHaveCount(0);
+  await openFile(page, "src/utils/format.ts");
+  await expect(editor(page)).toContainText("// draft");
+  await expect(page.getByTestId("status-notice")).toContainText("Restored unsaved changes");
+
+  // Calls on the reopened document still reach an open document.
+  await page.keyboard.type("x");
+  await expect(editor(page)).toContainText("x// draft");
+  await page.waitForTimeout(500);
+  await expect(page.getByTestId("status-notice")).not.toContainText("is not open");
+  await expect(activeTab(page).getByTestId("tab-dirty")).toHaveText("●");
+});
+
 test("closing a modified tab keeps its text", async ({ page, project }) => {
   await openApp(page, project);
   await openFile(page, "src/utils/format.ts");
