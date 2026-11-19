@@ -623,8 +623,8 @@ with M5b". Work happens on the `m5a` branch until CI on `main` is green.
 8. **Gutter.** Run icons next to `describe`/`it`/`test` blocks (tree-sitter,
    in Rust); clicking runs that test; the icon shows its last status.
 9. **Tests.** Parsers tested offline with reporter JSON for each framework
-   (recorded from the real tool where it is installed: Vitest and
-   Playwright; Jest written from its documented format, labeled as such);
+   (recorded from the real tool: Vitest, Playwright and Jest; the older
+   handwritten Jest report stays as a second, labeled fixture);
    command building and detection unit-tested; cleanup tests on every OS;
    UI tests against a fixture project with an in-memory runner (test-only);
    real runs against the fixture where the tools can be found, else skipped
@@ -642,8 +642,9 @@ backend, "core real" the same file starting real programs, "UI" means
 - [x] 2 Detection: scripts and test frameworks from `package.json`;
       package manager from `packageManager`, then the lockfile (unit tests).
 - [x] 3 Popup and keys: Alt+Shift+F10 popup, Shift+F10, Ctrl+Shift+F10,
-      Ctrl+F2, Ctrl+F5 (UI); Alt+4 toggles the window (not covered by a test).
-      macOS bindings are defined but not run.
+      Ctrl+F2, Ctrl+F5, Alt+4 (UI; Alt+4 shows the window, hides it while it
+      has the focus, and brings it to the front when it does not).
+      macOS bindings (including Cmd+4) are defined but not run.
 - [x] 4 Run window: a tab per run, exit code and duration, Stop and Rerun,
       Ctrl/Cmd+click on `file:line:col` in the output (UI, UI real). Colors
       and selection come from the M4 terminal view; not asserted for runs.
@@ -658,17 +659,24 @@ backend, "core real" the same file starting real programs, "UI" means
 - [x] 7 Test runner: Vitest and Playwright reports from the real tools
       (core real) and recorded (core fake, UI); tree, durations, failures
       with clickable stack frames, Rerun Failed, one test or one file again,
-      status filters, summary (UI). Jest: parser tested with a handwritten
-      report only; Jest is not installed here, so no real Jest run.
+      status filters, summary (UI). Jest 30.5.2 (a devDependency of
+      `fixtures/test-runners`, own `bun.lock`): a real run through the JSON
+      reporter is parsed into the tree (core real, `real_jest_run`; skipped
+      with a message when `bun install --cwd fixtures/test-runners` has not
+      run) and its report is recorded as `jest.json` (parser unit test). The
+      real report parsed with no parser change. The UI tests (fake backend)
+      still replay the handwritten Jest report; Jest is not run in the UI.
 - [x] 8 Gutter: markers from tree-sitter blocks, click runs the block, the
       caret anywhere in a test body runs it, last status shown (core fake,
       UI, UI real).
 - [ ] 9 Tests: as listed; all checks pass on Linux. CI on macOS and Windows
       has not run M5a yet.
 
-Open M5a items: Jest against the real tool; CI on macOS and Windows
-(Windows `.cmd` shims and Job Objects for runs); a UI test for Alt+4; typing
-latency with gutter markers not measured.
+Open M5a items: CI on macOS and Windows (Windows `.cmd` shims and Job
+Objects for runs); typing latency with gutter markers not measured; CI must
+install the fixture's Jest (`bun install --frozen-lockfile --cwd
+fixtures/test-runners`, like the react-ts step) or `real_jest_run` skips
+there. Closed: Jest against the real tool (Linux), a UI test for Alt+4.
 
 ### M5b: Node debugger (after M5a)
 
