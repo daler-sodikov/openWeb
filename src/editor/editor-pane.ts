@@ -583,6 +583,7 @@ export class EditorPane implements DocPane {
           { key: "Shift-Enter", run: () => this.newLine() },
           { key: "Tab", run: insertIndent(doc.indentUnit) },
           { key: "Escape", run: closeQuickDoc },
+          { key: "Escape", run: () => this.leaveSnippet() },
           { key: "Escape", run: simplifySelection },
           ...closeBracketsKeymap,
           ...standardKeymap,
@@ -791,6 +792,13 @@ export class EditorPane implements DocPane {
           });
       },
     };
+  }
+
+  /** Escape ends a snippet session (the selection stays as it is). */
+  private leaveSnippet(): boolean {
+    if (this.snippetStops.length === 0) return false;
+    this.snippetStops = [];
+    return true;
   }
 
   private advanceSnippet(backward: boolean): boolean {

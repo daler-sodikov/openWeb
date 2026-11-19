@@ -432,8 +432,17 @@ except the open items below. "Real server" means
 
 Open M3b items:
 
-- [ ] Snippet tab-stop navigation in the editor verified end to end (the
-      TypeScript server rarely returns snippets with the current settings)
+- [x] Snippet tab-stop navigation in the editor verified end to end
+      (`e2e/ui/lsp.spec.ts`, "snippet tab stops", Linux/macOS: the project's
+      `node_modules/.bin` launcher starts `fake-lsp-server` with
+      `FAKE_LSP_SNIPPETS`, because the TypeScript server rarely returns
+      snippets). Covered: accepting inserts the text without markers with
+      the first placeholder selected, Tab and Shift+Tab move between stops,
+      Tab after `$0` is a normal Tab, Escape ends the session, and the
+      insertion is one undo step. Bug found and fixed: Escape did not end
+      the session (Tab kept jumping to the stops). Not covered: Windows
+      (the launcher is a shell script), linked stops with several carets,
+      nested placeholders in the editor (unit-tested in Rust only).
 - [ ] macOS/Windows CI confirmation (needs a push)
 
 ### Later in the TypeScript track
