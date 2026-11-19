@@ -352,7 +352,10 @@ test("configurations are edited and stored in .ferrule/run.json", async ({ page,
   expect(after.configurations).toHaveLength(0);
 });
 
-test("the Run window key shows an empty Run window and a second press hides it", async ({ page, project }) => {
+test("the Run window key shows an empty Run window and a second press hides it", async ({
+  page,
+  project,
+}) => {
   await openApp(page, project);
   const runWindow = page.getByTestId("run-window");
   await expect(runWindow).toBeHidden();
