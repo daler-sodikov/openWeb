@@ -240,12 +240,20 @@ function recordStartup(page: Page): () => Promise<string> {
   };
 }
 
+const STARTUP_TIMEOUT_MS = 30_000;
+
 /** Loads the app with `project` opened. */
 export async function openApp(page: Page, project: string): Promise<void> {
   const startup = recordStartup(page);
   await page.goto(`/?project=${encodeURIComponent(project)}`);
   try {
-    await expect(page.getByTestId("project-name")).toHaveText(path.basename(project));
+    // Startup is several backend round trips (app info, keymap, frontend
+    // ready, open project) on one shared backend that may still be stopping
+    // the previous test's project, so it gets its own, longer wait than the
+    // 10 s used for ordinary UI changes. The assertion itself is unchanged.
+    await expect(page.getByTestId("project-name")).toHaveText(path.basename(project), {
+      timeout: STARTUP_TIMEOUT_MS,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${message}\n\nWhile the app started:\n${await startup()}`, { cause: error });
