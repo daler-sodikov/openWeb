@@ -51,6 +51,10 @@ export default defineConfig({
     {
       command: `cargo run --quiet -p ferrule-app${native} --features headless --bin ferrule-headless -- --port ${String(BACKEND_PORT)} --data-dir "${BACKEND_DATA}"${fakeTerminals}`,
       url: `${BACKEND_URL}/health`,
+      // Backend warnings and errors in the test output (tracing writes to
+      // stdout, which Playwright drops by default).
+      stdout: "pipe",
+      env: { RUST_LOG: process.env.RUST_LOG ?? "warn" },
       reuseExistingServer: false,
       timeout: 900_000,
     },

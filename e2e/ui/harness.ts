@@ -191,10 +191,65 @@ export const test = base.extend<{ project: string }>({
 
 export { expect };
 
+/**
+ * Records what the page did while it started (console, errors, backend
+ * requests and how long each took), for the failure message of `openApp`.
+ */
+function recordStartup(page: Page): () => Promise<string> {
+  const started = Date.now();
+  const lines: string[] = [];
+  const at = () => `+${String(Date.now() - started)}ms`;
+  const pending = new Map<object, string>();
+  page.on("console", (m) => {
+    if (m.type() === "error" || m.type() === "warning")
+      lines.push(`${at()} console.${m.type()}: ${m.text()}`);
+  });
+  page.on("pageerror", (e) => lines.push(`${at()} page error: ${e.message}`));
+  page.on("request", (r) => {
+    if (r.url().startsWith(BACKEND_URL))
+      pending.set(r, `${at()} ${r.url().slice(BACKEND_URL.length)}`);
+  });
+  page.on("requestfinished", (r) => pending.delete(r));
+  page.on("requestfailed", (r) => {
+    pending.delete(r);
+    lines.push(`${at()} request failed: ${r.url()} (${r.failure()?.errorText ?? "?"})`);
+  });
+  return async () => {
+    const probeStart = Date.now();
+    const probe = await Promise.race([
+      backend("app_info", {}).then(
+        () => `answered in ${String(Date.now() - probeStart)}ms`,
+        (error: unknown) => `failed: ${String(error)}`,
+      ),
+      new Promise<string>((resolve) =>
+        setTimeout(() => {
+          resolve("no answer within 5 s");
+        }, 5000),
+      ),
+    ]);
+    const app = await page
+      .locator("#app")
+      .innerText({ timeout: 1000 })
+      .catch((error: unknown) => `(cannot read #app: ${String(error)})`);
+    return [
+      `page text: ${JSON.stringify(app.slice(0, 500))}`,
+      `backend requests still open (sent at): ${[...pending.values()].join(", ") || "none"}`,
+      `app_info from the test process: ${probe}`,
+      ...lines,
+    ].join("\n");
+  };
+}
+
 /** Loads the app with `project` opened. */
 export async function openApp(page: Page, project: string): Promise<void> {
+  const startup = recordStartup(page);
   await page.goto(`/?project=${encodeURIComponent(project)}`);
-  await expect(page.getByTestId("project-name")).toHaveText(path.basename(project));
+  try {
+    await expect(page.getByTestId("project-name")).toHaveText(path.basename(project));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${message}\n\nWhile the app started:\n${await startup()}`, { cause: error });
+  }
   await waitForIndex();
 }
 
