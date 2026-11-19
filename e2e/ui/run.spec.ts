@@ -350,3 +350,16 @@ test("configurations are edited and stored in .ferrule/run.json", async ({ page,
   const after = JSON.parse(fs.readFileSync(runJson, "utf8")) as { configurations: unknown[] };
   expect(after.configurations).toHaveLength(0);
 });
+
+test("Alt+4 shows an empty Run window and a second Alt+4 hides it", async ({ page, project }) => {
+  await openApp(page, project);
+  const runWindow = page.getByTestId("run-window");
+  await expect(runWindow).toBeHidden();
+
+  await page.keyboard.press("Alt+4");
+  await expect(runWindow).toBeVisible();
+  await expect(page.getByTestId("run-empty")).toBeVisible();
+
+  await page.keyboard.press("Alt+4");
+  await expect(runWindow).toBeHidden();
+});
