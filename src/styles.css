@@ -383,6 +383,12 @@ button {
   border-left-color: var(--fr-text);
 }
 
+/* The blink's hidden half (`caretBlink` in editor/theme.ts); only the caret's
+   own box repaints. */
+.cm-editor .cm-cursorLayer.fr-caret-off .cm-cursor {
+  visibility: hidden;
+}
+
 .welcome {
   position: absolute;
   inset: 0;

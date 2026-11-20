@@ -4,7 +4,7 @@
 // live only in styles.css; this file maps CodeMirror's parts to them.
 import type { autocompletion } from "@codemirror/autocomplete";
 import { Compartment, type Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 
 const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -23,6 +23,64 @@ export function onColorSchemeChange(listener: () => void): () => void {
 
 /** Holds the dark/light flag so it can follow the OS setting. */
 export const colorScheme = new Compartment();
+
+/** Half of the 1.2 s blink cycle CodeMirror's own animation used. */
+const BLINK_HALF_MS = 600;
+
+/**
+ * Blinks the caret from a timer, only while the editor has the focus.
+ * CodeMirror blinks with an endless CSS animation, which keeps WebKitGTK
+ * producing frames all the time (perf/RESULTS.md: ~21 % of a core idle with
+ * a file open, ~1 % without the blink). A timer wakes the page twice per
+ * 1.2 s instead. The look is the same: visible for 600 ms, hidden for 600
+ * ms, and visible again right after an edit or a caret move. Use it with
+ * `drawSelection({ cursorBlinkRate: 0 })`, which turns the animation off.
+ */
+export const caretBlink: Extension = ViewPlugin.fromClass(
+  class {
+    private timer = 0;
+    private hidden = false;
+
+    constructor(private readonly view: EditorView) {
+      this.restart();
+    }
+
+    update(update: ViewUpdate): void {
+      if (update.selectionSet || update.docChanged || update.focusChanged) this.restart();
+    }
+
+    destroy(): void {
+      window.clearTimeout(this.timer);
+    }
+
+    /** Shows the caret and, while focused, schedules the next toggle. */
+    private restart(): void {
+      window.clearTimeout(this.timer);
+      this.show(false);
+      if (this.view.hasFocus)
+        this.timer = window.setTimeout(() => {
+          this.tick();
+        }, BLINK_HALF_MS);
+    }
+
+    private tick(): void {
+      if (!this.view.hasFocus) {
+        this.show(false);
+        return;
+      }
+      this.show(!this.hidden);
+      this.timer = window.setTimeout(() => {
+        this.tick();
+      }, BLINK_HALF_MS);
+    }
+
+    private show(hidden: boolean): void {
+      this.hidden = hidden;
+      const layer = this.view.dom.querySelector<HTMLElement>(".cm-cursorLayer");
+      layer?.classList.toggle("fr-caret-off", hidden);
+    }
+  },
+);
 
 export function colorSchemeFlag(dark: boolean): Extension {
   return EditorView.darkTheme.of(dark);

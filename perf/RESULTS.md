@@ -85,3 +85,63 @@ What this shows:
   GPU desktop, macOS or Windows.
 - Not verified: that the completion popup was visible during the `code` run
   (the harness only reads pixels of the first line).
+
+## 2026-11-20 — idle CPU with an open editor: the caret blink (B1-T03)
+
+Same machine and setup as 2026-11-04: 13th Gen Intel Core i5-1335U, 12
+threads, 15.2 GiB RAM, Linux 7.3.4 (Arch), `Xvfb` 1440×900×24 (no GPU,
+software rendering), release builds (`bun tauri build --no-bundle`), generated
+1000-file project, `main.ts` open. Command for every run:
+`xvfb-run -a -s "-screen 0 1440x900x24" ferrule-perf --app <build> --files 1000 --keys 30`
+(the full run; the numbers below are its idle-CPU, ready and typing rows).
+Four builds of the same tree, each measured three times, in alternating order:
+
+- **blink on**: `main` at `727de1c` (CodeMirror's CSS blink animation).
+- **blink off**: only `drawSelection({ cursorBlinkRate: 0 })`. A diagnostic,
+  not a candidate: the caret does not blink at all.
+- **timer, opacity**: the caret blinks from a timer (`caretBlink`,
+  `src/editor/theme.ts`), hiding the whole cursor layer with `opacity`.
+- **timer, visibility** (the change in this PR): the same timer, hiding only
+  the caret boxes with `visibility: hidden`.
+
+| Build                  | Idle CPU, 10 s average (three runs) | Ready (CPU settled), warm (three runs) | Typing latency, median (three runs) |
+| ---------------------- | ----------------------------------- | -------------------------------------- | ----------------------------------- |
+| blink on (`main`)      | 21.1 %, 25.8 %, 23.2 %              | not reached in 60 s (all three)        | 53.3, 53.3, 52.8 ms                 |
+| blink off (diagnostic) | 1.1 %, 1.2 %, 1.1 %                 | 1.2 s, 2.0 s, 1.3 s                    | 17.6, 19.4, 24.0 ms                 |
+| timer, opacity         | 1.9 %, 2.1 %, 2.2 %                 | 25.3 s, 6.6 s, 16.3 s                  | 22.4, 21.2, 23.5 ms                 |
+| timer, visibility      | 2.3 %, 1.9 %, 2.1 %                 | 4.2 s, 18.4 s, 6.0 s                   | 24.5, 22.1, 21.9 ms                 |
+
+What this shows:
+
+- **The caret blink is the cause of the idle CPU on this setup: confirmed.**
+  Turning only the blink off takes the idle CPU from 21–26 % to ~1 % in all
+  three rounds, and "Ready" from never to about 1–2 s. Typing latency also
+  drops (53 → 18–24 ms; still above the 8 ms budget).
+- The cost is not the repaint of a small caret: with the timer the caret
+  still toggles twice per 1.2 s, and the idle CPU is ~2 %. The endless CSS
+  `steps(1)` animation is what keeps WebKitGTK producing frames; a timer that
+  wakes the page twice per cycle removes most of it. This is the likely
+  mechanism, inferred from these four builds; the WebKit process was not
+  profiled.
+- The timer builds meet the idle-CPU budget (< 5 %) in all six runs. They do
+  not meet "Ready" (< 2 s): it took 4–25 s, and varies much more between runs
+  than the idle average does (probably each toggle is a small burst, and the
+  harness waits for a full second below 5 %; not verified). The two timer
+  variants cannot be told
+  apart from these runs, on idle CPU or on "Ready".
+- The caret looks and behaves as before (checked in Chromium with a
+  throwaway Playwright test, not kept): hidden and visible for 600 ms each,
+  visible right after typing, not left hidden when the editor loses focus,
+  CodeMirror's CSS animation duration 0 s.
+
+Limits of these numbers:
+
+- One machine, Xvfb with software rendering. Not measured on a GPU-composited
+  desktop, nor on macOS or Windows; the cost there may differ.
+- A few short low-priority (`nice -n 19`, two jobs) `cargo` builds for another
+  task ran on the same machine during some of the rounds. No timer or
+  blink-off run moved visibly, but the 25.8 % "blink on" run is the highest
+  of its group and may have been affected.
+- Memory was 660–680 MiB PSS in these runs against 308 MiB on 2026-11-04. Not
+  investigated here (outside this task); do not compare it with the earlier
+  record.
