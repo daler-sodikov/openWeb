@@ -34,6 +34,9 @@ struct Inner {
     raw: RepoStatus,
     /// Index text per repository path, for the current status generation.
     bases: HashMap<String, Option<Arc<str>>>,
+    /// HEAD text per repository path (its HEAD-side name), for the current
+    /// status generation.
+    heads: HashMap<String, Option<Arc<str>>>,
 }
 
 /// Every Git status gets the next number, across projects: the view keeps
@@ -349,6 +352,7 @@ impl GitState {
             inner.raw = raw;
             inner.status = status.clone();
             inner.bases.clear();
+            inner.heads.clear();
         }
         self.emit(status);
     }
@@ -371,6 +375,22 @@ impl GitState {
             .map(|t| Arc::from(t.replace("\r\n", "\n")));
         lock(&self.inner)?
             .bases
+            .insert(path.to_owned(), text.clone());
+        Ok(text)
+    }
+
+    /// HEAD text of a repository path (cached per status generation); `None`
+    /// for a file that is not in HEAD.
+    fn head_base(&self, repo: &Repo, path: &str) -> Result<Option<Arc<str>>, IpcError> {
+        if let Some(found) = lock(&self.inner)?.heads.get(path) {
+            return Ok(found.clone());
+        }
+        let text = repo
+            .head_text(path)
+            .map_err(git_error)?
+            .map(|t| Arc::from(t.replace("\r\n", "\n")));
+        lock(&self.inner)?
+            .heads
             .insert(path.to_owned(), text.clone());
         Ok(text)
     }
@@ -451,32 +471,52 @@ impl Session {
         Ok((state.doc.text(), state.doc.version(), doc.rel_path.clone()))
     }
 
-    /// Lines of a document that differ from the index.
+    /// Lines of a document that differ from the index, and the lines that
+    /// are staged (HEAD to index), in document order.
     pub async fn git_line_changes(&self, doc_id: DocId) -> Result<ipc::GitLineChanges, IpcError> {
         let git = self.git()?;
         let (text, version, path) = self.doc_text(doc_id)?;
         blocking(move || {
             let (repo, prefix) = git.repo()?;
-            let Some(base) = git.base(&repo, &to_repo(&prefix, &path))? else {
+            let repo_path = to_repo(&prefix, &path);
+            let Some(base) = git.base(&repo, &repo_path)? else {
                 return Ok(ipc::GitLineChanges {
                     version,
                     tracked: false,
                     hunks: Vec::new(),
                 });
             };
-            let hunks = ferrule_git::diff_lines(&base, &text)
+            let kind = |kind: HunkKind| match kind {
+                HunkKind::Added => ipc::GitHunkKind::Added,
+                HunkKind::Modified => ipc::GitHunkKind::Modified,
+                HunkKind::Deleted => ipc::GitHunkKind::Deleted,
+            };
+            let mut hunks: Vec<ipc::GitHunk> = ferrule_git::diff_lines(&base, &text)
                 .into_iter()
                 .map(|h| ipc::GitHunk {
-                    kind: match h.kind {
-                        HunkKind::Added => ipc::GitHunkKind::Added,
-                        HunkKind::Modified => ipc::GitHunkKind::Modified,
-                        HunkKind::Deleted => ipc::GitHunkKind::Deleted,
-                    },
+                    kind: kind(h.kind),
                     line: to_u32(h.new_start),
                     lines: to_u32(h.new_lines),
                     old_text: ferrule_git::hunk_base_text(&base, &h),
+                    staged: false,
                 })
                 .collect();
+            let head = git.head_base(&repo, &git.head_path(&repo_path))?;
+            hunks.extend(
+                ferrule_git::staged_hunks(head.as_deref(), &base, &text)
+                    .into_iter()
+                    .map(|s| ipc::GitHunk {
+                        kind: kind(s.kind),
+                        line: to_u32(s.line),
+                        lines: to_u32(s.lines),
+                        old_text: ferrule_git::hunk_base_text(
+                            head.as_deref().unwrap_or(""),
+                            &s.head,
+                        ),
+                        staged: true,
+                    }),
+            );
+            hunks.sort_by_key(|h| (h.line, h.staged));
             Ok(ipc::GitLineChanges {
                 version,
                 tracked: true,

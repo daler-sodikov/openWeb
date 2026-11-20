@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use ferrule_core::{EventSink, Session, SessionConfig, SessionEvent};
 use ferrule_ipc::{
-    ChangeTransaction, EditKind, EditorSelection, GitDeleteResult, GitDiffMode, GitFileKind,
+    ChangeTransaction, DocId, EditKind, EditorSelection, GitDeleteResult, GitDiffMode, GitFileKind,
     GitHunkKind, GitLineKind, GitStatus, IpcErrorKind, SelectionRange, TextEdit,
 };
 
@@ -217,6 +217,113 @@ async fn gutter_hunks_follow_unsaved_edits_and_roll_back() {
     write(&repo, "fresh.ts", "f\n");
     let fresh = s.open_document("fresh.ts".into()).await.unwrap();
     assert!(!s.git_line_changes(fresh.doc_id).await.unwrap().tracked);
+}
+
+/// `(kind, line, lines, staged)` of a document's gutter hunks.
+type Marks = Vec<(GitHunkKind, u32, u32, bool)>;
+
+/// The gutter hunks of `doc` once `done` accepts them (the status refresh
+/// after a stage or a commit is a moment behind the command).
+async fn hunks_until(s: &Session, doc: DocId, what: &str, done: impl Fn(&Marks) -> bool) -> Marks {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let changes = s.git_line_changes(doc).await.unwrap();
+        let marks: Marks = changes
+            .hunks
+            .iter()
+            .map(|h| (h.kind, h.line, h.lines, h.staged))
+            .collect();
+        if done(&marks) {
+            return marks;
+        }
+        assert!(Instant::now() < deadline, "no hunks {what}: {marks:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn staged_hunks_appear_on_stage_and_go_on_unstage_and_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = make_repo(dir.path());
+    // `two` is changed on disk; nothing is staged yet.
+    write(&repo, "web/src/a.ts", "one\nTWO\nthree\n");
+    let (s, _) = open(dir.path(), &repo).await;
+    wait_status(&s, "loaded", |st| st.generation > 0).await;
+    let doc = s.open_document("web/src/a.ts".into()).await.unwrap().doc_id;
+    let marks = hunks_until(&s, doc, "unstaged", |m| !m.is_empty()).await;
+    assert_eq!(marks, [(GitHunkKind::Modified, 1, 1, false)]);
+
+    // Staged: the change moves from the index marker to a staged marker,
+    // and the staged marker carries the HEAD text.
+    s.git_stage(vec!["web/src/a.ts".into()]).await.unwrap();
+    let marks = hunks_until(&s, doc, "staged", |m| m.iter().any(|h| h.3)).await;
+    assert_eq!(marks, [(GitHunkKind::Modified, 1, 1, true)]);
+    let changes = s.git_line_changes(doc).await.unwrap();
+    assert_eq!(changes.hunks[0].old_text, "two");
+
+    // A line added above (unsaved) is an unstaged marker; the staged marker
+    // moves down with the text.
+    s.apply_changes(doc, 0, vec![typing(0, "zero\n")])
+        .await
+        .unwrap();
+    let marks: Marks = s
+        .git_line_changes(doc)
+        .await
+        .unwrap()
+        .hunks
+        .iter()
+        .map(|h| (h.kind, h.line, h.lines, h.staged))
+        .collect();
+    assert_eq!(
+        marks,
+        [
+            (GitHunkKind::Added, 0, 1, false),
+            (GitHunkKind::Modified, 2, 1, true)
+        ]
+    );
+
+    // Unstaged again: only index markers, against HEAD.
+    s.git_unstage(vec!["web/src/a.ts".into()]).await.unwrap();
+    let marks = hunks_until(&s, doc, "unstaged again", |m| m.iter().all(|h| !h.3)).await;
+    assert_eq!(
+        marks,
+        [
+            (GitHunkKind::Added, 0, 1, false),
+            (GitHunkKind::Modified, 2, 1, false)
+        ]
+    );
+
+    // Committed (the unsaved line is saved and committed too): no markers.
+    s.git_commit("Edit".into(), false, vec!["web/src/a.ts".into()])
+        .await
+        .unwrap();
+    let marks = hunks_until(&s, doc, "committed", |m| m.is_empty()).await;
+    assert!(marks.is_empty());
+}
+
+#[tokio::test]
+async fn staged_new_files_and_deletions() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = make_repo(dir.path());
+    // A new file (not in HEAD) and a deleted line, both staged.
+    write(&repo, "new.ts", "n1\nn2\n");
+    write(&repo, "web/src/a.ts", "one\nthree\n");
+    let (s, _) = open(dir.path(), &repo).await;
+    wait_status(&s, "loaded", |st| st.generation > 0).await;
+    s.git_stage(vec!["new.ts".into(), "web/src/a.ts".into()])
+        .await
+        .unwrap();
+
+    let new = s.open_document("new.ts".into()).await.unwrap().doc_id;
+    let marks = hunks_until(&s, new, "new file", |m| !m.is_empty()).await;
+    assert_eq!(marks, [(GitHunkKind::Added, 0, 2, true)]);
+
+    let a = s.open_document("web/src/a.ts".into()).await.unwrap().doc_id;
+    let marks = hunks_until(&s, a, "deleted line", |m| !m.is_empty()).await;
+    // A deletion is drawn on the line after it.
+    assert_eq!(marks, [(GitHunkKind::Deleted, 1, 0, true)]);
+    let changes = s.git_line_changes(a).await.unwrap();
+    assert_eq!(changes.hunks[0].old_text, "two");
 }
 
 #[tokio::test]

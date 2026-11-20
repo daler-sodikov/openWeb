@@ -1263,8 +1263,13 @@ pub struct GitHunk {
     pub line: u32,
     /// Number of document lines (0 for a deletion).
     pub lines: u32,
-    /// The index text of the lines it replaces.
+    /// The base text of the lines it replaces: the index text for a change
+    /// to the index, the HEAD text for a staged change.
     pub old_text: String,
+    /// Whether this is a staged change (HEAD to index, located in the
+    /// document) and not a change against the index. Staged hunks have no
+    /// Rollback.
+    pub staged: bool,
 }
 
 /// Kind of a [`GitHunk`].
