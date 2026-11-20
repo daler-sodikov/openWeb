@@ -124,6 +124,8 @@ export class RunWindow {
     this.element.dataset.testid = "run-window";
     this.element.setAttribute("aria-label", "Run");
     this.element.hidden = true;
+    // Focusable so an empty window can hold focus and Alt+4 can hide it.
+    this.element.tabIndex = -1;
     const header = document.createElement("div");
     header.className = "tool-window-header";
     const title = document.createElement("span");
@@ -161,7 +163,8 @@ export class RunWindow {
   show(): void {
     this.element.hidden = false;
     this.empty.hidden = this.list.length > 0;
-    this.active?.view.focus();
+    if (this.active) this.active.view.focus();
+    else this.element.focus();
   }
 
   hide(): void {

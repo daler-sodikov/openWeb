@@ -31,6 +31,7 @@ const keys = {
   stop: isMac ? "Meta+F2" : "Control+F2",
   rerun: isMac ? "Meta+r" : "Control+F5",
   choose: isMac ? "Control+Alt+r" : "Alt+Shift+F10",
+  toggleWindow: isMac ? "Meta+4" : "Alt+4",
 };
 
 function hasNode(): boolean {
@@ -349,4 +350,20 @@ test("configurations are edited and stored in .ferrule/run.json", async ({ page,
   await expect(editor).toBeHidden();
   const after = JSON.parse(fs.readFileSync(runJson, "utf8")) as { configurations: unknown[] };
   expect(after.configurations).toHaveLength(0);
+});
+
+test("the Run window key shows an empty Run window and a second press hides it", async ({
+  page,
+  project,
+}) => {
+  await openApp(page, project);
+  const runWindow = page.getByTestId("run-window");
+  await expect(runWindow).toBeHidden();
+
+  await page.keyboard.press(keys.toggleWindow);
+  await expect(runWindow).toBeVisible();
+  await expect(page.getByTestId("run-empty")).toBeVisible();
+
+  await page.keyboard.press(keys.toggleWindow);
+  await expect(runWindow).toBeHidden();
 });
