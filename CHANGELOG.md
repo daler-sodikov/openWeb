@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M5b-3: debug session model, in `ferrule-run-debug`)
+
+- The protocol-neutral debug session model: states and the commands each
+  allows, stops with their call stack, scopes and variables (with cut
+  previews and pages of 100), and the events a session sends.
+- The breakpoint store: toggle, sorted by file and line, condition, log
+  message and enabled flag, following edits to a document (insert or delete
+  above, delete the line, multi-line edits), and a versioned stored form.
+- Log points: `text {expr} text` becomes a condition that prints and never
+  pauses; the text is escaped and unsafe expressions are printed as text.
+- A scripted debug backend for tests without Node (feature `testing`).
+  Nothing in the app uses these yet.
+
 ### Added (M5a: run configurations and test runner)
 
 - Run configurations for Node files, npm scripts, Vitest, Jest and
