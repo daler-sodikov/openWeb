@@ -1,0 +1,27 @@
+[package]
+name = "ferrule-cdp-client"
+description = "Chrome DevTools Protocol client for Node's inspector: discovery, WebSocket transport and typed calls."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[features]
+# The scripted fake CDP server, for tests in this and other crates.
+testing = []
+
+[dependencies]
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "io-util"] }
+tokio-tungstenite.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
