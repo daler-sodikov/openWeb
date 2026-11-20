@@ -73,6 +73,12 @@ fn ipc_contract() {
         "IpcError",
         "IpcErrorKind",
         "Platform",
+        // Git gutter: staged hunks (HEAD to index) are part of the hunk list
+        "gitLineChanges",
+        "\"git_line_changes\"",
+        "GitLineChanges",
+        "GitHunk",
+        "staged: boolean",
         // fields keep the camelCase wire names
         "protocolVersion",
         "renderedAppName",
