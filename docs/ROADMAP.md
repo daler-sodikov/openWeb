@@ -574,9 +574,18 @@ run yet.
 - [x] 1 Status, refreshed after file changes, saves, Git writes and window
       focus (debounced, off the async workers).
 - [x] 2 Tree colors for files and folders containing changes.
-- [ ] 3 Gutter: markers against the index with old text, Rollback (one undo
-      step) and Ctrl+Alt+Z / Cmd+Alt+Z. Not done: separate markers for
-      staged changes (against HEAD).
+- [x] 3 Gutter: markers against the index with old text, Rollback (one undo
+      step) and Ctrl+Alt+Z / Cmd+Alt+Z. Staged changes (HEAD to index) have
+      their own markers in a second thin column beside the first, drawn as
+      outlines. Rust computes them (`staged_hunks` in `crates/git`, mapped
+      onto document lines through the index-to-document diff, so they move
+      with unsaved edits) and sends them in the same hunk list with
+      `staged: true`. Clicking one shows the HEAD text, with no Rollback;
+      Rollback at the caret skips staged hunks. They refresh with the Git
+      status, like the others. A staged line that was changed again shows
+      only the index marker. Tests: unit and real-repository integration
+      (core), the IPC contract, and one Playwright test (stage, unstage,
+      commit, no Rollback). Linux only; macOS and Windows CI not run yet.
 - [x] 4 Diff against HEAD, side by side and unified, word highlights.
 - [x] 5 Commit window (Alt+0 / Cmd+0): checkboxes stage, message, Amend,
       errors for identity, hooks, empty commits; saves first.
