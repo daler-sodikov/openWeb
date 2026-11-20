@@ -75,7 +75,8 @@ ferrule-app (src-tauri) ──► core ──► ipc
 | `indexer`     | Incremental project indexing: file list, symbols, on-disk cache, invalidation on file change.                                                                                                                           | `project`, `vfs`, `lang-*`          |
 | `search`      | Fuzzy matching (camel humps, path segments) and regex text search/replace. Pure functions over caller-provided text, so unsaved buffers are searched like files.                                                        | none                                |
 | `lsp-client`  | Generic LSP client: process lifecycle and restart, JSON-RPC framing, requests with cancellation, notifications, debounced `didChange`, capability negotiation, executable lookup. Knows nothing about specific servers. | none                                |
-| `dap-client`  | Generic Debug Adapter Protocol client mirroring `lsp-client`, plus a Chrome DevTools Protocol client for browser/Node debugging.                                                                                        | none                                |
+| `dap-client`  | Generic Debug Adapter Protocol client mirroring `lsp-client` (for other languages; not used by M5b).                                                                                                                    | none                                |
+| `cdp-client`  | (M5b, new) Chrome DevTools Protocol client over a WebSocket: message framing, requests with timeouts and cancellation, events, the typed subset of the `Runtime` and `Debugger` domains a debugger needs. No processes. | none                                |
 | `git`         | Status, diff, blame, log, branches, commit, conflicts. Read paths via `gix`; write paths may shell out to the `git` binary.                                                                                             | `vfs`                               |
 | `terminal`    | PTY processes, VT parsing, terminal grid state and incremental updates for the view.                                                                                                                                    | none                                |
 | `run-debug`   | Run configurations (Node, npm scripts, Jest, Vitest, Playwright), process supervision, test-result parsing, debug sessions.                                                                                             | `dap-client`, `project`, `settings` |
@@ -784,7 +785,7 @@ to supervise, while the CDP subset a debugger needs (Debugger._, Runtime._)
 is small. The client goes into a new crate `cdp-client` (the protocol is not
 DAP, so `dap-client` would be a misleading home); the debugger session model
 (breakpoints, frames, variables) is protocol-neutral so a DAP backend can be
-added for other languages. Details are written with M5b.
+added for other languages. The design is in [4.11](#411-node-debugger-m5b).
 
 **IPC (M5a, as built).** Commands: `run_configurations` (stored +
 detected, the package manager, trust), `save_run_configuration`,
@@ -820,6 +821,197 @@ the terminal frame events with ids from `RUN_ID_BASE`.
   no default shortcut) clears it, and runs already going are not stopped.
 - Keys typed while a run's output has the focus go to the program, like in
   the terminal; only the run actions and Alt+F12 are handled by Ferrule.
+
+### 4.11 Node debugger (M5b)
+
+Written before the code, as `CLAUDE.md` asks. Things marked **verify** are
+decisions that depend on a check against the real tool; the step that needs
+each one does the check first and records the answer here.
+
+**Scope.** Debug a Node program, or one test of Vitest or Jest, from the
+editor: breakpoints, stepping, call stack, variables, watches and a console.
+One debug session at a time. Not in M5b: browser debugging, DAP for other
+languages (the session model leaves room for it), attaching to a running
+process, Playwright tests (verify after Vitest and Jest work), "just my code"
+blackboxing beyond Node's own `node:` modules.
+
+**Who owns what.** As in M5a, Rust owns everything and the view only draws.
+The debugger state (breakpoints, which frame is selected, the variable tree,
+watch results, where execution stopped) lives in Rust and is pushed to the
+view as events; the view sends commands. No protocol, source-map or
+variable logic is in TypeScript.
+
+**Crates.**
+
+- `cdp-client` (new, no internal deps): the Chrome DevTools Protocol over a
+  WebSocket. JSON message framing (`id`, `result`, `error`, `method`,
+  `params`), a request/response table with a timeout and cancellation per
+  request, an event stream, and typed commands and events for the subset
+  needed: `Runtime` (`enable`, `runIfWaitingForDebugger`, `getProperties`,
+  `evaluate`, `consoleAPICalled`, `releaseObjectGroup`) and `Debugger`
+  (`enable`, `setBreakpointByUrl`, `setBreakpoint`, `removeBreakpoint`,
+  `resume`, `pause`, `stepOver`, `stepInto`, `stepOut`, `evaluateOnCallFrame`,
+  `setBlackboxPatterns`, and the events `paused`, `resumed`, `scriptParsed`,
+  `breakpointResolved`). It starts no process and knows no project paths, so
+  it is tested against a scripted fake CDP server (an in-process WebSocket
+  server) in isolation, like `lsp-client` and `terminal`.
+- `run-debug` (pure, no processes, as in M5a) gets the debug session model:
+  the protocol-neutral types (breakpoint, frame, scope, variable,
+  session state) and the logic on them: script registry (script id and URL
+  to project path), source maps (original position to generated position
+  and back), the variable tree with lazy children, the breakpoint store. A
+  DAP backend would produce the same events.
+- `core` connects them: it starts the Node process (the M5a run machinery:
+  PTY, process tree, trust), connects `cdp-client`, feeds CDP events into the
+  model and sends the commands the model asks for. The mapping to `ipc` DTOs
+  is in `core`.
+
+The crate graph stays acyclic: `core` depends on `cdp-client`; `cdp-client`
+has no internal dependencies.
+
+**Launch.** A debug session is a run (same configuration, same trust
+question, same command-line display) with `--inspect-brk=127.0.0.1:<port>`
+added before the script, so the first line waits for the debugger. The
+trust dialog shows the exact command including that flag. Checked on Node
+24.19: with port 0 Node prints `Debugger listening on
+ws://127.0.0.1:<port>/<uuid>` to stderr and `http://127.0.0.1:<port>/json/list`
+returns the target with its `url` (a `file://` URL) and
+`webSocketDebuggerUrl`. **Verify** which way to get the port: (a) Ferrule
+picks a free port (bind to port 0, read it, close it, pass it) and retries
+once if Node reports the port in use, or (b) port 0 and read the line above
+from the run's output. (a) is simpler to test; (b) has no race but needs the
+run's raw output (the run is on a PTY, so stderr is merged into the screen).
+Decide in step 1 on real Node.
+
+After the connection: `Runtime.enable`, `Debugger.enable`,
+`Debugger.setBlackboxPatterns` for `^node:`, the breakpoints are set, then
+`Runtime.runIfWaitingForDebugger`. Nothing is sent before the first
+`Debugger.paused` that is not a request the model made.
+
+**Breakpoints.** Stored per project in Ferrule's data folder (like the trust
+answer, not in the project: breakpoints are personal and would be committed
+by accident in `.ferrule/`), as path, zero-based line, optional condition
+and optional log message, enabled flag. Set with `Debugger.setBreakpointByUrl`
+using a regular expression for the file's URL, so a breakpoint in a script
+that is not loaded yet takes effect when it loads. A breakpoint is
+_verified_ when Node resolved it to a location (the result of
+`setBreakpointByUrl` or `breakpointResolved`), else shown as unverified. A
+log point is a condition that prints and evaluates to false; its output goes
+to the debug console (`Runtime.consoleAPICalled`), not to the program's
+terminal. **Verify** that the output of a log point arrives as a console
+event with the message intact.
+
+**TypeScript and source maps.** What the inspector reports depends on how
+the code runs: compiled output (`tsc`, a bundler) has `//#
+sourceMappingURL=` comments with a `.map` file; runners such as `tsx` and
+`ts-node` use inline `data:` maps; and Node's own type stripping keeps
+positions without any map. The registry reads the `sourceMapURL` of every
+`Debugger.scriptParsed`, loads it (a file next to the script, or the inline
+`data:` URL; never over the network) and maps both ways: a breakpoint in
+`a.ts` is set at the generated location, and every position shown to the
+user (frames, the execution line) is mapped back to `a.ts`. A map that
+cannot be read leaves the generated file as is, with the reason shown.
+**Verify** the crate: the `sourcemap` crate (BSD-3-Clause, check `cargo deny`
+and maintenance) or a small VLQ decoder of our own. Test maps are recorded
+from the real `tsc` and `tsx`, not written by hand.
+
+**Stepping and state.** States: starting, running, paused (with the stop
+reason and the frames), ended. Commands: Debug (Shift+F9), Resume (F9),
+Step Over (F8), Step Into (F7), Step Out (Shift+F8), Pause, Stop (the M5a
+Stop: the process tree ends, then the connection is closed). Each command
+is allowed only in the states where it makes sense; the rest answer with an
+error, not silently. Resuming cancels the pending variable and evaluate
+requests of the stop that ended.
+
+**Variables, watches, console.** The scopes of the selected frame come from
+`Debugger.paused`; the children of an object are asked lazily with
+`Runtime.getProperties` when the user expands it, so a stop never fetches a
+whole object graph. A variable has a name, a short text for its value
+(`RemoteObject.description`, cut to a fixed length), its type, and an id for
+its children if it has some. A parent shows at most the first 100 children
+and says how many more there are. Watches and the console use
+`Debugger.evaluateOnCallFrame` (in the selected frame while paused, else
+`Runtime.evaluate`); watches are re-evaluated at every stop. Object ids are
+released (`releaseObjectGroup`) at resume. Inline values in the editor are
+not planned; they are added only if they turn out to be cheap.
+
+**Debug test.** The gutter icon of a test gets "Debug" (next to Run). The
+command is the M5a test command plus the inspector flag, with whatever the
+framework needs to run in the process that is debugged. Checked on the
+installed tools: Vitest 5 has `--inspectBrk [[host:]port]` and
+`--no-file-parallelism`, and its default pool is `forks`; Jest has
+`--runInBand`. **Verify** on the real tools that a breakpoint in a test file
+and in the code under test is hit, and which pool setting Vitest needs.
+
+**IPC (planned).** Commands: `debug_start(config or test, size)` (the same
+`Started { run }` / `NeedsTrust { command, cwd }` answer as `start_run`),
+`debug_resume`, `debug_pause`, `debug_step_over`, `debug_step_into`,
+`debug_step_out`, `debug_stop`, `set_breakpoint(path, line, condition,
+log_message)`, `remove_breakpoint`, `toggle_breakpoint`, `breakpoints()`,
+`select_frame(id)`, `variables(reference)` (lazy children),
+`evaluate(expression)`, `add_watch`, `remove_watch`. Events: a debug-state
+event (running, paused with the frames and the execution location, ended),
+a breakpoints event (verified or not, when it changes) and a console event.
+Program output still uses the run's terminal frames (ids from
+`RUN_ID_BASE`). All types are generated from Rust; nothing is hand-written
+in TypeScript.
+
+**View.** A Debug tab in the bottom tool window with the call stack
+(clicking a frame selects it and opens the file), variables as a virtualized
+tree with lazy expansion, watches and a console with an input. A
+breakpoint dot in the gutter (click, Ctrl+F8), and the execution line as a
+line decoration, both driven by events from Rust. Functional UI only; the
+visuals are M6.
+
+**Safety and cleanup.** The inspector listens on 127.0.0.1 only, on a port
+chosen per session; Ferrule connects to that address and never to another
+host. A debug session needs the same project trust as a run. `close_project`
+(and replacing a project) ends the debug session: it stops the process tree
+with the M5a machinery, closes the connection, cancels every task and
+reports anything that did not end, so no debuggee is left running and the
+project folder can be deleted. The M4/M5a Windows rules apply. No lock is
+held across an `.await`; the connection's tasks use a `CancellationToken`.
+
+**Windows and paths.** The inspector reports `file:///C:/x/a.js`. Path
+mapping reuses `run-debug`'s path normalization (a path is data, with `/`
+separators, never compared as a host path) and is tested with Windows-style
+URLs on every OS, as for the test reports.
+
+**Dependencies.** A WebSocket client is needed and is not in the lockfile
+today. **Verify** `tokio-tungstenite` (MIT) without TLS features (the
+connection is to 127.0.0.1): check `cargo deny`, the transitive crates and
+its maintenance state, and justify it in the commit message. The
+alternative is a minimal client of our own (handshake and framing, a few
+hundred lines), which is not preferred because framing bugs are easy to
+write.
+
+**Testing.**
+
+- `cdp-client` against the scripted fake CDP server: request/response
+  pairing, events between requests, an error response, a request timeout,
+  cancellation, the connection closing in the middle of a request.
+- `run-debug`: the model as pure functions (breakpoint store, source map
+  mapping against recorded maps, variable tree and the 100-children cap,
+  state transitions and refused commands), with URL and path cases from
+  Windows.
+- `core`: a fake CDP backend for the session wiring (like the in-memory run
+  backend), and real Node tests that skip with a message when Node is
+  missing: a breakpoint is hit, step over/into/out, variables, evaluate,
+  stop, and `close_project` leaves no process; the same for a Vitest and a
+  Jest test.
+- UI: Playwright with a fake backend (`--fake-debug`, like `--fake-runs`):
+  toggle a breakpoint, start, see the stop with its frames and variables,
+  step, resume, stop. The real-Node variant runs with an environment
+  variable, as for runs.
+
+**Order of work.** One reviewable step at a time, each with its tests and
+CI green: (1) `cdp-client` and its fake server, then a real-Node smoke test
+(connect, enable, stop at the first line, resume, exit); the port decision
+and the WebSocket crate. (2) The session model and core wiring: launch,
+breakpoints without source maps, stepping, stop, cleanup, the IPC. (3)
+Source maps. (4) The Debug window and the gutter. (5) Variables, watches
+and the console. (6) Debugging a test. (7) Cleanup and safety tests on
+every OS, documentation, `CHANGELOG.md`.
 
 ## 5. Editor view layer: CodeMirror 6 as a view only
 
