@@ -326,6 +326,36 @@ async fn staged_new_files_and_deletions() {
     assert_eq!(changes.hunks[0].old_text, "two");
 }
 
+/// The staged diff is kept between calls. A checkout that changes HEAD but
+/// leaves the index text as it is must still drop it: the staged marker
+/// goes, because the index now equals HEAD.
+#[tokio::test]
+async fn a_checkout_that_only_moves_head_drops_the_staged_marker() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = make_repo(dir.path());
+    // Branch `other` has the text that is about to be staged on `main`.
+    git(&repo, &["checkout", "-q", "-b", "other"]);
+    write(&repo, "web/src/a.ts", "one\nTWO\nthree\n");
+    git(&repo, &["commit", "-q", "-am", "other"]);
+    git(&repo, &["checkout", "-q", "main"]);
+    write(&repo, "web/src/a.ts", "one\nTWO\nthree\n");
+    git(&repo, &["add", "web/src/a.ts"]);
+
+    let (s, _) = open(dir.path(), &repo).await;
+    wait_status(&s, "loaded", |st| st.generation > 0).await;
+    let doc = s.open_document("web/src/a.ts".into()).await.unwrap().doc_id;
+    let marks = hunks_until(&s, doc, "staged", |m| !m.is_empty()).await;
+    assert_eq!(marks, [(GitHunkKind::Modified, 1, 1, true)]);
+    // Asked again with nothing changed: the kept diff gives the same answer.
+    let again = s.git_line_changes(doc).await.unwrap();
+    assert_eq!(again.hunks.len(), 1);
+    assert_eq!(again.hunks[0].old_text, "two");
+
+    s.git_checkout("other".into(), false).await.unwrap();
+    let marks = hunks_until(&s, doc, "after the checkout", |m| m.is_empty()).await;
+    assert!(marks.is_empty());
+}
+
 #[tokio::test]
 async fn diff_and_blame() {
     let dir = tempfile::tempdir().unwrap();

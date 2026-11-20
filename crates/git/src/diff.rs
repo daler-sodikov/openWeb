@@ -247,35 +247,68 @@ pub struct StagedHunk {
     pub head: Hunk,
 }
 
+/// Number of lines of `text`, counted as the diffs count them.
+pub fn line_count(text: &str) -> usize {
+    lines(text).len()
+}
+
+/// The changes staged in the index, as diff hunks from HEAD to `index`
+/// (`old_*` count HEAD lines, `new_*` index lines). `head` is `None` for a
+/// file that is not in HEAD: all of the index is staged as added.
+///
+/// This depends only on HEAD and the index, not on the document, so the
+/// caller can keep it until one of them changes and locate it in the current
+/// text with [`locate_staged`].
+pub fn staged_diff(head: Option<&str>, index: &str) -> Vec<Hunk> {
+    match head {
+        Some(head) => diff_lines(head, index),
+        None => match line_count(index) {
+            0 => Vec::new(),
+            n => vec![Hunk {
+                old_start: 0,
+                old_lines: 0,
+                new_start: 0,
+                new_lines: n,
+                kind: HunkKind::Added,
+            }],
+        },
+    }
+}
+
 /// The changes staged in the index (HEAD to `index`), located in the lines
-/// of `doc`. `head` is `None` for a file that is not in HEAD: all of the
-/// index is staged as added.
+/// of `doc`: [`staged_diff`] and [`locate_staged`] in one step.
+pub fn staged_hunks(head: Option<&str>, index: &str, doc: &str) -> Vec<StagedHunk> {
+    let staged = staged_diff(head, index);
+    if staged.is_empty() {
+        return Vec::new();
+    }
+    locate_staged(
+        &staged,
+        &diff_lines(index, doc),
+        line_count(index),
+        line_count(doc),
+    )
+}
+
+/// Locates `staged` (from [`staged_diff`], in index lines) in the lines of
+/// the document. `unstaged` is the diff from the index to the document
+/// (`diff_lines(index, doc)`, which the gutter has computed already);
+/// `index_lines` and `doc_lines` are their line counts.
 ///
 /// A staged line that the document has changed again (an unstaged change)
 /// has no line of its own to mark: that line shows the unstaged marker, and
 /// the staged hunk keeps only the lines that are still as staged, so a hunk
 /// can come back as several runs.
-pub fn staged_hunks(head: Option<&str>, index: &str, doc: &str) -> Vec<StagedHunk> {
-    let (index_lines, doc_lines) = (lines(index).len(), lines(doc).len());
-    let staged = match head {
-        Some(head) => diff_lines(head, index),
-        None if index_lines == 0 => Vec::new(),
-        None => vec![Hunk {
-            old_start: 0,
-            old_lines: 0,
-            new_start: 0,
-            new_lines: index_lines,
-            kind: HunkKind::Added,
-        }],
-    };
-    if staged.is_empty() {
-        return Vec::new();
-    }
-    let unstaged = diff_lines(index, doc);
+pub fn locate_staged(
+    staged: &[Hunk],
+    unstaged: &[Hunk],
+    index_lines: usize,
+    doc_lines: usize,
+) -> Vec<StagedHunk> {
     // The document line of index line `i`; `None` if the document replaced it.
     let doc_line = |i: usize| -> Option<usize> {
         let mut offset = 0isize;
-        for h in &unstaged {
+        for h in unstaged {
             if i < h.old_start {
                 break;
             }
@@ -306,7 +339,7 @@ pub fn staged_hunks(head: Option<&str>, index: &str, doc: &str) -> Vec<StagedHun
                 kind: HunkKind::Deleted,
                 line: boundary(h.new_start),
                 lines: 0,
-                head: h,
+                head: h.clone(),
             });
             continue;
         }
@@ -769,6 +802,25 @@ mod tests {
                 .iter()
                 .all(|s| (s.head.new_start, s.head.new_lines) == (1, 3))
         );
+    }
+
+    #[test]
+    fn a_kept_staged_diff_locates_in_every_version_of_the_document() {
+        let (head, index) = ("a\nb\nc\n", "a\nB\nc\n");
+        // Computed once, as the cache in core does, then located per edit
+        // with the document diff the gutter has already made.
+        let kept = staged_diff(Some(head), index);
+        for doc in ["a\nB\nc\n", "x\na\nB\nc\n", "a\nB2\nc\n", "a\nB\nc\nz\n"] {
+            let located = locate_staged(
+                &kept,
+                &diff_lines(index, doc),
+                line_count(index),
+                line_count(doc),
+            );
+            assert_eq!(located, staged_hunks(Some(head), index, doc), "{doc:?}");
+        }
+        assert!(staged_diff(None, "").is_empty());
+        assert!(staged_diff(Some("a\n"), "a\n").is_empty());
     }
 
     #[test]
