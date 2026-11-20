@@ -787,6 +787,14 @@ DAP, so `dap-client` would be a misleading home); the debugger session model
 added for other languages. The detailed design follows (4.10.1 to 4.10.8);
 the slices are in `docs/ROADMAP.md`, M5b.
 
+**Scope.** Debug a Node program, or one Vitest or Jest test, from the
+editor: breakpoints, stepping, call stack, variables, watches and a
+console. One debug session at a time. Not in M5b: browser debugging, DAP
+for other languages (the model leaves room), attaching to a process
+Ferrule did not start, Playwright tests (added after Vitest and Jest work,
+if the check in M5b-10 allows it), and "just my code" blackboxing beyond
+Node's own `node:` modules.
+
 **IPC (M5a, as built).** Commands: `run_configurations` (stored +
 detected, the package manager, trust), `save_run_configuration`,
 `delete_run_configuration`, `trust_project`, `revoke_project_trust`,
@@ -901,7 +909,10 @@ not used: the output is a PTY stream and the line can be split or
 colored. `--inspect-brk` makes Node wait for a debugger at the first
 line: after `Debugger.enable`, the breakpoints and `Runtime.enable`, the
 session sends `Runtime.runIfWaitingForDebugger`, then the program runs
-to the first breakpoint (or ends).
+to the first breakpoint (or ends). The session also sets
+`Debugger.setBlackboxPatterns` for `^node:` so stepping does not enter
+Node's own modules (**to verify** on real Node in M5b-2 that the pattern
+has that effect).
 
 **Dependencies and licences.** The only new runtime dependency is
 `tokio-tungstenite` (MIT) with `default-features = false` and the
@@ -938,7 +949,12 @@ own `node:` modules have a `script` name and no path).
   files, persisted (4.10.5), with `toggle(path, line)`, `update`, `remove`,
   `shift_for_edit` (4.10.5) and `for_path`. Pure; the file IO is in `core`.
 - **`DebugState`**: `Starting`, `Running`, `Paused(PauseInfo)`,
-  `Ended { exit_code: Option<i32>, stopped: bool }`.
+  `Ended { exit_code: Option<i32>, stopped: bool }`. Each command is
+  allowed only in the states where it makes sense (Resume and the steps
+  only while paused, Pause only while running); a command in another
+  state answers with an error, never silently. Resuming cancels the
+  pending variable and evaluate requests of the stop that ended and
+  releases that stop's remote objects (`Runtime.releaseObjectGroup`).
 - **`PauseInfo`**: `reason` (`Breakpoint`, `Step`, `Pause`, `Exception {
 message }`, `Entry` for the `--inspect-brk` stop), the call stack
   (`Vec<Frame>`) and the selected frame.
@@ -955,7 +971,8 @@ message }`, `Entry` for the `--inspect-brk` stop), the call stack
   `variables_ref: Option<String>` (present when expandable) and
   `evaluate_name` (for "add to watches"). Children are fetched by
   `variables_ref`, 100 at a time (`start`, `count`), so a huge array never
-  crosses IPC whole.
+  crosses IPC whole; the parent says how many more there are. The preview
+  text is cut to a fixed length.
 - **`DebugBackend`** (a trait in `core`, async; the model above is its
   vocabulary): `start`, `set_breakpoints(path, &[Breakpoint]) ->
 Vec<BreakpointState>`, `resume`, `step_over`, `step_into`, `step_out`,
@@ -970,8 +987,13 @@ Vec<BreakpointState>`, `resume`, `step_over`, `step_into`, `step_out`,
   never pauses: `(()=>{try{console.log(`…${expr}…`)}catch(e){}return false})()`.
   The message's backticks, `${` and backslashes are escaped; a `{expr}`
   is the only way to evaluate anything. Pure, unit-tested including
-  hostile input. The output goes to the debuggee's stdout, so it appears
-  in the Run tab, in order with the program's own output.
+  hostile input. **Open question (M5b-6):** where the output shows. With
+  `console.log` in the condition it goes to the program's stdout (the Run
+  tab, in order with the program's output) and, if the inspector also
+  reports `Runtime.consoleAPICalled` for it, to the Debug console as
+  well; whether it arrives there with the message intact, and whether it
+  then appears twice, is checked on real Node in M5b-6 and the answer is
+  recorded here. Until then the plan does not rely on either place.
 
 #### 4.10.3 Source maps (`run-debug`, no new dependency)
 
@@ -999,7 +1021,12 @@ the decoder is not small after all, it stops and proposes
 **Which maps.** For each `Debugger.scriptParsed` whose `sourceMapURL` is
 set, core loads the map once: an inline `data:application/json;base64,…`
 URL (what `tsx`, `ts-node` and `--enable-source-maps` pipelines produce)
-or a file next to the script (`file:` URL or relative path). Limits: a map
+or a file next to the script (`file:` URL or relative path); never over the
+network. Node's own type stripping keeps positions and needs no map, so a
+script without `sourceMapURL` is used as is. A map that cannot be read
+leaves the generated file as it is and the Debug window shows the reason.
+Test maps are recorded from real `tsc` and `tsx` output, not written by
+hand. Limits: a map
 file larger than 50 MB or outside the project folder and the script's own
 directory is not read. `sources` are resolved against the map's URL and
 `sourceRoot` and normalized; an original path that resolves outside the
@@ -1156,11 +1183,14 @@ No debugger logic in TypeScript: the view sends commands and draws events.
   the debug tasks, the sockets and the processes have ended and reports
   what did not. `Ended` events are sent before the runtime is dropped.
 - **Test runners and child processes.** Only the process Ferrule starts is
-  attached. Test frameworks that run tests in worker processes need
-  options that keep the test in the debugged process (for Vitest a
-  single-process pool, for Jest `--runInBand`, for Playwright `--debug`
-  is not used: `--workers=1` plus the inspector on the runner); M5b-10
-  checks each against the installed tool and says which are supported.
+  attached. A test framework that runs tests in worker processes needs
+  options that keep the test in the debugged process. **Open question
+  (M5b-10):** which options, per framework and version. Candidates to
+  check, not yet confirmed here: Vitest `--inspectBrk` with
+  `--no-file-parallelism` and the `forks` pool, Jest `--runInBand`;
+  Playwright is checked only after those two work. M5b-10 verifies each
+  on the installed tool and records the evidence here; a framework or
+  version that fails the check is reported as unsupported.
   Auto-attaching to child processes (`NodeWorker`/`Target.setAutoAttach`)
   is a follow-up, not M5b.
 

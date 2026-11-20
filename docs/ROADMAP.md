@@ -720,7 +720,12 @@ merged. A slice does not start before the ones it needs are merged.
 
 **Open questions, answered inside the slice that needs them** (not guessed
 here): which Vitest/Jest/Playwright options keep a test in the debugged
-process for the installed versions (M5b-10); whether the pick-then-release
+process for the installed versions (M5b-10; Jim reports Vitest 5 has
+`--inspectBrk` and `--no-file-parallelism` with `forks` as the default
+pool, and Jest `--runInBand`, on Node 24.19, but the evidence is not in
+this plan yet, so this stays open until it is); where a log point's
+output shows (M5b-6); whether `setBlackboxPatterns` for `^node:` keeps
+stepping out of Node's modules (M5b-2); whether the pick-then-release
 port race shows in practice (M5b-1); the Windows path-case rules of
 `file://` URLs against real Node on a Windows runner (M5b-4, M5b-11).
 
@@ -845,11 +850,14 @@ slices 8 and 9 only need the fake backend from slice 5.
     _Files:_ `crates/run-debug/src/command.rs` (debug flags per framework),
     `crates/core/src/runs.rs`, `crates/core/src/debug.rs`, `src/` (a debug
     icon on a test block), `e2e/ui/debug.spec.ts`, `CHANGELOG.md`.
-    _Done when:_ for each of Vitest, Jest and Playwright the options that
-    keep the test in the debugged process are verified against the
-    installed tool (Jest: from its docs where it is not installed, said
-    so), a test block can be debugged from the gutter and a breakpoint in
-    the test hits (real Vitest where available); unsupported frameworks or
+    _Done when:_ for Vitest and Jest the options that keep the test in
+    the debugged process are verified against the installed tool and the
+    evidence (command and result) is written into 4.10.7 (Jest: from its
+    docs where it is not installed, said so); Playwright is checked the
+    same way afterwards and is either supported or listed as not
+    supported; a test block can be debugged from the gutter and a
+    breakpoint in the test file and in the code under test hits (real
+    Vitest where available); unsupported frameworks or
     versions give a clear message and no half-started session.
 11. **M5b-11 Close-out.** _Needs:_ 1 to 10.
     _Files:_ `e2e/ui/debug.spec.ts` (real-Node spec under
