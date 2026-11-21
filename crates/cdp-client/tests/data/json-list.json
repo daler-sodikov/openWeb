@@ -1,0 +1,13 @@
+[
+ {
+  "description": "node.js instance",
+  "devtoolsFrontendUrl": "devtools://devtools/bundled/js_app.html?experiments=true&v8only=true&ws=127.0.0.1:9331/aefcfce7-2ebc-460b-ae02-b4cf6d6ee858",
+  "devtoolsFrontendUrlCompat": "devtools://devtools/bundled/inspector.html?experiments=true&v8only=true&ws=127.0.0.1:9331/aefcfce7-2ebc-460b-ae02-b4cf6d6ee858",
+  "faviconUrl": "https://nodejs.org/static/images/favicons/favicon.ico",
+  "id": "aefcfce7-2ebc-460b-ae02-b4cf6d6ee858",
+  "title": "/project/target.js",
+  "type": "node",
+  "url": "file:///project/target.js",
+  "webSocketDebuggerUrl": "ws://127.0.0.1:9331/aefcfce7-2ebc-460b-ae02-b4cf6d6ee858"
+ }
+]
