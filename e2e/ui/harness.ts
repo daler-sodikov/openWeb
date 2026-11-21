@@ -8,6 +8,7 @@ import path from "node:path";
 import { expect, type Locator, type Page, test as base } from "@playwright/test";
 
 import { BACKEND_URL, repoRoot } from "../paths";
+import { isTransientStartupFailure } from "./startup-retry";
 
 export const isMac = process.platform === "darwin";
 
@@ -195,11 +196,12 @@ export { expect };
  * Records what the page did while it started (console, errors, backend
  * requests and how long each took), for the failure message of `openApp`.
  */
-function recordStartup(page: Page): () => Promise<string> {
+function recordStartup(page: Page): { report: () => Promise<string>; failedErrors: string[] } {
   const started = Date.now();
   const lines: string[] = [];
   const at = () => `+${String(Date.now() - started)}ms`;
   const pending = new Map<object, string>();
+  const failedErrors: string[] = [];
   page.on("console", (m) => {
     if (m.type() === "error" || m.type() === "warning")
       lines.push(`${at()} console.${m.type()}: ${m.text()}`);
@@ -212,9 +214,10 @@ function recordStartup(page: Page): () => Promise<string> {
   page.on("requestfinished", (r) => pending.delete(r));
   page.on("requestfailed", (r) => {
     pending.delete(r);
+    failedErrors.push(r.failure()?.errorText ?? "?");
     lines.push(`${at()} request failed: ${r.url()} (${r.failure()?.errorText ?? "?"})`);
   });
-  return async () => {
+  const report = async () => {
     const probeStart = Date.now();
     const probe = await Promise.race([
       backend("app_info", {}).then(
@@ -238,15 +241,17 @@ function recordStartup(page: Page): () => Promise<string> {
       ...lines,
     ].join("\n");
   };
+  return { report, failedErrors };
 }
 
 const STARTUP_TIMEOUT_MS = 30_000;
 
 /** Loads the app with `project` opened. */
 export async function openApp(page: Page, project: string): Promise<void> {
+  const url = `/?project=${encodeURIComponent(project)}`;
   const startup = recordStartup(page);
-  await page.goto(`/?project=${encodeURIComponent(project)}`);
-  try {
+  const start = async (): Promise<void> => {
+    await page.goto(url);
     // Startup is several backend round trips (app info, keymap, frontend
     // ready, open project) on one shared backend that may still be stopping
     // the previous test's project, so it gets its own, longer wait than the
@@ -254,9 +259,27 @@ export async function openApp(page: Page, project: string): Promise<void> {
     await expect(page.getByTestId("project-name")).toHaveText(path.basename(project), {
       timeout: STARTUP_TIMEOUT_MS,
     });
+  };
+  try {
+    try {
+      await start();
+    } catch (first: unknown) {
+      // Windows CI sometimes fails a module request with ERR_NO_BUFFER_SPACE
+      // (an OS socket-buffer shortage), so the page never boots. Retry once,
+      // and only for that error; anything else fails as before.
+      if (!isTransientStartupFailure(startup.failedErrors)) throw first;
+      test.info().annotations.push({
+        type: "startup-retry",
+        description: "first start failed with net::ERR_NO_BUFFER_SPACE; loaded the app again",
+      });
+      startup.failedErrors.length = 0;
+      await start();
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${message}\n\nWhile the app started:\n${await startup()}`, { cause: error });
+    throw new Error(`${message}\n\nWhile the app started:\n${await startup.report()}`, {
+      cause: error,
+    });
   }
   await waitForIndex();
 }
