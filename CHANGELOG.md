@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M5b-5: debug session lifecycle, groundwork for the debugger)
+
+- Commands `start_debug`, `debug_resume`, `debug_step_over`,
+  `debug_step_into`, `debug_step_out`, `debug_pause` and `stop_debug`, and a
+  `debug-event` stream (`Started`, `Paused`, `Resumed`, `Ended`, each with a
+  `seq` per session). `start_debug` follows the Run path: it asks for trust
+  (showing `--inspect-brk=127.0.0.1:<port>`), then starts the run. A
+  configuration that already has an inspector flag (`--inspect*` argument or
+  `NODE_OPTIONS`) is refused, and only Node files can be debugged for now.
+- Stop and closing the project end debug sessions first, also while the
+  program is paused (a paused program is stopped, never resumed).
+- Keymap actions Debug (Shift+F9), Resume (F9), Step Over (F8), Step Into
+  (F7), Step Out (Shift+F8), Pause, Toggle Breakpoint (Ctrl+F8) and the
+  Debug window (Alt+5); macOS variants in the IntelliJ-style macOS keymap.
+- The headless test backend has `--fake-debug`. Nothing in the app attaches
+  to Node yet (the CDP backend follows), so `start_debug` reports that this
+  build has no debugger.
+
 ### Added (M5b-3: debug session model, in `ferrule-run-debug`)
 
 - The protocol-neutral debug session model: states and the commands each

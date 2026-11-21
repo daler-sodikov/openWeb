@@ -115,6 +115,22 @@ pub enum Action {
     ChooseRunConfiguration,
     /// Show or hide the Run tool window.
     ToggleRunWindow,
+    /// Debug the selected run configuration (stops on the first line).
+    Debug,
+    /// Resume a paused program.
+    Resume,
+    /// Step over the current line.
+    StepOver,
+    /// Step into the call on the current line.
+    StepInto,
+    /// Step out of the current function.
+    StepOut,
+    /// Pause a running program.
+    Pause,
+    /// Toggle a breakpoint on the caret's line.
+    ToggleBreakpoint,
+    /// Show or hide the Debug tool window.
+    ToggleDebugWindow,
     /// Forget that the project is trusted: the next run asks again.
     RevokeProjectTrust,
 }
@@ -212,12 +228,20 @@ pub fn action_name(action: Action) -> &'static str {
         Action::Rerun => "Rerun",
         Action::ChooseRunConfiguration => "Run…",
         Action::ToggleRunWindow => "Run Tool Window",
+        Action::Debug => "Debug",
+        Action::Resume => "Resume Program",
+        Action::StepOver => "Step Over",
+        Action::StepInto => "Step Into",
+        Action::StepOut => "Step Out",
+        Action::Pause => "Pause Program",
+        Action::ToggleBreakpoint => "Toggle Line Breakpoint",
+        Action::ToggleDebugWindow => "Debug Tool Window",
         Action::RevokeProjectTrust => "Revoke Project Trust",
     }
 }
 
 /// Every action, in display order.
-pub const ALL_ACTIONS: [Action; 51] = [
+pub const ALL_ACTIONS: [Action; 59] = [
     Action::GotoFile,
     Action::GotoSymbol,
     Action::GotoLine,
@@ -268,6 +292,14 @@ pub const ALL_ACTIONS: [Action; 51] = [
     Action::Rerun,
     Action::ChooseRunConfiguration,
     Action::ToggleRunWindow,
+    Action::Debug,
+    Action::Resume,
+    Action::StepOver,
+    Action::StepInto,
+    Action::StepOut,
+    Action::Pause,
+    Action::ToggleBreakpoint,
+    Action::ToggleDebugWindow,
     Action::RevokeProjectTrust,
 ];
 
@@ -369,6 +401,18 @@ pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
             A::ToggleRunWindow,
             Chord(if mac { "Mod-4" } else { "Alt-4" }),
         ),
+        bind(A::Debug, Chord(if mac { "Ctrl-d" } else { "Shift-F9" })),
+        bind(A::Resume, Chord(if mac { "Mod-Alt-r" } else { "F9" })),
+        bind(A::StepOver, Chord("F8")),
+        bind(A::StepInto, Chord("F7")),
+        bind(A::StepOut, Chord("Shift-F8")),
+        // IntelliJ's Pause Program has no default key; this one is free.
+        bind(A::Pause, Chord("Mod-Alt-p")),
+        bind(A::ToggleBreakpoint, Chord("Mod-F8")),
+        bind(
+            A::ToggleDebugWindow,
+            Chord(if mac { "Mod-5" } else { "Alt-5" }),
+        ),
     ]
 }
 
@@ -415,12 +459,36 @@ mod tests {
                 Action::Rerun,
                 Action::ChooseRunConfiguration,
                 Action::ToggleRunWindow,
+                Action::Debug,
+                Action::Resume,
+                Action::StepOver,
+                Action::StepInto,
+                Action::StepOut,
+                Action::Pause,
+                Action::ToggleBreakpoint,
+                Action::ToggleDebugWindow,
             ] {
                 assert_eq!(
                     keymap.iter().filter(|b| b.action == action).count(),
                     1,
                     "{action:?}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn no_two_actions_share_a_stroke() {
+        for os in [KeymapOs::Mac, KeymapOs::Other] {
+            let keymap = intellij_keymap(os);
+            for (i, a) in keymap.iter().enumerate() {
+                for b in &keymap[i + 1..] {
+                    assert_ne!(
+                        a.stroke, b.stroke,
+                        "{:?} and {:?} share a key",
+                        a.action, b.action
+                    );
+                }
             }
         }
     }

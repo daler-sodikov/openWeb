@@ -963,6 +963,7 @@ name = "ferrule-core"
 version = "0.1.0"
 dependencies = [
  "ferrule-buffer",
+ "ferrule-core",
  "ferrule-dap-client",
  "ferrule-git",
  "ferrule-indexer",

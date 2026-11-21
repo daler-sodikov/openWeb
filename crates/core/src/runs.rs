@@ -567,6 +567,26 @@ impl Session {
         config: ipc::RunConfig,
         size: ipc::TerminalSize,
     ) -> Result<ipc::StartRun, IpcError> {
+        self.start_run_with(config, size, None).await
+    }
+
+    /// Like [`Session::start_run`], with Node's inspector on
+    /// `127.0.0.1:<port>` waiting for a debugger (a debug session's run).
+    pub(crate) async fn start_run_inspected(
+        &self,
+        config: ipc::RunConfig,
+        size: ipc::TerminalSize,
+        port: u16,
+    ) -> Result<ipc::StartRun, IpcError> {
+        self.start_run_with(config, size, Some(port)).await
+    }
+
+    async fn start_run_with(
+        &self,
+        config: ipc::RunConfig,
+        size: ipc::TerminalSize,
+        inspect_port: Option<u16>,
+    ) -> Result<ipc::StartRun, IpcError> {
         let runtime = self.runtime()?;
         blocking(move || {
             let root = runtime.project.root().to_path_buf();
@@ -578,7 +598,17 @@ impl Session {
             {
                 config = fresh;
             }
-            start(&runtime.runs, &root, config, runtime.trusted(), size)
+            if inspect_port.is_some() {
+                crate::debug::check_debuggable(&config)?;
+            }
+            start(
+                &runtime.runs,
+                &root,
+                config,
+                runtime.trusted(),
+                size,
+                inspect_port,
+            )
         })
         .await
     }
@@ -877,6 +907,7 @@ fn start(
     config: RunConfig,
     trusted: bool,
     size: ipc::TerminalSize,
+    inspect_port: Option<u16>,
 ) -> Result<ipc::StartRun, IpcError> {
     let framework = match &config.kind {
         RunKind::Test { framework, .. } => Some(*framework),
@@ -891,8 +922,15 @@ fn start(
         which: &ferrule_lsp_client::find_on_path,
         os: rd::Os::current(),
     };
-    let command = rd::command_line(&config, root, report.as_deref(), &tools)
+    let mut command = rd::command_line(&config, root, report.as_deref(), &tools)
         .map_err(|err| IpcError::new(IpcErrorKind::InvalidArgument, err.to_string()))?;
+    if let Some(port) = inspect_port {
+        // Always an explicit loopback address, never the bare flag (which
+        // listens on the fixed port 9229).
+        command
+            .args
+            .insert(0, format!("--inspect-brk=127.0.0.1:{port}"));
+    }
     let shown = command.display();
     if !trusted {
         return Ok(ipc::StartRun::NeedsTrust {

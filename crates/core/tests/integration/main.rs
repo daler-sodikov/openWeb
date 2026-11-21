@@ -5,6 +5,7 @@
 //! everything here.
 
 mod cleanup;
+mod debug;
 mod git;
 mod lsp_fake;
 mod m2;

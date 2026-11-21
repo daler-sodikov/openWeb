@@ -41,6 +41,7 @@ headless = [
   "ferrule-terminal/testing",
   "dep:ferrule-run-debug",
   "ferrule-run-debug/testing",
+  "ferrule-core/testing",
 ]
 
 [build-dependencies]
