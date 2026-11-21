@@ -24,6 +24,23 @@ All notable changes to this project are documented here. The format follows
   to Node yet (the CDP backend follows), so `start_debug` reports that this
   build has no debugger.
 
+### Added (M5b-2: CDP protocol subset)
+
+- `ferrule-cdp-client` gains the typed subset of the Chrome DevTools
+  Protocol the debugger needs: the `Debugger` and `Runtime` requests and
+  the `paused`, `resumed`, `scriptParsed`, `breakpointResolved`,
+  `consoleAPICalled` and `exceptionThrown` events (`protocol` module,
+  `CdpClient::send`, `CdpEvent::typed`). Unknown fields and events are
+  ignored. Tested against JSON recorded from real Node 24 and a real
+  `node --inspect-brk` session (skipped when `node` is not installed). No
+  debugger feature is visible yet.
+
+### Fixed (M5b-2)
+
+- `discover` no longer hangs against real Node: Node answers `/json/list`
+  and keeps the socket open, so the reply is complete at its
+  `Content-Length`, not at EOF.
+
 ### Added (M5b-3: debug session model, in `ferrule-run-debug`)
 
 - The protocol-neutral debug session model: states and the commands each

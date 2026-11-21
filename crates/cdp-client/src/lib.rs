@@ -11,6 +11,7 @@
 
 mod discover;
 mod error;
+pub mod protocol;
 mod transport;
 
 #[cfg(any(test, feature = "testing"))]

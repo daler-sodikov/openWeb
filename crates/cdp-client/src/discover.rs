@@ -66,13 +66,22 @@ async fn list_once(port: u16) -> Result<String, CdpError> {
         .write_all(request.as_bytes())
         .await
         .map_err(transport)?;
+    // Node answers HTTP/1.0 but keeps the socket open despite
+    // `Connection: close`, so waiting for EOF would hang: stop as soon as the
+    // announced `Content-Length` bytes are in. Without that header the body
+    // ends at EOF. The size cap bounds what a misbehaving peer can make grow.
     let mut raw = Vec::new();
-    // `take` bounds the read: a misbehaving peer cannot make it grow.
-    (&mut stream)
-        .take(MAX_RESPONSE as u64)
-        .read_to_end(&mut raw)
-        .await
-        .map_err(transport)?;
+    let mut chunk = [0_u8; 4096];
+    while !response_complete(&raw) {
+        if raw.len() >= MAX_RESPONSE {
+            return Err(CdpError::Transport("response too large".into()));
+        }
+        let n = stream.read(&mut chunk).await.map_err(transport)?;
+        if n == 0 {
+            break;
+        }
+        raw.extend_from_slice(&chunk[..n]);
+    }
     let body = http_body(&raw)?;
     let targets: Vec<Target> =
         serde_json::from_slice(&body).map_err(|e| CdpError::Decode(e.to_string()))?;
@@ -80,6 +89,24 @@ async fn list_once(port: u16) -> Result<String, CdpError> {
         .into_iter()
         .find_map(|t| t.web_socket_debugger_url)
         .ok_or_else(|| CdpError::Transport("no inspector target listed".into()))
+}
+
+/// True when `raw` holds the headers and as many body bytes as the
+/// `Content-Length` header announces.
+fn response_complete(raw: &[u8]) -> bool {
+    let Some(split) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return false;
+    };
+    let Ok(head) = std::str::from_utf8(&raw[..split]) else {
+        return false;
+    };
+    let length = head.split("\r\n").find_map(|l| {
+        let (name, value) = l.split_once(':')?;
+        name.eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse::<usize>().ok())
+            .flatten()
+    });
+    length.is_some_and(|n| raw.len() - (split + 4) >= n)
 }
 
 fn transport(error: std::io::Error) -> CdpError {
