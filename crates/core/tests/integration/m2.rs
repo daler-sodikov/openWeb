@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ferrule_core::{EventSink, Session, SessionEvent};
 use ferrule_ipc::{
-    ChangeTransaction, EditKind, EditorSelection, FsChangeKind, IpcErrorKind, SearchItem,
+    ChangeTransaction, EditKind, EditorSelection, FsChange, FsChangeKind, IpcErrorKind, SearchItem,
     SearchTab, SelectionRange, TextEdit, TextSearch,
 };
 
@@ -400,16 +400,39 @@ async fn watcher_updates_index_and_emits_events() {
         }
     }
     assert!(found, "new file indexed through the watcher");
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let events = f.events.0.lock().unwrap().clone();
-    let changes: Vec<_> = events
-        .iter()
-        .filter_map(|e| match e {
-            SessionEvent::FsChanged(batch) => Some(batch.changes.clone()),
-            _ => None,
-        })
-        .flatten()
-        .collect();
+    // The watcher delivers in debounced batches, and the removal of
+    // `src/win.ts` can arrive in a later batch than the new directory (seen
+    // on a loaded Windows runner), so wait for both events instead of a
+    // fixed delay.
+    let collect = || -> Vec<FsChange> {
+        f.events
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                SessionEvent::FsChanged(batch) => Some(batch.changes.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+    let seen_both = |changes: &[FsChange]| {
+        changes
+            .iter()
+            .any(|c| c.path == "src/win.ts" && c.kind == FsChangeKind::Removed)
+            && changes
+                .iter()
+                .any(|c| c.path.starts_with("src/fresh") && c.kind == FsChangeKind::Changed)
+    };
+    let mut changes = collect();
+    for _ in 0..200 {
+        if seen_both(&changes) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        changes = collect();
+    }
     assert!(
         changes
             .iter()
