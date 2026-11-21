@@ -13,6 +13,8 @@ mod detect;
 pub mod fake;
 pub mod paths;
 mod report;
+mod sourcemap;
+mod urls;
 
 pub use command::{CommandError, CommandLine, Os, Tools, command_line, test_name_pattern};
 pub use config::{
@@ -24,3 +26,5 @@ pub use report::{
     Failure, NodeKind, StackFrame, TestNode, TestReport, TestStatus, parse_jest_report,
     parse_playwright_report,
 };
+pub use sourcemap::{Generated, Original, SourceMap, SourceMapError, SourcePosition};
+pub use urls::{Host, file_url_to_path, path_to_file_url, same_file};
