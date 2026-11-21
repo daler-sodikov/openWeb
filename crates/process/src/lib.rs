@@ -170,9 +170,18 @@ mod tests {
             .spawn()
             .unwrap();
         let tree = ProcessTree::job(child.as_raw_handle()).unwrap();
-        std::thread::sleep(Duration::from_millis(500));
         assert!(tree.is_alive());
-        let ids = tree.process_ids();
+        // cmd needs some time to start ping (one run in fifty on a loaded CI
+        // runner took longer than a fixed 500 ms), so wait for it like the
+        // Unix test waits for its background sleep. If ping was started
+        // before the job existed it never joins it, and this still fails
+        // after the deadline: that would be a real leak, not a slow start.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut ids = tree.process_ids();
+        while ids.len() < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+            ids = tree.process_ids();
+        }
         assert!(ids.contains(&child.id()), "cmd is in the job: {ids:?}");
         assert!(ids.len() >= 2, "and ping too: {ids:?}");
         tree.kill();
