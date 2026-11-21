@@ -19,6 +19,27 @@ All notable changes to this project are documented here. The format follows
 - A scripted debug backend for tests without Node (feature `testing`).
   Nothing in the app uses these yet.
 
+### Added (M5b-4: source maps and file URLs, groundwork for the debugger)
+
+- `run-debug` decodes Source Map v3 files (including `sourceRoot` and inline
+  `data:` URLs) in both directions: original position to generated for
+  breakpoints, generated to original for frames; a blank line moves to the
+  next mapped line. Malformed maps return an error and never panic.
+- `file://` URL to path conversion for POSIX and Windows paths, with the
+  per-OS case rules, tested on every OS.
+- `fixtures/debug-app/`: a small TypeScript program with real `tsc` output
+  and source map for the debugger tests. No user-visible change yet.
+
+### Added (M5b-1: CDP client transport)
+
+- New crate `ferrule-cdp-client`: finds Node's inspector (`/json/list` on
+  127.0.0.1), connects over a WebSocket, correlates calls with answers,
+  and delivers events and the end of the connection in order. Calls time
+  out, everything is cancellable, a flooding debuggee is throttled, and any
+  URL other than `ws://127.0.0.1:<port>` is refused. Tested against a
+  scripted fake server; no debugger feature is visible yet.
+- New dependency `tokio-tungstenite` (MIT, no TLS) for the WebSocket.
+
 ### Added (M5a: run configurations and test runner)
 
 - Run configurations for Node files, npm scripts, Vitest, Jest and

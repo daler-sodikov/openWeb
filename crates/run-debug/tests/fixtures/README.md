@@ -6,10 +6,13 @@
 - `playwright.json`: recorded from Playwright 1.64.1
   (`playwright test --reporter=list,json`, `PLAYWRIGHT_JSON_OUTPUT_NAME`) on
   `fixtures/test-runners`.
-- `jest.handwritten.json`: **not recorded** (Jest is not installed here):
-  written from Jest's documented aggregated-result format (`--json
-  --testLocationInResults`) to mirror the same tests, plus a file that fails
-  to load.
+- `jest.json`: recorded from Jest 30.5.2
+  (`jest --json --testLocationInResults --outputFile=...`) on
+  `fixtures/test-runners` (`jest/math.test.cjs`).
+- `jest.handwritten.json`: **not recorded**: written from Jest's documented
+  aggregated-result format to mirror the Vitest tests, plus a file that fails
+  to load (a case the real fixture does not have). The fake run backend
+  replays it.
 
 Machine-specific paths are replaced: `__ROOT__` is the fixture project,
 `__REPO__` the repository, `__NODE__` the Node executable.

@@ -23,6 +23,8 @@ pub mod fake_debug;
 mod logpoint;
 pub mod paths;
 mod report;
+mod sourcemap;
+mod urls;
 
 pub use breakpoints::{
     Breakpoint, BreakpointEdit, BreakpointError, BreakpointStore, Shifted, Toggled,
@@ -43,3 +45,5 @@ pub use report::{
     Failure, NodeKind, StackFrame, TestNode, TestReport, TestStatus, parse_jest_report,
     parse_playwright_report,
 };
+pub use sourcemap::{Generated, Original, SourceMap, SourceMapError, SourcePosition};
+pub use urls::{Host, file_url_to_path, path_to_file_url, same_file};
