@@ -28,6 +28,7 @@ ferrule-dap-client.workspace = true
 ferrule-git.workspace = true
 ferrule-terminal.workspace = true
 ferrule-run-debug.workspace = true
+ferrule-cdp-client.workspace = true
 ferrule-plugin-host.workspace = true
 tokio.workspace = true
 serde.workspace = true

@@ -20,9 +20,15 @@ All notable changes to this project are documented here. The format follows
 - Keymap actions Debug (Shift+F9), Resume (F9), Step Over (F8), Step Into
   (F7), Step Out (Shift+F8), Pause, Toggle Breakpoint (Ctrl+F8) and the
   Debug window (Alt+5); macOS variants in the IntelliJ-style macOS keymap.
-- The headless test backend has `--fake-debug`. Nothing in the app attaches
-  to Node yet (the CDP backend follows), so `start_debug` reports that this
-  build has no debugger.
+- The debugger attaches to Node's inspector over the Chrome DevTools
+  Protocol (the `ferrule-cdp-client` crate, now a dependency of
+  `ferrule-core`): the program stops on its first line, Resume, the steps
+  and Pause work, and stopping kills the program and the processes it
+  started, also while it is paused. When the program ends by itself the
+  session ends (its exit code is in the run tab, not yet in the event). If
+  the debugger cannot attach, the session ends with the reason in the
+  `Ended` event instead of waiting for a debugger forever.
+- The headless test backend has `--fake-debug`.
 
 ### Added (M5b-2: CDP protocol subset)
 

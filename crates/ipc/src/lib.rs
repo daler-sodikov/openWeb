@@ -1699,6 +1699,9 @@ pub enum DebugEventKind {
         exit_code: Option<i32>,
         /// True when the user stopped it.
         stopped: bool,
+        /// Why the session ended without having run, e.g. the debugger could
+        /// not attach; the view shows it. `None` for a normal end.
+        message: Option<String>,
     },
 }
 

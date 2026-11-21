@@ -164,6 +164,7 @@ fn to_ipc(event: &rd::DebugEvent) -> Option<ipc::DebugEventKind> {
         rd::DebugEvent::Ended { exit_code, stopped } => ipc::DebugEventKind::Ended {
             exit_code: *exit_code,
             stopped: *stopped,
+            message: None,
         },
         rd::DebugEvent::Paused(info) => ipc::DebugEventKind::Paused {
             reason: match &info.reason {
@@ -272,34 +273,42 @@ async fn drive(d: Drive) {
             event: kind,
         }));
     };
-    let attached = tokio::select! {
-        () = d.cancel.cancelled() => None,
+    // `Err(None)`: the user stopped it while attaching; `Err(Some(text))`:
+    // attaching failed, and the view is told why.
+    let attached: Result<Connection, Option<String>> = tokio::select! {
+        () = d.cancel.cancelled() => Err(None),
         r = tokio::time::timeout(CONNECT_TIMEOUT, d.connector.connect(d.port, d.cancel.clone())) => match r {
-            Ok(Ok(connection)) => Some(connection),
+            Ok(Ok(connection)) => Ok(connection),
             Ok(Err(err)) => {
                 tracing::warn!(session = d.id, %err, "attaching the debugger failed");
-                None
+                Err(Some(format!("The debugger could not attach: {err}")))
             }
             Err(_) => {
                 tracing::warn!(session = d.id, "attaching the debugger timed out");
-                None
+                Err(Some(format!(
+                    "The debugger did not attach within {} seconds",
+                    CONNECT_TIMEOUT.as_secs()
+                )))
             }
         },
     };
-    let Some(Connection {
+    let Connection {
         backend,
         mut events,
-    }) = attached
-    else {
-        // Never attached: the program waits for a debugger, so end it.
-        if let Ok(terminal) = d.runs.terminals.get(d.run) {
-            terminal.stop();
+    } = match attached {
+        Ok(connection) => connection,
+        Err(message) => {
+            // Never attached: the program waits for a debugger, so end it.
+            if let Ok(terminal) = d.runs.terminals.get(d.run) {
+                terminal.stop();
+            }
+            emit(ipc::DebugEventKind::Ended {
+                exit_code: None,
+                stopped: d.cancel.is_cancelled(),
+                message,
+            });
+            return;
         }
-        emit(ipc::DebugEventKind::Ended {
-            exit_code: None,
-            stopped: d.cancel.is_cancelled(),
-        });
-        return;
     };
     if let Ok(mut slot) = d.slot.lock() {
         *slot = Some(backend.clone());
@@ -327,6 +336,7 @@ async fn drive(d: Drive) {
         emit(ipc::DebugEventKind::Ended {
             exit_code: None,
             stopped: d.cancel.is_cancelled(),
+            message: None,
         });
     }
     let _ = tokio::time::timeout(CLOSE_TIMEOUT, backend.close()).await;
@@ -462,6 +472,288 @@ impl Session {
             ));
         };
         self.stop_run(run).await
+    }
+}
+
+pub use cdp_backend::CdpConnector;
+
+/// The real debugger: Node's inspector over the Chrome DevTools Protocol
+/// (`ferrule-cdp-client`).
+mod cdp_backend {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use ferrule_cdp_client::protocol::{self as cdp, Event};
+    use ferrule_cdp_client::{CdpClient, CdpError, CdpEvent, CdpEvents, discover};
+    use ferrule_run_debug::{self as rd, DebugCommand, DebugError};
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+
+    use super::{BoxFuture, Connection, DebugBackend, DebugConnector};
+
+    /// How long discovering the inspector's URL may take.
+    const DISCOVER_TIMEOUT: Duration = Duration::from_secs(10);
+    /// How long `Debugger.disable` may take when closing.
+    const DISABLE_TIMEOUT: Duration = Duration::from_millis(800);
+    /// Events queued between the inspector and the session task.
+    const QUEUE: usize = 256;
+    /// Sent when the program has run to its end and Node waits for the
+    /// debugger to disconnect (after `NodeRuntime.notifyWhenWaitingForDisconnect`).
+    const WAITING_FOR_DISCONNECT: &str = "NodeRuntime.waitingForDisconnect";
+
+    /// Attaches to Node's inspector.
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct CdpConnector;
+
+    /// What the next `Debugger.paused` caused: V8 reports a step end and a
+    /// user pause both as `other`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Cause {
+        Unknown,
+        Step,
+        Pause,
+    }
+
+    fn backend_error(err: &CdpError) -> DebugError {
+        DebugError::Backend(err.to_string())
+    }
+
+    struct CdpBackend {
+        client: CdpClient,
+        /// Owned by the backend, not the session: cancelling the session
+        /// must leave the socket open until `Debugger.disable` was sent.
+        link: CancellationToken,
+        cause: Arc<Mutex<Cause>>,
+    }
+
+    impl CdpBackend {
+        fn expect(&self, cause: Cause) {
+            if let Ok(mut c) = self.cause.lock() {
+                *c = cause;
+            }
+        }
+    }
+
+    impl DebugBackend for CdpBackend {
+        fn command(&self, command: DebugCommand) -> BoxFuture<'_, Result<(), DebugError>> {
+            Box::pin(async move {
+                let sent = match command {
+                    DebugCommand::Resume => {
+                        self.client.send(cdp::Resume::default()).await.map(|_| ())
+                    }
+                    DebugCommand::StepOver => {
+                        self.expect(Cause::Step);
+                        self.client.send(cdp::StepOver).await.map(|_| ())
+                    }
+                    DebugCommand::StepInto => {
+                        self.expect(Cause::Step);
+                        self.client.send(cdp::StepInto).await.map(|_| ())
+                    }
+                    DebugCommand::StepOut => {
+                        self.expect(Cause::Step);
+                        self.client.send(cdp::StepOut).await.map(|_| ())
+                    }
+                    DebugCommand::Pause => {
+                        self.expect(Cause::Pause);
+                        self.client.send(cdp::Pause).await.map(|_| ())
+                    }
+                    // The session ends by cancelling its task, which closes.
+                    DebugCommand::Stop => Ok(()),
+                    DebugCommand::Variables | DebugCommand::Evaluate => {
+                        return Err(DebugError::Backend(
+                            "variables and evaluation are not available yet".into(),
+                        ));
+                    }
+                };
+                sent.map_err(|e| backend_error(&e))
+            })
+        }
+
+        fn close(&self) -> BoxFuture<'_, ()> {
+            Box::pin(async move {
+                // Best effort: detach cleanly, then drop the socket.
+                let _ =
+                    tokio::time::timeout(DISABLE_TIMEOUT, self.client.send(cdp::DebuggerDisable))
+                        .await;
+                self.client.close().await;
+                self.link.cancel();
+            })
+        }
+    }
+
+    impl DebugConnector for CdpConnector {
+        fn connect(
+            &self,
+            port: u16,
+            cancel: CancellationToken,
+        ) -> BoxFuture<'_, Result<Connection, DebugError>> {
+            Box::pin(async move {
+                let url = discover(port, DISCOVER_TIMEOUT, &cancel)
+                    .await
+                    .map_err(|e| backend_error(&e))?;
+                let link = CancellationToken::new();
+                let (client, events) = CdpClient::connect(&url, link.clone())
+                    .await
+                    .map_err(|e| backend_error(&e))?;
+                match start(&client, events).await {
+                    Ok((events, cause)) => Ok(Connection {
+                        backend: Arc::new(CdpBackend {
+                            client,
+                            link,
+                            cause,
+                        }),
+                        events,
+                    }),
+                    Err(err) => {
+                        client.close().await;
+                        link.cancel();
+                        Err(err)
+                    }
+                }
+            })
+        }
+    }
+
+    /// Enables the debugger, lets the waiting program run and starts the task
+    /// that turns inspector events into session events.
+    async fn start(
+        client: &CdpClient,
+        inspector: CdpEvents,
+    ) -> Result<(mpsc::Receiver<rd::DebugEvent>, Arc<Mutex<Cause>>), DebugError> {
+        let backend_failed = |e: CdpError| backend_error(&e);
+        client
+            .send(cdp::DebuggerEnable::default())
+            .await
+            .map_err(backend_failed)?;
+        // Without this Node would wait for a disconnect after the program
+        // ended, and we could not tell. Older Nodes may refuse it: then the
+        // end is seen when the process closes the socket.
+        if let Err(err) = client
+            .call::<_, serde_json::Value>(
+                "NodeRuntime.notifyWhenWaitingForDisconnect",
+                serde_json::json!({ "enabled": true }),
+            )
+            .await
+        {
+            tracing::debug!(%err, "NodeRuntime.notifyWhenWaitingForDisconnect refused");
+        }
+        let (tx, rx) = mpsc::channel(QUEUE);
+        // `Started` first, so it precedes the stop at the first line.
+        tx.send(rd::DebugEvent::Started)
+            .await
+            .map_err(|_| DebugError::Backend("the session ended while attaching".into()))?;
+        let cause = Arc::new(Mutex::new(Cause::Unknown));
+        tokio::spawn(pump(inspector, tx, cause.clone()));
+        client
+            .send(cdp::RunIfWaitingForDebugger)
+            .await
+            .map_err(backend_failed)?;
+        Ok((rx, cause))
+    }
+
+    /// Reads the inspector's events until the connection ends; the end of the
+    /// channel tells the session task.
+    async fn pump(
+        mut inspector: CdpEvents,
+        tx: mpsc::Sender<rd::DebugEvent>,
+        cause: Arc<Mutex<Cause>>,
+    ) {
+        // Script id -> URL, for the file of a frame.
+        let mut scripts: HashMap<String, String> = HashMap::new();
+        while let Some(event) = inspector.recv().await {
+            if matches!(&event, CdpEvent::Closed { .. }) {
+                break;
+            }
+            if matches!(&event, CdpEvent::Event { method, .. } if method == WAITING_FOR_DISCONNECT)
+            {
+                // The program ended; the session task closes the socket,
+                // and Node then exits.
+                let _ = tx
+                    .send(rd::DebugEvent::Ended {
+                        exit_code: None,
+                        stopped: false,
+                    })
+                    .await;
+                break;
+            }
+            let session_event = match event.typed() {
+                Ok(Some(Event::ScriptParsed(script))) => {
+                    scripts.insert(script.script_id, script.url);
+                    None
+                }
+                Ok(Some(Event::Paused(paused))) => {
+                    let taken = cause
+                        .lock()
+                        .map(|mut c| std::mem::replace(&mut *c, Cause::Unknown))
+                        .unwrap_or(Cause::Unknown);
+                    Some(rd::DebugEvent::Paused(pause_info(&paused, &scripts, taken)))
+                }
+                Ok(Some(Event::Resumed)) => Some(rd::DebugEvent::Resumed),
+                Ok(_) => None,
+                Err(err) => {
+                    tracing::warn!(%err, "an inspector event could not be decoded");
+                    None
+                }
+            };
+            if let Some(event) = session_event
+                && tx.send(event).await.is_err()
+            {
+                break;
+            }
+        }
+    }
+
+    fn pause_info(
+        paused: &cdp::Paused,
+        scripts: &HashMap<String, String>,
+        cause: Cause,
+    ) -> rd::PauseInfo {
+        let reason = match paused.reason.as_str() {
+            "Break on start" => rd::PauseReason::Entry,
+            "exception" | "promiseRejection" => rd::PauseReason::Exception {
+                message: paused
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("description"))
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("exception")
+                    .to_owned(),
+            },
+            _ if !paused.hit_breakpoints.is_empty() => rd::PauseReason::Breakpoint,
+            "debugCommand" => rd::PauseReason::Breakpoint,
+            _ => match cause {
+                Cause::Step => rd::PauseReason::Step,
+                Cause::Pause => rd::PauseReason::Pause,
+                // A `debugger;` statement is reported as `other`.
+                Cause::Unknown => rd::PauseReason::Breakpoint,
+            },
+        };
+        let frames = paused
+            .call_frames
+            .iter()
+            .map(|frame| {
+                let url = scripts.get(&frame.location.script_id);
+                let path = url
+                    .and_then(|u| rd::file_url_to_path(u))
+                    .or_else(|| url.cloned())
+                    .unwrap_or_else(|| format!("script {}", frame.location.script_id));
+                let is_library = path.starts_with("node:") || path.contains("/node_modules/");
+                rd::Frame {
+                    id: frame.call_frame_id.clone(),
+                    name: frame.function_name.clone(),
+                    location: rd::Location {
+                        path_or_script: path,
+                        line: frame.location.line_number,
+                        column: frame.location.column_number.unwrap_or(0),
+                        generated: None,
+                    },
+                    is_library,
+                    scopes: Vec::new(),
+                }
+            })
+            .collect();
+        rd::PauseInfo::new(reason, frames)
     }
 }
 

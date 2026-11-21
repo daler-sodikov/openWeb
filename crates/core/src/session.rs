@@ -183,8 +183,8 @@ pub struct SessionConfig {
     pub terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
     /// PTY and emulator for runs; `None`: the terminal backend.
     pub run_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
-    /// Attaches to a program started for debugging; `None`: this build has
-    /// no debugger and `start_debug` says so.
+    /// Attaches to a program started for debugging; Node's inspector by
+    /// default. `None`: there is no debugger and `start_debug` says so.
     pub debug_connector: Option<Arc<dyn crate::debug::DebugConnector>>,
 }
 
@@ -214,7 +214,7 @@ impl SessionConfig {
             typing_trace: None,
             terminal_backend: None,
             run_backend: None,
-            debug_connector: None,
+            debug_connector: Some(Arc::new(crate::debug::CdpConnector)),
         }
     }
 }

@@ -22,7 +22,7 @@ mod trace;
 
 #[cfg(feature = "testing")]
 pub use debug::fake as fake_debug;
-pub use debug::{BoxFuture, Connection, DebugBackend, DebugConnector};
+pub use debug::{BoxFuture, CdpConnector, Connection, DebugBackend, DebugConnector};
 pub use events::{EventSink, NoEvents, SessionEvent};
 pub use session::{DEFAULT_AUTOSAVE_DELAY, Session, SessionConfig, SessionError};
 
