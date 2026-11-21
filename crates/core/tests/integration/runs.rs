@@ -71,7 +71,9 @@ fn copy_dir(from: &Path, to: &Path) {
     for entry in fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
         let name = entry.file_name();
-        if name == "node_modules" || name == "test-results" {
+        // `bun.lock` pins the fixture's own tools (Jest); copied, it would
+        // make Bun the project's package manager instead of the default npm.
+        if name == "node_modules" || name == "test-results" || name == "bun.lock" {
             continue;
         }
         if entry.file_type().unwrap().is_dir() {
@@ -545,20 +547,20 @@ async fn stopping_keeps_the_output_and_closing_the_project_ends_runs() {
     crate::cleanup::remove_project_dir(&root, &report.still_running);
 }
 
-/// Links the repository's `node_modules` (where Vitest and Playwright are
-/// installed for the frontend) into the copied fixture.
-fn link_node_modules(root: &Path) -> bool {
-    let target = repo().join("node_modules");
-    for package in ["vitest", "@playwright/test"] {
+/// Links `target` (a `node_modules` folder holding `packages`) into the
+/// copied fixture; `install` is the command that installs them, for the
+/// skip message.
+fn link_node_modules(root: &Path, target: &Path, packages: &[&str], install: &str) -> bool {
+    for package in packages {
         if !target.join(package).join("package.json").is_file() {
-            eprintln!("skipped: {package} is not installed (run `bun install`)");
+            eprintln!("skipped: {package} is not installed (run `{install}`)");
             return false;
         }
     }
     #[cfg(unix)]
-    let linked = std::os::unix::fs::symlink(&target, root.join("node_modules"));
+    let linked = std::os::unix::fs::symlink(target, root.join("node_modules"));
     #[cfg(windows)]
-    let linked = std::os::windows::fs::symlink_dir(&target, root.join("node_modules"));
+    let linked = std::os::windows::fs::symlink_dir(target, root.join("node_modules"));
     match linked {
         Ok(()) => true,
         Err(err) => {
@@ -577,7 +579,12 @@ async fn real_node_vitest_and_playwright_runs() {
     let Some(_) = node() else { return };
     let dir = tempfile::tempdir().unwrap();
     let (s, events, root) = open(dir.path(), native()).await;
-    if !link_node_modules(&root) {
+    if !link_node_modules(
+        &root,
+        &repo().join("node_modules"),
+        &["vitest", "@playwright/test"],
+        "bun install",
+    ) {
         return;
     }
     s.trust_project().await.unwrap();
@@ -619,6 +626,106 @@ async fn real_node_vitest_and_playwright_runs() {
     .unwrap();
     assert_eq!(fails.location.path, "e2e/math.spec.ts");
     assert!(fails.location.line > 0);
+
+    let report = s.close_project().await.unwrap();
+    assert!(report.still_running.is_empty(), "{report:?}");
+    crate::cleanup::remove_project_dir(&root, &report.still_running);
+}
+
+/// What Jest does when started directly in the project copy (no terminal),
+/// for a failure message: how it ended, what it printed, and what
+/// `node_modules` looks like.
+fn jest_diagnosis(root: &Path) -> String {
+    let script = root.join("node_modules/jest/bin/jest.js");
+    let report = root.join("diagnosis.json");
+    let ran = std::process::Command::new("node")
+        .arg(&script)
+        .args(["--json", "--testLocationInResults"])
+        .arg(format!("--outputFile={}", report.display()))
+        .current_dir(root)
+        .output();
+    let mut out = format!(
+        "root {}\nscript {} exists: {}\nreport written: {}\n",
+        root.display(),
+        script.display(),
+        script.is_file(),
+        report.is_file()
+    );
+    match ran {
+        Ok(o) => out.push_str(&format!(
+            "direct run: {}\nstdout:\n{}\nstderr:\n{}\n",
+            o.status,
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        )),
+        Err(err) => out.push_str(&format!("direct run failed to start: {err}\n")),
+    }
+    let modules: Vec<String> = fs::read_dir(root.join("node_modules"))
+        .map(|d| {
+            d.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .take(12)
+                .collect()
+        })
+        .unwrap_or_default();
+    out.push_str(&format!("node_modules (first 12): {modules:?}\n"));
+    out
+}
+
+/// Jest is not a dependency of the repository itself: the fixture has its
+/// own (`bun install --cwd fixtures/test-runners`), linked into the copy.
+#[tokio::test]
+async fn real_jest_run() {
+    let Some(_) = node() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let (s, events, root) = open(dir.path(), native()).await;
+    if !link_node_modules(
+        &root,
+        &repo().join("fixtures/test-runners/node_modules"),
+        &["jest"],
+        "bun install --cwd fixtures/test-runners",
+    ) {
+        return;
+    }
+    s.trust_project().await.unwrap();
+    let configs = s.run_configurations().await.unwrap();
+
+    let jest = detected(&configs.detected, "detected:test:jest");
+    let run = started(s.start_run(jest, SIZE).await.unwrap());
+    let finished = wait_finished(&events, run.id, Duration::from_secs(120)).await;
+    let mut output = events.output(run.id);
+    if finished.report_error.is_some() {
+        // The terminal may show nothing (ConPTY): say what Jest does when
+        // started directly, and how the run ended.
+        output = format!(
+            "{output}\nexit code {:?}\n{}",
+            finished.exit_code,
+            jest_diagnosis(&root)
+        );
+    }
+    assert_eq!(finished.report_error, None, "{output}");
+    assert_eq!(finished.exit_code, Some(1), "{output}");
+    assert_eq!(finished.counts, Some((3, 1, 1)), "{output}");
+    let tree = finished.tests.unwrap();
+    let divides = find(&tree, &["math", "divides"]).unwrap();
+    assert_eq!(divides.status, TestStatus::Failed);
+    assert_eq!(divides.location.path, "jest/math.test.cjs");
+    assert_eq!(divides.location.line, 8);
+    let frame = &divides.failures[0].frames[0];
+    assert_eq!(
+        (frame.path.as_str(), frame.line),
+        ("jest/math.test.cjs", 10)
+    );
+    assert_eq!(
+        find(&tree, &["math", "is skipped"]).unwrap().status,
+        TestStatus::Skipped
+    );
+    assert_eq!(
+        find(&tree, &["math", "tables", "adds 2 and 3"])
+            .unwrap()
+            .status,
+        TestStatus::Passed
+    );
 
     let report = s.close_project().await.unwrap();
     assert!(report.still_running.is_empty(), "{report:?}");

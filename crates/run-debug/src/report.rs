@@ -576,6 +576,56 @@ mod tests {
     }
 
     #[test]
+    fn jest_report_recorded_from_the_real_tool() {
+        let report = parse_jest_report(&fixture("jest.json")).unwrap();
+        assert_eq!(report.files.len(), 1);
+        let file = &report.files[0];
+        assert_eq!(file.name, "/work/p/jest/math.test.cjs");
+        assert_eq!(file.status, TestStatus::Failed);
+        assert_eq!(names(file), ["math"]);
+        let math = &file.children[0];
+        assert_eq!(names(math), ["adds", "divides", "is skipped", "tables"]);
+        let divides = &math.children[1];
+        assert_eq!(divides.status, TestStatus::Failed);
+        assert_eq!(divides.full_name, ["math", "divides"]);
+        assert_eq!(divides.line, Some(8));
+        let failure = &divides.failures[0];
+        assert!(
+            failure
+                .message
+                .starts_with("Error: expect(received).toBe(expected)"),
+            "{:?}",
+            failure.message
+        );
+        assert!(failure.message.contains("Received: 0.25"));
+        // Jest's own frames (jest-circus) follow the test's; the first is the test's.
+        assert_eq!(
+            failure.frames[0],
+            StackFrame {
+                file: "/work/p/jest/math.test.cjs".into(),
+                line: 10,
+                column: 26
+            }
+        );
+        assert_eq!(math.children[2].status, TestStatus::Skipped, "pending");
+        let tables = &math.children[3];
+        assert_eq!(tables.kind, NodeKind::Suite);
+        assert_eq!(
+            tables.children[1].full_name,
+            ["math", "tables", "adds 2 and 3"]
+        );
+        assert_eq!(report.counts(), (3, 1, 1));
+        assert_eq!(
+            report.failed_tests(Path::new("/work/p")),
+            [TestRef {
+                file: "jest/math.test.cjs".into(),
+                name: vec!["math".into(), "divides".into()],
+                line: Some(8)
+            }]
+        );
+    }
+
+    #[test]
     fn playwright_report_recorded_from_the_real_tool() {
         let report = parse_playwright_report(&fixture("playwright.json")).unwrap();
         assert_eq!(report.files.len(), 1);
