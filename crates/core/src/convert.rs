@@ -175,6 +175,14 @@ pub(crate) fn action_to_ipc(action: ferrule_settings::Action) -> ipc::KeyAction 
         A::Rerun => K::Rerun,
         A::ChooseRunConfiguration => K::ChooseRunConfiguration,
         A::ToggleRunWindow => K::ToggleRunWindow,
+        A::Debug => K::Debug,
+        A::Resume => K::Resume,
+        A::StepOver => K::StepOver,
+        A::StepInto => K::StepInto,
+        A::StepOut => K::StepOut,
+        A::Pause => K::Pause,
+        A::ToggleBreakpoint => K::ToggleBreakpoint,
+        A::ToggleDebugWindow => K::ToggleDebugWindow,
         A::RevokeProjectTrust => K::RevokeProjectTrust,
     }
 }

@@ -28,6 +28,7 @@ ferrule-dap-client.workspace = true
 ferrule-git.workspace = true
 ferrule-terminal.workspace = true
 ferrule-run-debug.workspace = true
+ferrule-cdp-client.workspace = true
 ferrule-plugin-host.workspace = true
 tokio.workspace = true
 serde.workspace = true
@@ -41,7 +42,13 @@ pulldown-cmark.workspace = true
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_RestartManager"] }
 
+[features]
+# The scripted debugger (`fake_debug`) for tests and the headless binary.
+testing = ["ferrule-run-debug/testing"]
+
 [dev-dependencies]
+# Itself, to turn `testing` on for this crate's own tests.
+ferrule-core = { workspace = true, features = ["testing"] }
 ferrule-terminal = { workspace = true, features = ["testing", "native"] }
 ferrule-run-debug = { workspace = true, features = ["testing"] }
 tempfile.workspace = true

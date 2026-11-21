@@ -2,8 +2,8 @@
 
 use ferrule_core::{EventSink, SessionEvent};
 use ferrule_ipc::{
-    FileProblems, FsChangeBatch, GitStatus, IndexState, RunFinished, ServerStatus, TerminalExited,
-    TerminalFrame,
+    DebugEvent, FileProblems, FsChangeBatch, GitStatus, IndexState, RunFinished, ServerStatus,
+    TerminalExited, TerminalFrame,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -42,6 +42,11 @@ pub struct GitStatusEvent(pub GitStatus);
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct RunFinishedEvent(pub RunFinished);
 
+/// Something happened in a debug session (`debug-event`).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[tauri_specta(event_name = "debug-event")]
+pub struct DebugEventMessage(pub DebugEvent);
+
 /// Event name and JSON payload of a session event, for transports other
 /// than Tauri events (the headless test backend).
 pub fn encode(event: &SessionEvent) -> (&'static str, serde_json::Value) {
@@ -62,6 +67,7 @@ pub fn encode(event: &SessionEvent) -> (&'static str, serde_json::Value) {
         }
         SessionEvent::GitStatus(status) => (GitStatusEvent::NAME, serde_json::to_value(status)),
         SessionEvent::RunFinished(run) => (RunFinishedEvent::NAME, serde_json::to_value(run)),
+        SessionEvent::Debug(event) => (DebugEventMessage::NAME, serde_json::to_value(event)),
     };
     (name, payload.unwrap_or(serde_json::Value::Null))
 }
@@ -80,6 +86,7 @@ impl<R: Runtime> EventSink for TauriSink<R> {
             SessionEvent::TerminalExited(exited) => TerminalExitedEvent(exited).emit(&self.0),
             SessionEvent::GitStatus(status) => GitStatusEvent(status).emit(&self.0),
             SessionEvent::RunFinished(run) => RunFinishedEvent(run).emit(&self.0),
+            SessionEvent::Debug(event) => DebugEventMessage(event).emit(&self.0),
         };
         if let Err(err) = result {
             tracing::warn!(%err, "emitting an event failed");

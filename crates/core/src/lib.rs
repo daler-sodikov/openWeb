@@ -5,6 +5,7 @@
 
 mod completion;
 mod convert;
+mod debug;
 mod edits;
 mod events;
 mod git;
@@ -19,6 +20,9 @@ mod session;
 mod terminal;
 mod trace;
 
+#[cfg(feature = "testing")]
+pub use debug::fake as fake_debug;
+pub use debug::{BoxFuture, CdpConnector, Connection, DebugBackend, DebugConnector};
 pub use events::{EventSink, NoEvents, SessionEvent};
 pub use session::{DEFAULT_AUTOSAVE_DELAY, Session, SessionConfig, SessionError};
 

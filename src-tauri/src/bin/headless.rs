@@ -10,7 +10,10 @@
 //!   the current position immediately
 //!
 //! Usage: `ferrule-headless --port 1431 --data-dir <dir> [--fake-terminals]
-//! [--fake-runs]`. `--fake-terminals` replaces real shells by the in-memory
+//! [--fake-runs] [--fake-debug]`. `--fake-debug` (which implies
+//! `--fake-runs`) attaches debug sessions to a scripted program instead of
+//! Node's inspector: it stops at line 0, 3 and 4 of `main.js`, then exits
+//! with code 0. `--fake-terminals` replaces real shells by the in-memory
 //! backend from `ferrule-terminal` (its shells echo what is typed) and
 //! implies `--fake-runs`, which replaces run processes by the in-memory
 //! backend from `ferrule-run-debug` (it writes recorded test reports), so
@@ -82,6 +85,37 @@ struct Args {
     data_dir: PathBuf,
     fake_terminals: bool,
     fake_runs: bool,
+    fake_debug: bool,
+}
+
+/// The program `--fake-debug` sessions play.
+fn fake_program() -> ferrule_run_debug::fake_debug::FakeDebug {
+    use ferrule_run_debug::fake_debug::{FakeDebug, ScriptItem};
+    use ferrule_run_debug::{Frame, Location, PauseInfo, PauseReason};
+    let stop = |reason: PauseReason, line: u32| {
+        ScriptItem::Stop(PauseInfo::new(
+            reason,
+            vec![Frame {
+                id: format!("frame-{line}"),
+                name: "main".to_owned(),
+                location: Location {
+                    path_or_script: "main.js".to_owned(),
+                    line,
+                    column: 0,
+                    generated: None,
+                },
+                is_library: false,
+                scopes: Vec::new(),
+            }],
+        ))
+    };
+    FakeDebug::new(vec![
+        stop(PauseReason::Entry, 0),
+        ScriptItem::Output("started".to_owned()),
+        stop(PauseReason::Step, 3),
+        stop(PauseReason::Step, 4),
+        ScriptItem::Exit(Some(0)),
+    ])
 }
 
 fn parse_args() -> anyhow::Result<Args> {
@@ -89,6 +123,7 @@ fn parse_args() -> anyhow::Result<Args> {
     let mut data_dir = std::env::temp_dir().join("ferrule-headless");
     let mut fake_terminals = false;
     let mut fake_runs = false;
+    let mut fake_debug = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -96,14 +131,16 @@ fn parse_args() -> anyhow::Result<Args> {
             "--data-dir" => data_dir = args.next().context("--data-dir needs a value")?.into(),
             "--fake-terminals" => fake_terminals = true,
             "--fake-runs" => fake_runs = true,
+            "--fake-debug" => fake_debug = true,
             other => bail!("unknown argument {other:?}"),
         }
     }
     Ok(Args {
         port,
         data_dir,
-        fake_runs: fake_runs || fake_terminals,
+        fake_runs: fake_runs || fake_terminals || fake_debug,
         fake_terminals,
+        fake_debug,
     })
 }
 
@@ -121,6 +158,12 @@ fn main() -> anyhow::Result<()> {
     if args.fake_runs {
         tracing::info!("runs use the in-memory test backend");
         config.run_backend = Some(Arc::new(ferrule_run_debug::fake::FakeRunBackend));
+    }
+    if args.fake_debug {
+        tracing::info!("debug sessions use the scripted test debugger");
+        config.debug_connector = Some(Arc::new(ferrule_core::fake_debug::FakeConnector::new(
+            fake_program,
+        )));
     }
     let session = Session::with_config(config, events.clone())?;
     let app = configure(mock_builder(), InitialProject(None), SmokeMode::new(false))

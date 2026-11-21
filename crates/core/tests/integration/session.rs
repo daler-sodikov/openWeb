@@ -316,6 +316,7 @@ async fn opening_twice_returns_the_same_document() {
 fn keymap_has_every_action() {
     // Every action except Open Folder, Split Right, Restart TypeScript Server,
     // Branches, Show Diff and Annotate with Git Blame
-    // (no default keys in the IntelliJ keymap).
-    assert_eq!(ferrule_core::keymap().len(), 44);
+    // (no default keys in the IntelliJ keymap). The eight debug actions all
+    // have one.
+    assert_eq!(ferrule_core::keymap().len(), 52);
 }

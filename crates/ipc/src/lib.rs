@@ -364,6 +364,14 @@ pub enum KeyAction {
     Rerun,
     ChooseRunConfiguration,
     ToggleRunWindow,
+    Debug,
+    Resume,
+    StepOver,
+    StepInto,
+    StepOut,
+    Pause,
+    ToggleBreakpoint,
+    ToggleDebugWindow,
     RevokeProjectTrust,
 }
 
@@ -1584,6 +1592,131 @@ pub enum StartRun {
         /// Its working directory.
         cwd: String,
     },
+}
+
+/// Result of asking to start a debug session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum StartDebug {
+    /// Started: the run tab exists and the debugger is attaching.
+    Started {
+        /// The session, for the debug commands and in every `debug-event`.
+        session: u32,
+        /// The run (its output is in the Run tab).
+        run: RunInfo,
+    },
+    /// The project must be trusted first: show this command and ask. The
+    /// command has `--inspect-brk=127.0.0.1:<port>`; the port is the only
+    /// part that differs from a plain run.
+    NeedsTrust {
+        /// The exact command line.
+        command: String,
+        /// Its working directory.
+        cwd: String,
+    },
+}
+
+/// A zero-based position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugPosition {
+    /// Line.
+    pub line: u32,
+    /// Column.
+    pub column: u32,
+}
+
+/// Where a stack frame is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugLocation {
+    /// The file (project-relative or absolute) or a script name such as
+    /// `node:fs`.
+    pub path_or_script: String,
+    /// Zero-based line (in the original file when a source map applied).
+    pub line: u32,
+    /// Zero-based column.
+    pub column: u32,
+    /// The position in the generated code when it was mapped back.
+    pub generated: Option<DebugPosition>,
+}
+
+/// One entry of the call stack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugFrame {
+    /// An opaque id from the debugger.
+    pub id: String,
+    /// The function name (empty for anonymous).
+    pub name: String,
+    /// Where it is.
+    pub location: DebugLocation,
+    /// Under `node_modules` or a `node:` module; the view dims it.
+    pub is_library: bool,
+}
+
+/// Why the program stopped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum DebugPauseReason {
+    /// A breakpoint was hit.
+    Breakpoint,
+    /// A step finished.
+    Step,
+    /// The user asked to pause.
+    Pause,
+    /// An exception was thrown.
+    Exception {
+        /// The exception's text.
+        message: String,
+    },
+    /// The stop at the first line of a program started under the debugger.
+    Entry,
+}
+
+/// What happened in a debug session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum DebugEventKind {
+    /// The debugger attached; the program runs.
+    Started,
+    /// The program stopped.
+    #[serde(rename_all = "camelCase")]
+    Paused {
+        /// Why.
+        reason: DebugPauseReason,
+        /// The call stack, innermost first.
+        frames: Vec<DebugFrame>,
+        /// Index into `frames`.
+        selected: u32,
+    },
+    /// The program runs again (also after a step).
+    Resumed,
+    /// The session is over (the run tab stays).
+    #[serde(rename_all = "camelCase")]
+    Ended {
+        /// The exit code, if the program ended by itself.
+        exit_code: Option<i32>,
+        /// True when the user stopped it.
+        stopped: bool,
+        /// Why the session ended without having run, e.g. the debugger could
+        /// not attach; the view shows it. `None` for a normal end.
+        message: Option<String>,
+    },
+}
+
+/// An event of a debug session (`debug-event`). `seq` grows by one per event
+/// of a session, so the view can drop an event that arrives after a newer
+/// one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugEvent {
+    /// The session.
+    pub session: u32,
+    /// Starts at 1.
+    pub seq: u32,
+    /// What happened.
+    pub event: DebugEventKind,
 }
 
 /// A test's status.

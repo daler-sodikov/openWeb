@@ -183,6 +183,9 @@ pub struct SessionConfig {
     pub terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
     /// PTY and emulator for runs; `None`: the terminal backend.
     pub run_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
+    /// Attaches to a program started for debugging; Node's inspector by
+    /// default. `None`: there is no debugger and `start_debug` says so.
+    pub debug_connector: Option<Arc<dyn crate::debug::DebugConnector>>,
 }
 
 impl std::fmt::Debug for SessionConfig {
@@ -194,6 +197,7 @@ impl std::fmt::Debug for SessionConfig {
             .field("typing_trace", &self.typing_trace)
             .field("terminal_backend", &self.terminal_backend.is_some())
             .field("run_backend", &self.run_backend.is_some())
+            .field("debug_connector", &self.debug_connector.is_some())
             .finish()
     }
 }
@@ -210,6 +214,7 @@ impl SessionConfig {
             typing_trace: None,
             terminal_backend: None,
             run_backend: None,
+            debug_connector: Some(Arc::new(crate::debug::CdpConnector)),
         }
     }
 }
@@ -226,6 +231,7 @@ pub struct Session {
     pub(crate) settings_file: PathBuf,
     terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
     run_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
+    debug_connector: Option<Arc<dyn crate::debug::DebugConnector>>,
     pub(crate) trace: Option<Arc<TypingTrace>>,
     pub(crate) sink: Arc<dyn EventSink>,
     /// Incremented by every Find in Files request; older requests stop.
@@ -303,6 +309,7 @@ impl Session {
             typing_trace,
             terminal_backend,
             run_backend,
+            debug_connector,
         } = config;
         let registry = Arc::new(languages()?);
         Ok(Arc::new_cyclic(move |weak| Self {
@@ -315,6 +322,7 @@ impl Session {
             data_dir,
             settings_file,
             run_backend: run_backend.or_else(|| terminal_backend.clone()),
+            debug_connector,
             terminal_backend,
             trace: typing_trace.map(|path| Arc::new(TypingTrace::new(path))),
             sink,
@@ -389,8 +397,11 @@ impl Session {
         let sink = self.sink.clone();
         let settings_file = self.settings_file.clone();
         let session = Arc::downgrade(self);
-        let terminal_backend = self.terminal_backend.clone();
-        let run_backend = self.run_backend.clone();
+        let backends = crate::project_runtime::Backends {
+            terminal: self.terminal_backend.clone(),
+            run: self.run_backend.clone(),
+            debug: self.debug_connector.clone(),
+        };
         let runtime = blocking(move || {
             let project = Project::open(Path::new(&path)).map_err(project_error)?;
             Ok(Arc::new(ProjectRuntime::new(
@@ -399,8 +410,7 @@ impl Session {
                 sink,
                 settings_file,
                 session,
-                terminal_backend,
-                run_backend,
+                backends,
             )))
         })
         .await?;

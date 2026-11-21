@@ -53,6 +53,8 @@ pub(crate) struct ProjectRuntime {
     pub git: Arc<crate::git::GitState>,
     /// Runs of configurations and tests.
     pub runs: Arc<crate::runs::Runs>,
+    /// Debug sessions (each one is also a run).
+    pub debug: Arc<crate::debug::Debugs>,
     /// Whether the user trusted the project to run commands.
     trusted: AtomicBool,
     /// The background index build (awaited when the project closes).
@@ -93,6 +95,16 @@ impl Drop for ProjectRuntime {
     }
 }
 
+/// The pluggable backends a project's services start with.
+pub(crate) struct Backends {
+    /// PTY and emulator for terminals.
+    pub terminal: Option<Arc<dyn ferrule_terminal::Backend>>,
+    /// PTY and emulator for runs.
+    pub run: Option<Arc<dyn ferrule_terminal::Backend>>,
+    /// Attaches to a program started for debugging.
+    pub debug: Option<Arc<dyn crate::debug::DebugConnector>>,
+}
+
 impl ProjectRuntime {
     pub fn new(
         project: Project,
@@ -100,9 +112,13 @@ impl ProjectRuntime {
         sink: Arc<dyn EventSink>,
         settings_file: PathBuf,
         session: Weak<Session>,
-        terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
-        run_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
+        backends: Backends,
     ) -> Self {
+        let Backends {
+            terminal: terminal_backend,
+            run: run_backend,
+            debug: debug_connector,
+        } = backends;
         let hash = ferrule_vfs::path_hash(project.root());
         let project_file = data_dir.join("projects").join(format!("{hash}.json"));
         let stored = std::fs::read(&project_file)
@@ -117,6 +133,7 @@ impl ProjectRuntime {
             project.root().to_path_buf(),
             data_dir.join("runs").join(&hash),
         );
+        let debug = crate::debug::Debugs::new(sink.clone(), debug_connector);
         let git = Arc::new(crate::git::GitState::new(sink.clone()));
         let lsp = Arc::new(LanguageService::new(
             ferrule_lang_js::typescript_server(),
@@ -137,6 +154,7 @@ impl ProjectRuntime {
             terminals,
             git,
             runs,
+            debug,
             trusted: AtomicBool::new(stored.trusted),
             index_task: Mutex::new(None),
             git_start: Mutex::new(None),
@@ -152,6 +170,9 @@ impl ProjectRuntime {
     pub async fn shut_down(self: &Arc<Self>) -> Vec<String> {
         let mut still_running = Vec::new();
         self.cancel.cancel();
+        // Debug sessions first: their `Ended` events go out while the
+        // runtime is alive, and their tasks are gone before the runs close.
+        self.debug.shut_down().await;
         let me = self.clone();
         match tokio::task::spawn_blocking(move || me.terminals.close_all_and_wait(CLOSE_WAIT)).await
         {

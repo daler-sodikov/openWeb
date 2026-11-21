@@ -13,8 +13,9 @@ use std::time::Duration;
 mod events;
 
 pub use events::{
-    FsChanged, GitStatusEvent, IndexStatus, ProblemsChanged, RunFinishedEvent, ServerStatusChanged,
-    TauriSink, TerminalExitedEvent, TerminalFrameEvent, encode as encode_event,
+    DebugEventMessage, FsChanged, GitStatusEvent, IndexStatus, ProblemsChanged, RunFinishedEvent,
+    ServerStatusChanged, TauriSink, TerminalExitedEvent, TerminalFrameEvent,
+    encode as encode_event,
 };
 
 use ferrule_core::{Session, SessionConfig};
@@ -26,10 +27,10 @@ use ferrule_ipc::{
     GitStatus, Highlights, HoverResult, IpcError, KeyBinding, NavKind, NavTarget, OpenedDocument,
     PROTOCOL_VERSION, ProjectCloseReport, ProjectInfo, RUN_ID_BASE, RefactoringPreview,
     RemoteUpdate, RenameTarget, ReplaceResult, RunConfig, RunConfigurations, RunInfo, SaveResult,
-    SearchResults, SearchTab, ServerStatus, SignatureView, StartRun, StartupTarget, TERMINAL_FLAGS,
-    TerminalCell, TerminalInfo, TerminalKey, TerminalLink, TerminalList, TerminalSelectionKind,
-    TerminalSize, TestBlocks, TestTarget, TextSearch, TraceSample, UsageResults,
-    WorkspaceEditResult,
+    SearchResults, SearchTab, ServerStatus, SignatureView, StartDebug, StartRun, StartupTarget,
+    TERMINAL_FLAGS, TerminalCell, TerminalInfo, TerminalKey, TerminalLink, TerminalList,
+    TerminalSelectionKind, TerminalSize, TestBlocks, TestTarget, TextSearch, TraceSample,
+    UsageResults, WorkspaceEditResult,
 };
 use specta_typescript::Typescript;
 use tauri::{Manager, Runtime, State};
@@ -912,6 +913,60 @@ async fn start_run(
     session.start_run(config, size).await
 }
 
+/// Starts debugging a Node configuration (or says the project must be
+/// trusted first).
+#[tauri::command]
+#[specta::specta]
+async fn start_debug(
+    session: SessionState<'_>,
+    config: RunConfig,
+    size: TerminalSize,
+) -> Result<StartDebug, IpcError> {
+    session.start_debug(config, size).await
+}
+
+/// Continues a paused program.
+#[tauri::command]
+#[specta::specta]
+async fn debug_resume(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.debug_resume(id).await
+}
+
+/// Steps over the current line.
+#[tauri::command]
+#[specta::specta]
+async fn debug_step_over(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.debug_step_over(id).await
+}
+
+/// Steps into the call on the current line.
+#[tauri::command]
+#[specta::specta]
+async fn debug_step_into(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.debug_step_into(id).await
+}
+
+/// Steps out of the current function.
+#[tauri::command]
+#[specta::specta]
+async fn debug_step_out(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.debug_step_out(id).await
+}
+
+/// Pauses a running program.
+#[tauri::command]
+#[specta::specta]
+async fn debug_pause(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.debug_pause(id).await
+}
+
+/// Ends a debug session and its process tree (the run tab stays).
+#[tauri::command]
+#[specta::specta]
+async fn stop_debug(session: SessionState<'_>, id: u32) -> Result<(), IpcError> {
+    session.stop_debug(id).await
+}
+
 /// Stops a run's processes (its output stays).
 #[tauri::command]
 #[specta::specta]
@@ -1077,6 +1132,13 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             trust_project,
             revoke_project_trust,
             start_run,
+            start_debug,
+            debug_resume,
+            debug_step_over,
+            debug_step_into,
+            debug_step_out,
+            debug_pause,
+            stop_debug,
             stop_run,
             close_run,
             rerun,
@@ -1094,7 +1156,8 @@ pub fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
             TerminalFrameEvent,
             TerminalExitedEvent,
             GitStatusEvent,
-            RunFinishedEvent
+            RunFinishedEvent,
+            DebugEventMessage
         ])
         .constant("PROTOCOL_VERSION", PROTOCOL_VERSION)
         .constant("TERMINAL_FLAGS", TERMINAL_FLAGS)

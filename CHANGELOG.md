@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M5b-5: debug session lifecycle, groundwork for the debugger)
+
+- Commands `start_debug`, `debug_resume`, `debug_step_over`,
+  `debug_step_into`, `debug_step_out`, `debug_pause` and `stop_debug`, and a
+  `debug-event` stream (`Started`, `Paused`, `Resumed`, `Ended`, each with a
+  `seq` per session). `start_debug` follows the Run path: it asks for trust
+  (showing `--inspect-brk=127.0.0.1:<port>`), then starts the run. A
+  configuration that already has an inspector flag (`--inspect*` argument or
+  `NODE_OPTIONS`) is refused, and only Node files can be debugged for now.
+- Stop and closing the project end debug sessions first, also while the
+  program is paused (a paused program is stopped, never resumed).
+- Keymap actions Debug (Shift+F9), Resume (F9), Step Over (F8), Step Into
+  (F7), Step Out (Shift+F8), Pause, Toggle Breakpoint (Ctrl+F8) and the
+  Debug window (Alt+5); macOS variants in the IntelliJ-style macOS keymap.
+- The debugger attaches to Node's inspector over the Chrome DevTools
+  Protocol (the `ferrule-cdp-client` crate, now a dependency of
+  `ferrule-core`): the program stops on its first line, Resume, the steps
+  and Pause work, and stopping kills the program and the processes it
+  started, also while it is paused. When the program ends by itself the
+  session ends (its exit code is in the run tab, not yet in the event). If
+  the debugger cannot attach, the session ends with the reason in the
+  `Ended` event instead of waiting for a debugger forever.
+- The headless test backend has `--fake-debug`.
+
 ### Added (M5b-2: CDP protocol subset)
 
 - `ferrule-cdp-client` gains the typed subset of the Chrome DevTools
