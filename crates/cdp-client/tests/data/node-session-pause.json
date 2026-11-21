@@ -1,0 +1,155 @@
+{
+ "node": "v24.22.3",
+ "description": "Recorded against node --inspect-brk on a setInterval script: Debugger.pause, removeBreakpoint, disable (paths rewritten to /project).",
+ "messages": [
+  {
+   "dir": "out",
+   "msg": {
+    "id": 10,
+    "method": "Debugger.pause"
+   }
+  },
+  {
+   "dir": "in",
+   "msg": {
+    "id": 10,
+    "result": {}
+   }
+  },
+  {
+   "dir": "in",
+   "msg": {
+    "method": "Debugger.paused",
+    "params": {
+     "callFrames": [
+      {
+       "callFrameId": "3522272236233050867.1.0",
+       "functionName": "processTimers",
+       "functionLocation": {
+        "scriptId": "10",
+        "lineNumber": 602,
+        "columnNumber": 24
+       },
+       "location": {
+        "scriptId": "10",
+        "lineNumber": 603,
+        "columnNumber": 4
+       },
+       "url": "",
+       "scopeChain": [
+        {
+         "type": "local",
+         "object": {
+          "type": "object",
+          "className": "Object",
+          "description": "Object",
+          "objectId": "3522272236233050867.1.33"
+         },
+         "name": "processTimers",
+         "startLocation": {
+          "scriptId": "10",
+          "lineNumber": 602,
+          "columnNumber": 24
+         },
+         "endLocation": {
+          "scriptId": "10",
+          "lineNumber": 620,
+          "columnNumber": 3
+         }
+        },
+        {
+         "type": "closure",
+         "object": {
+          "type": "object",
+          "className": "Object",
+          "description": "Object",
+          "objectId": "3522272236233050867.1.34"
+         },
+         "name": "getTimerCallbacks",
+         "startLocation": {
+          "scriptId": "10",
+          "lineNumber": 518,
+          "columnNumber": 26
+         },
+         "endLocation": {
+          "scriptId": "10",
+          "lineNumber": 743,
+          "columnNumber": 1
+         }
+        },
+        {
+         "type": "closure",
+         "object": {
+          "type": "object",
+          "className": "Object",
+          "description": "Object",
+          "objectId": "3522272236233050867.1.35"
+         },
+         "startLocation": {
+          "scriptId": "10",
+          "lineNumber": 0,
+          "columnNumber": 0
+         },
+         "endLocation": {
+          "scriptId": "10",
+          "lineNumber": 822,
+          "columnNumber": 0
+         }
+        },
+        {
+         "type": "global",
+         "object": {
+          "type": "object",
+          "className": "global",
+          "description": "global",
+          "objectId": "3522272236233050867.1.36"
+         }
+        }
+       ],
+       "this": {
+        "type": "object",
+        "className": "process",
+        "description": "process",
+        "objectId": "3522272236233050867.1.37"
+       },
+       "canBeRestarted": true
+      }
+     ],
+     "reason": "other",
+     "hitBreakpoints": []
+    }
+   }
+  },
+  {
+   "dir": "out",
+   "msg": {
+    "id": 11,
+    "method": "Debugger.removeBreakpoint",
+    "params": {
+     "breakpointId": "2:99:0:.*nomatch.js"
+    }
+   }
+  },
+  {
+   "dir": "in",
+   "msg": {
+    "id": 11,
+    "result": {}
+   }
+  },
+  {
+   "dir": "out",
+   "msg": {
+    "id": 12,
+    "method": "Debugger.disable"
+   }
+  },
+  {
+   "dir": "in",
+   "msg": {
+    "id": 12,
+    "result": {}
+   }
+  }
+ ]
+}

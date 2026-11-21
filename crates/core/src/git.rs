@@ -496,7 +496,7 @@ impl Session {
     }
 
     /// Text, version and project path of an open document.
-    fn doc_text(&self, doc_id: DocId) -> Result<(String, u32, String), IpcError> {
+    pub(crate) fn doc_text(&self, doc_id: DocId) -> Result<(String, u32, String), IpcError> {
         let doc = self.doc(doc_id)?;
         let state = doc.lock()?;
         Ok((state.doc.text(), state.doc.version(), doc.rel_path.clone()))

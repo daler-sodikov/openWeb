@@ -93,7 +93,7 @@ fn flags_to_ipc(style: &Style) -> u32 {
     .fold(0, |bits, (_, bit)| bits | bit)
 }
 
-fn frame_to_ipc(frame: &Frame) -> ipc::TerminalFrame {
+pub(crate) fn frame_to_ipc(frame: &Frame) -> ipc::TerminalFrame {
     ipc::TerminalFrame {
         id: frame.id,
         seq: u32::try_from(frame.seq).unwrap_or(u32::MAX),
@@ -197,8 +197,16 @@ impl Session {
         .await
     }
 
+    /// A terminal or a run's output terminal (runs have ids from
+    /// [`ipc::RUN_ID_BASE`]).
     fn terminal(&self, id: u32) -> Result<Arc<Terminal>, IpcError> {
-        self.runtime()?.terminals.get(id).map_err(terminal_error)
+        let runtime = self.runtime()?;
+        if id >= ipc::RUN_ID_BASE {
+            runtime.runs.terminals.get(id)
+        } else {
+            runtime.terminals.get(id)
+        }
+        .map_err(terminal_error)
     }
 
     /// Sends typed text.
@@ -274,11 +282,7 @@ impl Session {
         cell: ipc::TerminalCell,
     ) -> Result<Option<ipc::TerminalLink>, IpcError> {
         let runtime = self.runtime()?;
-        let text = runtime
-            .terminals
-            .get(id)
-            .map_err(terminal_error)?
-            .row_text(to_u16(cell.row));
+        let text = self.terminal(id)?.row_text(to_u16(cell.row));
         let col = usize::from(to_u16(cell.col));
         blocking(move || {
             let project = &runtime.project;
@@ -333,6 +337,8 @@ impl Session {
     pub fn shutdown_terminals(&self) {
         if let Ok(runtime) = self.runtime() {
             runtime.terminals.close_all();
+            // Runs are PTY sessions too (their own registry).
+            runtime.runs.terminals.close_all();
         }
     }
 }

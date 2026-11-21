@@ -250,5 +250,9 @@ Update this section at the end of every milestone.
       scrollback limit untested, staged-change gutter markers; see
       docs/ROADMAP.md M4a/M4b)
 - [ ] M5: run/debug, test runner
+      (M5a run configurations and test runner done 2026-11-15: checks pass
+      locally on Linux with real Node, Vitest and Playwright; open: Jest
+      against the real tool, macOS/Windows CI; see docs/ROADMAP.md M5a.
+      M5b debugger not started)
 - [ ] M6: UI design (see docs/M6-DESIGN.md; start only when the
       maintainer says "start M6")

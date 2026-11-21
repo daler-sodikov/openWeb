@@ -609,9 +609,301 @@ run yet.
 
 ## M5: Run, debug, tests
 
-- [ ] `run-debug`: run configurations (Node, npm scripts)
-- [ ] Test runners (Jest, Vitest, Playwright) with gutter icons
-- [ ] `dap-client` + CDP: debugger UI (breakpoints, stepping, variables)
+Design: [ARCHITECTURE.md, 4.10](ARCHITECTURE.md#410-run-configurations-tests-and-debugging-m5).
+Functional UI only (M6 does the visuals); new panels go into the bottom
+tool window. In two parts; M5b starts after the maintainer says "continue
+with M5b". Work happens on the `m5a` branch until CI on `main` is green.
+
+### M5a: Run configurations and test runner
+
+**Done when:**
+
+1. **Configurations.** Node file, npm script, Vitest, Jest and Playwright
+   configurations are stored in `.ferrule/run.json` (versioned, sorted) and
+   edited in the UI: name, kind, file/script/scope, working directory,
+   arguments, environment variables, package manager.
+2. **Detection.** One configuration per `package.json` script and per test
+   framework found in the dependencies is offered; the package manager
+   comes from `packageManager`, else the lockfile, and the npm-script
+   command uses it (`bun run`, `pnpm run`, `yarn run`, `npm run`).
+3. **Run popup and keys.** A popup lists stored and detected
+   configurations; Run (Shift+F10, macOS Ctrl+R), Run Current File
+   (Ctrl+Shift+F10, macOS Ctrl+Shift+R), Stop (Ctrl+F2, macOS Cmd+F2),
+   Rerun (Ctrl+F5, macOS Cmd+R), the popup (Alt+Shift+F10, macOS Ctrl+Alt+R).
+4. **Run tool window.** One tab per run; output with ANSI colors, scrollback,
+   selection and clickable `file:line:col` links (the M4 terminal emulator);
+   running / exit code and duration; Stop and Rerun buttons.
+5. **Trust.** Nothing runs on open. The first run in a project shows the
+   exact command line and asks "Trust this project"; the answer is stored
+   per project in Ferrule's data folder; configurations are re-read before
+   every run.
+6. **Cleanup.** Stop, closing a tab, closing or replacing the project and
+   quitting end the whole process tree (process group / Job Object);
+   `close_project` waits for run processes; a test proves no process
+   survives, on every OS in CI, with programs started directly (no shell).
+7. **Test runner.** Vitest, Jest and Playwright run with their JSON
+   reporter; the results become a tree (file > suites > tests) with status,
+   duration, failure messages and stack frames with clickable locations;
+   re-run failed, run one test or one file, filter by status, a summary bar.
+8. **Gutter.** Run icons next to `describe`/`it`/`test` blocks (tree-sitter,
+   in Rust); clicking runs that test; the icon shows its last status.
+9. **Tests.** Parsers tested offline with reporter JSON for each framework
+   (recorded from the real tool: Vitest, Playwright and Jest; the older
+   handwritten Jest report stays as a second, labeled fixture);
+   command building and detection unit-tested; cleanup tests on every OS;
+   UI tests against a fixture project with an in-memory runner (test-only);
+   real runs against the fixture where the tools can be found, else skipped
+   with a message; all checks pass with zero warnings.
+
+**Status (2026-11-15):** built and tested on Linux (Node 24.19, Vitest
+5.1.0, Playwright 1.64.1); macOS and Windows on CI after the push. "Core
+fake" means `crates/core/tests/integration/runs.rs` with the in-memory run
+backend, "core real" the same file starting real programs, "UI" means
+`e2e/ui/run.spec.ts` (fake run backend by default; "UI real" with
+`FERRULE_E2E_REAL_RUNS=1`).
+
+- [x] 1 Configurations: stored in `.ferrule/run.json`, created, edited,
+      deleted and run from the editor (core fake, UI, UI real).
+- [x] 2 Detection: scripts and test frameworks from `package.json`;
+      package manager from `packageManager`, then the lockfile (unit tests).
+- [x] 3 Popup and keys: Alt+Shift+F10 popup, Shift+F10, Ctrl+Shift+F10,
+      Ctrl+F2, Ctrl+F5, Alt+4 (UI; Alt+4 shows the window, hides it while it
+      has the focus, and brings it to the front when it does not).
+      macOS bindings (including Cmd+4) are defined but not run.
+- [x] 4 Run window: a tab per run, exit code and duration, Stop and Rerun,
+      Ctrl/Cmd+click on `file:line:col` in the output (UI, UI real). Colors
+      and selection come from the M4 terminal view; not asserted for runs.
+- [x] 5 Trust: the exact command and folder are shown, Cancel runs nothing,
+      the answer is stored outside the project and remembered; "Revoke
+      Project Trust" makes the next run ask again (core fake, UI, UI real).
+- [ ] 6 Cleanup: Stop, closing the project and quitting end the process
+      tree (core fake; core real on Linux: a Node run with its own child,
+      the folder is deleted after `close_project`; UI real: Stop of
+      `npm run dev`). Closing a running tab uses the M4 terminal close,
+      not separately tested. macOS and Windows: CI pending.
+- [x] 7 Test runner: Vitest and Playwright reports from the real tools
+      (core real) and recorded (core fake, UI); tree, durations, failures
+      with clickable stack frames, Rerun Failed, one test or one file again,
+      status filters, summary (UI). Jest 30.5.2 (a devDependency of
+      `fixtures/test-runners`, own `bun.lock`): a real run through the JSON
+      reporter is parsed into the tree (core real, `real_jest_run`; skipped
+      with a message when `bun install --cwd fixtures/test-runners` has not
+      run) and its report is recorded as `jest.json` (parser unit test). The
+      real report parsed with no parser change. The UI tests (fake backend)
+      still replay the handwritten Jest report; Jest is not run in the UI.
+- [x] 8 Gutter: markers from tree-sitter blocks, click runs the block, the
+      caret anywhere in a test body runs it, last status shown (core fake,
+      UI, UI real).
+- [ ] 9 Tests: as listed; all checks pass on Linux. CI on macOS and Windows
+      has not run M5a yet.
+
+Open M5a items: CI on macOS and Windows (Windows `.cmd` shims and Job
+Objects for runs); typing latency with gutter markers not measured; the CI
+step that installs the fixture's Jest (`bun install --frozen-lockfile --cwd
+fixtures/test-runners`) has not run on GitHub yet, so `real_jest_run` is
+unconfirmed there. Closed: Jest against the real tool (Linux), a UI test for
+Alt+4.
+
+### M5b: Node debugger (after M5a)
+
+**Done when:**
+
+1. **Protocol.** A Chrome DevTools Protocol client (new crate `cdp-client`)
+   over a WebSocket to `node --inspect-brk=127.0.0.1:<random port>`; no
+   external debug adapter; a protocol-neutral session model leaves room
+   for DAP.
+2. **Breakpoints.** Toggle in the gutter (click, Ctrl+F8), conditional and
+   log-point breakpoints, persisted per project, verified/unverified state;
+   TypeScript source maps resolved so breakpoints in `.ts` files hit.
+3. **Stepping.** Debug (Shift+F9), Resume (F9), Step Over (F8), Step Into
+   (F7), Step Out (Shift+F8), Pause, Stop.
+4. **Debug tool window.** Call stack (click to select a frame and jump),
+   variables with lazy expansion, watches, a console with evaluate; the
+   execution line highlighted in the editor; inline values if cheap.
+5. **Tests from the gutter.** Debug a single test.
+6. **Safety and cleanup.** Inspector on 127.0.0.1 only, random port; no
+   debuggee left running; `close_project` ends debug sessions.
+7. **Tests.** Client against a scripted fake CDP server (offline); real
+   Node tests when available (breakpoint hit, step, variables, stop); UI
+   tests with a fake backend.
+
+Follow-ups, not M5: browser (Chrome) debugging, DAP for other languages.
+
+**Design:** [ARCHITECTURE.md, 4.10.1 to 4.10.8](ARCHITECTURE.md#410-run-configurations-tests-and-debugging-m5)
+(written for M5b on 2026-11-20, from the m5a code; the maintainer said
+"Start M5b"). Work continues on the `m5a` branch until CI on `main` is
+green; slice PRs target `m5a`. Each slice is one task, one branch, one PR,
+and passes every check in `CLAUDE.md` with zero warnings before it is
+merged. A slice does not start before the ones it needs are merged.
+
+**Decisions taken in the plan** (review them before M5b-1 starts):
+
+- CDP over `tokio-tungstenite` (MIT, no TLS), picked over a hand-written
+  WebSocket; a minimal HTTP request for `/json/list` instead of an HTTP
+  client.
+- Source maps decoded in `run-debug` with no dependency; fallback is
+  `oxc_sourcemap` if the decoder is not small.
+- Breakpoints and watches live in Ferrule's data folder
+  (`projects/<hash>.json`), not in the project, so they are not committed.
+- Log points print through the debuggee's `console.log` (so they appear in
+  the Run tab); the Debug console shows evaluate results and
+  `console.*` from the inspector.
+- Only the process Ferrule starts is attached; child-process and worker
+  auto-attach is a follow-up.
+- `dap-client` stays the empty M0 placeholder.
+
+**Open questions, answered inside the slice that needs them** (not guessed
+here): which Vitest/Jest/Playwright options keep a test in the debugged
+process for the installed versions (M5b-10; Jim reports Vitest 5 has
+`--inspectBrk` and `--no-file-parallelism` with `forks` as the default
+pool, and Jest `--runInBand`, on Node 24.19, but the evidence is not in
+this plan yet, so this stays open until it is); where a log point's
+output shows (M5b-6); whether `setBlackboxPatterns` for `^node:` keeps
+stepping out of Node's modules (M5b-2); whether the pick-then-release
+port race shows in practice (M5b-1); the Windows path-case rules of
+`file://` URLs against real Node on a Windows runner (M5b-4, M5b-11).
+
+### M5b slices, in order
+
+Dependencies are written as "needs". Slices 1 to 4 are independent of the UI
+and of each other except where stated, so they can run in parallel; the UI
+slices 8 and 9 only need the fake backend from slice 5.
+
+1. **M5b-1 `cdp-client` transport.** _Needs:_ nothing.
+   _Files:_ `crates/cdp-client/` (new: `Cargo.toml`, `src/lib.rs`,
+   `src/transport.rs`, `src/discover.rs`, `src/testing.rs` fake server),
+   `Cargo.toml` and `Cargo.lock` (workspace member and the dependency),
+   `deny.toml` only if `cargo deny` needs it (stop and report instead),
+   `THIRD_PARTY_LICENSES.md`, `docs/ARCHITECTURE.md` (the crate list),
+   `CHANGELOG.md`.
+   _Done when:_ `discover`, `connect`, `call`, `CdpEvents`, `close` work
+   against the fake server; tests cover id correlation, protocol errors,
+   timeout, cancellation (connecting and pending), peer close, event
+   flood, non-loopback URL refused; `cargo deny check` passes on all four
+   targets and the new crates are listed; no `unwrap` outside tests.
+2. **M5b-2 CDP protocol subset and real Node smoke test.** _Needs:_ 1.
+   _Files:_ `crates/cdp-client/src/protocol/` (typed subset), tests under
+   `crates/cdp-client/tests/`, `CHANGELOG.md`.
+   _Done when:_ typed calls and events for the subset in 4.10.1 round-trip
+   against recorded JSON (taken from real Node 20+ output and saved as test
+   data); a real-Node test (skipped without `node`) starts
+   `node --inspect-brk=127.0.0.1:<port>` on a two-line script, discovers,
+   connects, `Debugger.enable`, `Runtime.runIfWaitingForDebugger`, receives
+   `Debugger.paused`, resumes and sees the connection close; the process
+   is gone afterwards.
+3. **M5b-3 Session model, breakpoint store, log points, fake backend.**
+   _Needs:_ nothing.
+   _Files:_ `crates/run-debug/src/debug.rs` (model), `breakpoints.rs`
+   (store, `shift_for_edit`, file format), `logpoint.rs`, `fake_debug.rs`
+   (behind `testing`), `src/lib.rs`, `CHANGELOG.md`.
+   _Done when:_ the model in 4.10.2 exists with unit tests for toggling,
+   sorting, round trip of the stored form, every `shift_for_edit` case
+   (insert above, delete above, delete the line, multi-line edit across
+   it), `logpoint_condition` with hostile input; the fake backend plays a
+   scripted session (start, pause with frames, step, end); `run-debug`
+   still has no process or tokio dependency.
+4. **M5b-4 Source maps.** _Needs:_ nothing.
+   _Files:_ `crates/run-debug/src/sourcemap.rs`, `urls.rs` (`file://` ↔
+   path, per-OS case rules), `fixtures/debug-app/` (a small TypeScript
+   file with the `tsc`-made `.js`, `.js.map` and a README saying how),
+   `CHANGELOG.md`.
+   _Done when:_ the decoder maps both directions on the fixture and on the
+   specification's examples (blank line moves to the next mapped line,
+   `sourceRoot`, inline data URL), malformed maps return an error and
+   never panic (a short fuzz-style test), URL conversion is tested for
+   POSIX and Windows paths on every OS, and the decoder is under about 250
+   lines or the slice stops and proposes `oxc_sourcemap`.
+5. **M5b-5 Debug session lifecycle in core, IPC and keymap actions.**
+   _Needs:_ 1, 2, 3.
+   _Files:_ `crates/core/src/debug.rs` (driver, `DebugBackend` trait, CDP
+   backend without breakpoints yet), `crates/core/src/runs.rs` (a debug
+   run starts through the M5a path), `crates/core/src/session.rs`
+   (`close_project` ends sessions), `crates/ipc/src/lib.rs` (types,
+   events), `src-tauri/src/` (commands), `src-tauri/src/bin/headless.rs`
+   (`--fake-debug`), `crates/settings/src/lib.rs` (actions
+   `Debug`, `Resume`, `StepOver`, `StepInto`, `StepOut`, `Pause`,
+   `ToggleBreakpoint`, `ToggleDebugWindow` and their keys),
+   `src/ipc/bindings.ts` (generated), `CHANGELOG.md`.
+   _Done when:_ `start_debug` (trust included), `debug_resume`,
+   `debug_step_*`, `debug_pause`, `stop_debug` work against the fake
+   backend and, in a core test, against real Node (a script paused at the
+   first line, stepped, resumed, stopped); `debug-event` carries `Started`,
+   `Paused`, `Resumed`, `Ended` with `seq`; inspector flags in a
+   configuration are refused; Stop and `close_project` leave no process
+   and no task, also while paused; the keymap test (one binding per
+   action) passes.
+6. **M5b-6 Breakpoints in core: set, verify, persist, source maps.**
+   _Needs:_ 3, 4, 5.
+   _Files:_ `crates/core/src/debug.rs` and a new `crates/core/src/breakpoints.rs`
+   (store IO in the data folder, edit shifting hook, resolution via source
+   maps, late `scriptParsed`), `crates/core/src/edits.rs` (the hook),
+   `crates/ipc/src/lib.rs`, `src-tauri/src/`, `src/ipc/bindings.ts`
+   (generated), `CHANGELOG.md`.
+   _Done when:_ `toggle_breakpoint`, `update_breakpoint`,
+   `remove_breakpoint`, `breakpoints` and `BreakpointsChanged` work with
+   and without a session; breakpoints persist across a project reopen and
+   shift with edits; conditions and log points reach the debugger; a
+   `.ts` breakpoint hits through the fixture's source map and is
+   `Unverified` until its script loads; real-Node core test: a breakpoint
+   hit with a condition and a log point printing into the run output.
+7. **M5b-7 Frames, variables, evaluate, watches in core.**
+   _Needs:_ 5.
+   _Files:_ `crates/core/src/debug.rs` (scopes, lazy `variables`,
+   `evaluate`, watches, frame mapping through source maps when 6 has
+   landed, else generated positions), `crates/ipc/src/lib.rs`,
+   `src-tauri/src/`, `src/ipc/bindings.ts` (generated), `CHANGELOG.md`.
+   _Done when:_ `debug_select_frame`, `debug_variables` (100 at a time,
+   cycles safe), `debug_evaluate` (errors from the debuggee come back as
+   text, not as IPC errors), `watches` commands work; real-Node core
+   test: variables of objects, arrays and closures expand lazily,
+   evaluate in a chosen frame, a throwing watch shows its error.
+8. **M5b-8 UI: breakpoint gutter, execution line, debug keys.**
+   _Needs:_ 5 (fake backend); works fully with 6.
+   _Files:_ `src/editor/` (breakpoint gutter, execution-line
+   decoration), `src/run/` or a new `src/debug/` (debug actions in
+   `RUN_ACTIONS`-style `DEBUG_ACTIONS`), `src/app/workbench.ts`,
+   `src/styles/` (CSS variables only), `e2e/ui/debug.spec.ts` (new),
+   `fixtures/` only if a fixture is missing, `CHANGELOG.md`.
+   _Done when:_ with `--fake-debug`, a gutter click and Ctrl+F8 toggle a
+   breakpoint (verified, unverified, disabled, conditional, log point
+   shown), the popup edits condition and log message, Debug (Shift+F9)
+   starts the session, a pause opens the file and shows the execution
+   line, F8/F7/Shift+F8/F9 and Stop work, also while the Run tab has the
+   focus; the gutter never holds line numbers of its own (verified by
+   an edit test); the Playwright spec passes on Linux.
+9. **M5b-9 UI: Debug tool window.** _Needs:_ 7, 8.
+   _Files:_ `src/debug/` (window, call stack, variables tree, watches,
+   console), `src/app/workbench.ts`, `src/styles/`, `e2e/ui/debug.spec.ts`,
+   `CHANGELOG.md`.
+   _Done when:_ with `--fake-debug`, Alt+5 (Cmd+5) toggles the window;
+   the call stack is virtualized and a click selects a frame and jumps;
+   variables expand lazily; a watch can be added and updates on the next
+   stop; the console evaluates and shows results; library frames are
+   dimmed; inline values are either done or listed here as not done.
+10. **M5b-10 Debug a single test from the gutter.** _Needs:_ 5, 8.
+    _Files:_ `crates/run-debug/src/command.rs` (debug flags per framework),
+    `crates/core/src/runs.rs`, `crates/core/src/debug.rs`, `src/` (a debug
+    icon on a test block), `e2e/ui/debug.spec.ts`, `CHANGELOG.md`.
+    _Done when:_ for Vitest and Jest the options that keep the test in
+    the debugged process are verified against the installed tool and the
+    evidence (command and result) is written into 4.10.7 (Jest: from its
+    docs where it is not installed, said so); Playwright is checked the
+    same way afterwards and is either supported or listed as not
+    supported; a test block can be debugged from the gutter and a
+    breakpoint in the test file and in the code under test hits (real
+    Vitest where available); unsupported frameworks or
+    versions give a clear message and no half-started session.
+11. **M5b-11 Close-out.** _Needs:_ 1 to 10.
+    _Files:_ `e2e/ui/debug.spec.ts` (real-Node spec under
+    `FERRULE_E2E_REAL_RUNS=1`), `perf/` (idle CPU and memory with a paused
+    session, measured), `docs/ROADMAP.md`, `docs/ARCHITECTURE.md` (what
+    M5b verified and decisions to review, like M5a's), `CHANGELOG.md`,
+    `CLAUDE.md` (status line), `README.md` if the feature list changes.
+    _Done when:_ all seven M5b items above are checked with evidence;
+    nothing is left running after Stop, window close and `close_project`
+    (checked by listing processes); CI results on macOS and Windows are
+    recorded (or listed as open, never claimed); `du -sh target` is
+    reported.
 
 ## M6: UI design (not started)
 

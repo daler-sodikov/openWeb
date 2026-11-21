@@ -9,5 +9,6 @@ mod git;
 mod lsp_fake;
 mod m2;
 mod m2b;
+mod runs;
 mod session;
 mod terminal;

@@ -13,6 +13,7 @@ mod intel;
 mod lsp;
 mod project_runtime;
 mod refactor;
+mod runs;
 mod search;
 mod session;
 mod terminal;

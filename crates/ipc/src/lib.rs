@@ -10,7 +10,7 @@ use specta::Type;
 
 /// Version of the IPC protocol. Bump on any breaking change to a command,
 /// event or DTO so that a mismatched frontend refuses to run.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Operating system the backend runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -358,6 +358,13 @@ pub enum KeyAction {
     ShowDiff,
     ToggleBlame,
     RollbackHunk,
+    Run,
+    RunContext,
+    StopRun,
+    Rerun,
+    ChooseRunConfiguration,
+    ToggleRunWindow,
+    RevokeProjectTrust,
 }
 
 /// Modifier used in double-tap gestures.
@@ -1430,6 +1437,281 @@ pub enum GitDeleteResult {
     /// Not deleted: not merged into the current branch (delete with force
     /// to drop its commits).
     NotMerged,
+}
+
+// Run configurations and tests (docs/ARCHITECTURE.md, 4.10)
+
+/// Ids of runs start here (lower ids are terminals); a run's output is a
+/// terminal with that id.
+pub const RUN_ID_BASE: u32 = 1_000_000;
+
+/// A package manager.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum PackageManager {
+    Bun,
+    Pnpm,
+    Yarn,
+    Npm,
+}
+
+/// A test framework.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum TestFramework {
+    Vitest,
+    Jest,
+    Playwright,
+}
+
+/// One test or suite to run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestRef {
+    /// File relative to the working directory.
+    pub file: String,
+    /// Titles from the outermost suite.
+    pub name: Vec<String>,
+    /// One-based line.
+    pub line: Option<u32>,
+}
+
+/// A file, suite or test of a finished run, to run again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestTarget {
+    /// File relative to the project root.
+    pub path: String,
+    /// Titles from the outermost suite (empty: the whole file).
+    pub name: Vec<String>,
+}
+
+/// Which tests a test configuration runs (all if both lists are empty).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestScope {
+    /// Whole files.
+    pub files: Vec<String>,
+    /// Single tests or suites.
+    pub tests: Vec<TestRef>,
+}
+
+/// What a configuration runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum RunKind {
+    /// `node <file>`.
+    Node {
+        /// File relative to the working directory.
+        file: String,
+    },
+    /// A `package.json` script.
+    NpmScript {
+        /// Script name.
+        script: String,
+    },
+    /// Tests.
+    Test {
+        /// Framework.
+        framework: TestFramework,
+        /// Which tests.
+        scope: TestScope,
+    },
+}
+
+/// A run configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunConfig {
+    /// Id (`detected:...` until saved).
+    pub id: String,
+    /// Name.
+    pub name: String,
+    /// What runs.
+    pub kind: RunKind,
+    /// Working directory relative to the project root (`""` = root).
+    pub cwd: String,
+    /// Extra arguments.
+    pub args: Vec<String>,
+    /// Extra environment variables, `[name, value]`.
+    pub env: Vec<(String, String)>,
+    /// Package manager for scripts (`None`: detected).
+    pub package_manager: Option<PackageManager>,
+}
+
+/// The project's configurations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunConfigurations {
+    /// Stored in `.ferrule/run.json`.
+    pub stored: Vec<RunConfig>,
+    /// Detected from `package.json` (not stored).
+    pub detected: Vec<RunConfig>,
+    /// Why `.ferrule/run.json` could not be read, if so.
+    pub error: Option<String>,
+    /// The project's detected package manager.
+    pub package_manager: PackageManager,
+    /// Whether the project is trusted to run commands.
+    pub trusted: bool,
+}
+
+/// A run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunInfo {
+    /// Id (also the id of its output terminal).
+    pub id: u32,
+    /// Name (from the configuration).
+    pub name: String,
+    /// The command line, as shown before running.
+    pub command: String,
+    /// The configuration it ran.
+    pub config: RunConfig,
+    /// Whether it is a test run (it reports a test tree).
+    pub tests: bool,
+}
+
+/// Result of asking to start a run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum StartRun {
+    /// Started.
+    Started {
+        /// The run.
+        run: RunInfo,
+    },
+    /// The project must be trusted first: show this command and ask.
+    NeedsTrust {
+        /// The exact command line.
+        command: String,
+        /// Its working directory.
+        cwd: String,
+    },
+}
+
+/// A test's status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum TestStatus {
+    Passed,
+    Failed,
+    Skipped,
+    Running,
+}
+
+/// A location in a failure's stack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestLocation {
+    /// Project-relative path, or absolute outside the project.
+    pub path: String,
+    /// Whether the file is in the project (only those open).
+    pub in_project: bool,
+    /// One-based line.
+    pub line: u32,
+    /// One-based column.
+    pub column: u32,
+}
+
+/// A failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestFailure {
+    /// Message without terminal colors.
+    pub message: String,
+    /// Stack frames, innermost first.
+    pub frames: Vec<TestLocation>,
+}
+
+/// Kind of a test tree node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum TestNodeKind {
+    File,
+    Suite,
+    Test,
+}
+
+/// A file, suite or test of a run's results.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestTreeNode {
+    /// Kind.
+    pub kind: TestNodeKind,
+    /// Title (the project-relative path for files).
+    pub name: String,
+    /// Titles from the outermost suite (empty for files).
+    pub full_name: Vec<String>,
+    /// Status.
+    pub status: TestStatus,
+    /// Milliseconds.
+    pub duration_ms: Option<f64>,
+    /// Where it is (line when reported).
+    pub location: TestLocation,
+    /// Failures.
+    pub failures: Vec<TestFailure>,
+    /// Suites and tests inside.
+    pub children: Vec<TestTreeNode>,
+}
+
+/// A run has ended (`run-finished-event`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunFinished {
+    /// Run id.
+    pub id: u32,
+    /// Exit code, if known.
+    pub exit_code: Option<i32>,
+    /// Whether it ended because the user stopped it (its exit code is then
+    /// whatever the program chose on the signal).
+    pub stopped: bool,
+    /// Milliseconds from start to exit.
+    pub duration_ms: f64,
+    /// Test results (test runs whose report was read).
+    pub tests: Option<Vec<TestTreeNode>>,
+    /// Passed, failed and skipped test counts.
+    pub counts: Option<(u32, u32, u32)>,
+    /// Why there are no test results for a test run (no or a bad report).
+    pub report_error: Option<String>,
+}
+
+/// Kind of a test block in the editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+#[allow(missing_docs)]
+pub enum TestBlockKind {
+    Suite,
+    Test,
+}
+
+/// A `describe`/`it`/`test` block, for the gutter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestBlock {
+    /// Zero-based line.
+    pub line: u32,
+    /// Suite or test.
+    pub kind: TestBlockKind,
+    /// Titles from the outermost suite.
+    pub name: Vec<String>,
+    /// Last status, if it ran.
+    pub status: Option<TestStatus>,
+}
+
+/// The test blocks of a document version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestBlocks {
+    /// Document version.
+    pub version: u32,
+    /// Framework that runs this file, if one was found.
+    pub framework: Option<TestFramework>,
+    /// Blocks in order.
+    pub blocks: Vec<TestBlock>,
 }
 
 #[cfg(test)]

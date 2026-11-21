@@ -1,6 +1,6 @@
 [package]
 name = "ferrule-run-debug"
-description = "Run/debug configurations, process supervision, test runners and debug sessions."
+description = "Run configurations, the commands they run, and test reports (pure logic; processes run in core)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,10 +9,19 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+# The in-memory run backend (`fake`) for UI and integration tests.
+testing = ["dep:ferrule-terminal", "ferrule-terminal/testing"]
+
 [dependencies]
-ferrule-dap-client.workspace = true
-ferrule-project.workspace = true
-ferrule-settings.workspace = true
+ferrule-terminal = { workspace = true, optional = true }
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

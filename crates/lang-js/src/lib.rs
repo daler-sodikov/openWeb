@@ -6,8 +6,10 @@
 //! arrive with M3b (`docs/ROADMAP.md`).
 
 mod imports;
+mod test_blocks;
 
 pub use imports::{ImportEdit, UnusedImport, sort_imports, unused_imports};
+pub use test_blocks::{TestBlock, TestBlockKind, test_blocks};
 
 use ferrule_syntax::{LanguageDef, Precedence};
 

@@ -9,11 +9,14 @@
 //!   waiting up to 20 s for new events (long poll); `after=latest` returns
 //!   the current position immediately
 //!
-//! Usage: `ferrule-headless --port 1431 --data-dir <dir> [--fake-terminals]`.
-//! `--fake-terminals` replaces real shells by the in-memory backend from
-//! `ferrule-terminal` (its shells echo what is typed), so the terminal UI
-//! can be tested on machines without the native backend. Test-only: built
-//! only with the `headless` feature, never bundled.
+//! Usage: `ferrule-headless --port 1431 --data-dir <dir> [--fake-terminals]
+//! [--fake-runs]`. `--fake-terminals` replaces real shells by the in-memory
+//! backend from `ferrule-terminal` (its shells echo what is typed) and
+//! implies `--fake-runs`, which replaces run processes by the in-memory
+//! backend from `ferrule-run-debug` (it writes recorded test reports), so
+//! the terminal and run UI can be tested without the native backend or
+//! real tools. Test-only: built only with the `headless` feature, never
+//! bundled.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
@@ -78,24 +81,28 @@ struct Args {
     port: u16,
     data_dir: PathBuf,
     fake_terminals: bool,
+    fake_runs: bool,
 }
 
 fn parse_args() -> anyhow::Result<Args> {
     let mut port = 1431;
     let mut data_dir = std::env::temp_dir().join("ferrule-headless");
     let mut fake_terminals = false;
+    let mut fake_runs = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--port" => port = args.next().context("--port needs a value")?.parse()?,
             "--data-dir" => data_dir = args.next().context("--data-dir needs a value")?.into(),
             "--fake-terminals" => fake_terminals = true,
+            "--fake-runs" => fake_runs = true,
             other => bail!("unknown argument {other:?}"),
         }
     }
     Ok(Args {
         port,
         data_dir,
+        fake_runs: fake_runs || fake_terminals,
         fake_terminals,
     })
 }
@@ -111,6 +118,10 @@ fn main() -> anyhow::Result<()> {
     } else {
         terminal_backend()
     };
+    if args.fake_runs {
+        tracing::info!("runs use the in-memory test backend");
+        config.run_backend = Some(Arc::new(ferrule_run_debug::fake::FakeRunBackend));
+    }
     let session = Session::with_config(config, events.clone())?;
     let app = configure(mock_builder(), InitialProject(None), SmokeMode::new(false))
         .build(mock_context(noop_assets()))

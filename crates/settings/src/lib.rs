@@ -103,6 +103,20 @@ pub enum Action {
     ToggleBlame,
     /// Roll back the change at the caret (to the index).
     RollbackHunk,
+    /// Run the selected run configuration.
+    Run,
+    /// Run the current file, or the test at the caret.
+    RunContext,
+    /// Stop the active run.
+    StopRun,
+    /// Run the active run's configuration again.
+    Rerun,
+    /// The run configurations popup.
+    ChooseRunConfiguration,
+    /// Show or hide the Run tool window.
+    ToggleRunWindow,
+    /// Forget that the project is trusted: the next run asks again.
+    RevokeProjectTrust,
 }
 
 /// Modifier used in double-tap gestures.
@@ -192,11 +206,18 @@ pub fn action_name(action: Action) -> &'static str {
         Action::ShowDiff => "Show Diff",
         Action::ToggleBlame => "Annotate with Git Blame",
         Action::RollbackHunk => "Rollback Lines",
+        Action::Run => "Run",
+        Action::RunContext => "Run Current File",
+        Action::StopRun => "Stop",
+        Action::Rerun => "Rerun",
+        Action::ChooseRunConfiguration => "Run…",
+        Action::ToggleRunWindow => "Run Tool Window",
+        Action::RevokeProjectTrust => "Revoke Project Trust",
     }
 }
 
 /// Every action, in display order.
-pub const ALL_ACTIONS: [Action; 44] = [
+pub const ALL_ACTIONS: [Action; 51] = [
     Action::GotoFile,
     Action::GotoSymbol,
     Action::GotoLine,
@@ -241,6 +262,13 @@ pub const ALL_ACTIONS: [Action; 44] = [
     Action::ShowDiff,
     Action::ToggleBlame,
     Action::RollbackHunk,
+    Action::Run,
+    Action::RunContext,
+    Action::StopRun,
+    Action::Rerun,
+    Action::ChooseRunConfiguration,
+    Action::ToggleRunWindow,
+    Action::RevokeProjectTrust,
 ];
 
 /// IntelliJ-style default bindings (from the publicly documented default
@@ -322,6 +350,25 @@ pub fn intellij_keymap(os: KeymapOs) -> Vec<KeyBinding> {
         bind(A::ToggleCommit, Chord(if mac { "Mod-0" } else { "Alt-0" })),
         bind(A::ToggleGitLog, Chord(if mac { "Mod-9" } else { "Alt-9" })),
         bind(A::RollbackHunk, Chord("Mod-Alt-z")),
+        bind(A::Run, Chord(if mac { "Ctrl-r" } else { "Shift-F10" })),
+        bind(
+            A::RunContext,
+            Chord(if mac {
+                "Ctrl-Shift-r"
+            } else {
+                "Ctrl-Shift-F10"
+            }),
+        ),
+        bind(A::StopRun, Chord("Mod-F2")),
+        bind(A::Rerun, Chord(if mac { "Mod-r" } else { "Ctrl-F5" })),
+        bind(
+            A::ChooseRunConfiguration,
+            Chord(if mac { "Ctrl-Alt-r" } else { "Alt-Shift-F10" }),
+        ),
+        bind(
+            A::ToggleRunWindow,
+            Chord(if mac { "Mod-4" } else { "Alt-4" }),
+        ),
     ]
 }
 
@@ -362,6 +409,12 @@ mod tests {
                 Action::ToggleCommit,
                 Action::ToggleGitLog,
                 Action::RollbackHunk,
+                Action::Run,
+                Action::RunContext,
+                Action::StopRun,
+                Action::Rerun,
+                Action::ChooseRunConfiguration,
+                Action::ToggleRunWindow,
             ] {
                 assert_eq!(
                     keymap.iter().filter(|b| b.action == action).count(),

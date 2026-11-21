@@ -21,6 +21,7 @@ import {
   type NavKind,
   type NavTarget,
   type OpenedDocument_Serialize as OpenedDocument,
+  type TestBlock,
   type TextEdit,
 } from "../ipc/bindings";
 import { BackendError, errorMessage, type IpcResult, unwrap } from "../ipc/result";
@@ -49,6 +50,8 @@ export interface DocPane {
   setDiagnostics(decorations: DecorationSet): void;
   setGitHunks(hunks: readonly GitHunk[]): void;
   setBlame(lines: readonly GitBlameLine[] | null): void;
+  /** Run markers of describe/it/test blocks with their last status. */
+  setTestBlocks(blocks: readonly TestBlock[]): void;
   setCaretInfo(info: CaretInfo | null): void;
   showExternalChange(show: boolean): void;
   applyDocumentEdit(edit: DocumentEdit): void;
@@ -95,6 +98,7 @@ export class DocModel {
   private diagnosticsTimer: ReturnType<typeof setTimeout> | undefined;
   private gitTimer: ReturnType<typeof setTimeout> | undefined;
   private blameTimer: ReturnType<typeof setTimeout> | undefined;
+  private testTimer: ReturnType<typeof setTimeout> | undefined;
   /** Latest gutter hunks (for Rollback at the caret). */
   hunks: readonly GitHunk[] = [];
   /** Whether blame is shown for this document. */
@@ -138,6 +142,7 @@ export class DocModel {
     this.scheduleFolds(0);
     this.scheduleDiagnostics(0);
     this.scheduleGitChanges(0);
+    this.scheduleTestBlocks(0);
     if (this.blameOn) this.scheduleBlame(0);
   }
 
@@ -153,6 +158,7 @@ export class DocModel {
     clearTimeout(this.diagnosticsTimer);
     clearTimeout(this.gitTimer);
     clearTimeout(this.blameTimer);
+    clearTimeout(this.testTimer);
   }
 
   /** Runs after all queued work for this document has finished. */
@@ -206,6 +212,7 @@ export class DocModel {
     // In-process results (oxc unused imports) follow edits without the server.
     this.scheduleDiagnostics(FOLD_DEBOUNCE_MS);
     this.scheduleGitChanges(GIT_DEBOUNCE_MS);
+    this.scheduleTestBlocks(GIT_DEBOUNCE_MS);
     if (this.blameOn) this.scheduleBlame(GIT_DEBOUNCE_MS);
   }
 
@@ -547,6 +554,24 @@ export class DocModel {
         }
         this.hunks = result.data.hunks;
         for (const pane of this.panes) pane.setGitHunks(this.hunks);
+      });
+    }, delay);
+  }
+
+  /** Asks Rust for the test blocks and their statuses (gutter run markers). */
+  scheduleTestBlocks(delay: number): void {
+    clearTimeout(this.testTimer);
+    this.testTimer = setTimeout(() => {
+      void this.enqueue(async () => {
+        if (this.panes.size === 0) return;
+        await this.pushAll();
+        const result = await commands.testBlocks(this.docId);
+        if (result.status === "error") return;
+        if (!this.isSynced(result.data.version)) {
+          this.scheduleTestBlocks(DIAGNOSTICS_RETRY_MS);
+          return;
+        }
+        for (const pane of this.panes) pane.setTestBlocks(result.data.blocks);
       });
     }, delay);
   }

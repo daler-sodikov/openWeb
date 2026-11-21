@@ -1,0 +1,16 @@
+{
+  "name": "test-runners-fixture",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node src/serve.js",
+    "start": "node src/main.js",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "jest": "^30.5.2",
+    "vitest": "^5.1.0"
+  }
+}

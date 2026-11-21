@@ -1,4 +1,5 @@
-// Shared setup for UI tests: a fresh copy of fixtures/react-ts per test and a
+// Shared setup for UI tests: a fresh copy of a fixture project per test
+// (fixtures/react-ts unless a spec sets `fixture`) and a
 // `window.__TAURI_INTERNALS__` shim forwarding IPC to the headless backend.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -158,12 +159,13 @@ function processesMentioning(dir: string): string {
   }
 }
 
-export const test = base.extend<{ project: string }>({
-  // eslint-disable-next-line no-empty-pattern -- Playwright requires object destructuring here
-  project: async ({}, use) => {
+export const test = base.extend<{ project: string; fixture: string }>({
+  /** Which project in `fixtures/` the test gets a copy of. */
+  fixture: ["react-ts", { option: true }],
+  project: async ({ fixture }, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ferrule-ui-"));
-    const root = path.join(dir, "react-ts");
-    fs.cpSync(path.join(repoRoot, "fixtures", "react-ts"), root, { recursive: true });
+    const root = path.join(dir, fixture);
+    fs.cpSync(path.join(repoRoot, "fixtures", fixture), root, { recursive: true });
     await use(root);
     // Windows cannot delete a folder a process still uses. close_project
     // stops everything the backend started for the project (file watcher,

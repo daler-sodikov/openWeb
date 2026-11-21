@@ -317,5 +317,5 @@ fn keymap_has_every_action() {
     // Every action except Open Folder, Split Right, Restart TypeScript Server,
     // Branches, Show Diff and Annotate with Git Blame
     // (no default keys in the IntelliJ keymap).
-    assert_eq!(ferrule_core::keymap().len(), 38);
+    assert_eq!(ferrule_core::keymap().len(), 44);
 }

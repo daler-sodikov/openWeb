@@ -6,6 +6,86 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (M5b-2: CDP protocol subset)
+
+- `ferrule-cdp-client` gains the typed subset of the Chrome DevTools
+  Protocol the debugger needs: the `Debugger` and `Runtime` requests and
+  the `paused`, `resumed`, `scriptParsed`, `breakpointResolved`,
+  `consoleAPICalled` and `exceptionThrown` events (`protocol` module,
+  `CdpClient::send`, `CdpEvent::typed`). Unknown fields and events are
+  ignored. Tested against JSON recorded from real Node 24 and a real
+  `node --inspect-brk` session (skipped when `node` is not installed). No
+  debugger feature is visible yet.
+
+### Fixed (M5b-2)
+
+- `discover` no longer hangs against real Node: Node answers `/json/list`
+  and keeps the socket open, so the reply is complete at its
+  `Content-Length`, not at EOF.
+
+### Added (M5b-3: debug session model, in `ferrule-run-debug`)
+
+- The protocol-neutral debug session model: states and the commands each
+  allows, stops with their call stack, scopes and variables (with cut
+  previews and pages of 100), and the events a session sends.
+- The breakpoint store: toggle, sorted by file and line, condition, log
+  message and enabled flag, following edits to a document (insert or delete
+  above, delete the line, multi-line edits), and a versioned stored form.
+- Log points: `text {expr} text` becomes a condition that prints and never
+  pauses; the text is escaped and unsafe expressions are printed as text.
+- A scripted debug backend for tests without Node (feature `testing`).
+  Nothing in the app uses these yet.
+
+### Added (M5b-4: source maps and file URLs, groundwork for the debugger)
+
+- `run-debug` decodes Source Map v3 files (including `sourceRoot` and inline
+  `data:` URLs) in both directions: original position to generated for
+  breakpoints, generated to original for frames; a blank line moves to the
+  next mapped line. Malformed maps return an error and never panic.
+- `file://` URL to path conversion for POSIX and Windows paths, with the
+  per-OS case rules, tested on every OS.
+- `fixtures/debug-app/`: a small TypeScript program with real `tsc` output
+  and source map for the debugger tests. No user-visible change yet.
+
+### Added (M5b-1: CDP client transport)
+
+- New crate `ferrule-cdp-client`: finds Node's inspector (`/json/list` on
+  127.0.0.1), connects over a WebSocket, correlates calls with answers,
+  and delivers events and the end of the connection in order. Calls time
+  out, everything is cancellable, a flooding debuggee is throttled, and any
+  URL other than `ws://127.0.0.1:<port>` is refused. Tested against a
+  scripted fake server; no debugger feature is visible yet.
+- New dependency `tokio-tungstenite` (MIT, no TLS) for the WebSocket.
+
+### Added (M5a: run configurations and test runner)
+
+- Run configurations for Node files, npm scripts, Vitest, Jest and
+  Playwright, stored in `.ferrule/run.json` and edited in the app; scripts
+  and test frameworks in `package.json` are offered automatically, and npm
+  scripts use the project's package manager (`packageManager` field, else
+  the lockfile).
+- Run (Shift+F10), Run Context (Ctrl+Shift+F10), Stop (Ctrl+F2), Rerun
+  (Ctrl+F5), the configuration popup (Alt+Shift+F10) and the Run window
+  (Alt+4); macOS bindings in the IntelliJ-style macOS keymap.
+- Run window: a tab per run with its output in the terminal view
+  (clickable `file:line:col`), exit code, duration, Stop and Rerun.
+- Test runner: Vitest, Jest and Playwright results as a tree with status,
+  durations, failure messages and clickable stack locations; Rerun Failed,
+  run one test or file again, status filters, a summary.
+- Gutter markers on `describe`/`it`/`test` blocks: click to run, last
+  status shown.
+- Nothing runs before the project is trusted: the first run shows the exact
+  command and asks; the answer is kept in Ferrule's data folder, not in the
+  project, and "Revoke Project Trust" (Go to Action) takes it back. Stopping, closing the project and quitting end the whole process
+  tree.
+
+### Fixed
+
+- Terminal: a double click could leave nothing selected and copy could
+  read the selection before it was made (selection calls overtook each
+  other); copy now writes to the clipboard during the key press, which
+  WebKit (the Linux and macOS app) requires.
+
 ### Added (M4a: terminal)
 
 - Terminal tool window (Alt+F12, macOS Option+F12): shells in the project

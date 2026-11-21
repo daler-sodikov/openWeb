@@ -17,6 +17,7 @@ import {
   type KeyBinding,
   type NavKind,
   type NavTarget,
+  RUN_ID_BASE,
   type ReplaceResult,
   type SearchTab,
   type ServerStatus,
@@ -32,6 +33,7 @@ import { SearchEverywhere } from "../popup/search-everywhere";
 import { GotoLine, RecentFiles } from "../popup/simple-popups";
 import { UsagesPopup } from "../popup/usages";
 import { GIT_ACTIONS, GitUi } from "../git/git-ui";
+import { RUN_ACTIONS, RunUi } from "../run/run-ui";
 import { TerminalWindow } from "../terminal/window";
 import { TreeView } from "../tree/tree-view";
 import { chordMatches, formatChord } from "../ui/keys";
@@ -86,6 +88,7 @@ export class Workbench implements PaneHost, DocHost {
   private readonly problems: ProblemsPanel;
   private readonly terminal: TerminalWindow;
   private readonly git: GitUi;
+  private readonly runs: RunUi;
   private serverStatus: ServerStatus | null = null;
   readonly mac: boolean;
   private readonly doubleShift = new DoubleTapDetector("Shift");
@@ -175,10 +178,38 @@ export class Workbench implements PaneHost, DocHost {
         this.showBottom(element);
       },
     });
+    this.runs = new RunUi({
+      mac: this.mac,
+      notify: (message) => {
+        this.notify(message);
+      },
+      openLocation: (path, line, column) => {
+        this.openLocation(path, line, column);
+      },
+      activePane: () => this.active,
+      docs: () => this.docs.values(),
+      saveAll: async () => {
+        const dirty = [...this.docs.values()].filter((d) => d.dirty && !d.readOnly);
+        const results = await Promise.allSettled(dirty.map((d) => d.save()));
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed > 0) this.notify(`${String(failed)} file(s) could not be saved.`);
+      },
+      showPopup: (popup) => {
+        this.showPopup(popup);
+      },
+      showBottom: (element) => {
+        this.showBottom(element);
+      },
+      focusEditor: () => {
+        this.active?.view.focus();
+      },
+    });
+    toolbar.append(this.runs.toolbar);
     main.append(
       editorArea,
       this.problems.element,
       this.terminal.element,
+      this.runs.window.element,
       this.git.commit.element,
       this.git.log.element,
     );
@@ -229,9 +260,14 @@ export class Workbench implements PaneHost, DocHost {
         // Keys typed in the terminal belong to the shell, except the one
         // that hides it.
         const inTerminal = this.terminal.hasFocus();
+        // A run's output takes typed keys too, except the run actions.
+        const inRun = this.runs.window.hasFocus();
         for (const binding of this.keymap) {
           if (EDITOR_ACTIONS.has(binding.action) || binding.stroke.type !== "chord") continue;
           if (inTerminal && binding.action !== "toggleTerminal") continue;
+          if (inRun && !RUN_ACTIONS.has(binding.action) && binding.action !== "toggleTerminal") {
+            continue;
+          }
           if (chordMatches(event, binding.stroke.keys, this.mac)) {
             event.preventDefault();
             event.stopPropagation();
@@ -266,7 +302,12 @@ export class Workbench implements PaneHost, DocHost {
         this.onProblemsChanged(event.payload);
       });
       await events.terminalFrameEvent.listen((event) => {
-        this.terminal.onFrame(event.payload);
+        // Runs have their own id range; their output goes to the Run window.
+        if (event.payload.id >= RUN_ID_BASE) this.runs.onFrame(event.payload);
+        else this.terminal.onFrame(event.payload);
+      });
+      await events.runFinishedEvent.listen((event) => {
+        this.runs.onFinished(event.payload);
       });
       await events.terminalExitedEvent.listen((event) => {
         this.terminal.onExited(event.payload);
@@ -288,6 +329,10 @@ export class Workbench implements PaneHost, DocHost {
     }
     if (GIT_ACTIONS.has(action)) {
       if (this.requireProject()) this.git.run(action);
+      return;
+    }
+    if (RUN_ACTIONS.has(action)) {
+      if (this.requireProject()) this.runs.run(action);
       return;
     }
     switch (action) {
@@ -643,6 +688,7 @@ export class Workbench implements PaneHost, DocHost {
     this.focusedGroup = this.createGroup();
     this.problems.setAll([]);
     this.terminal.reset();
+    this.runs.reset();
     this.git.reset();
     this.serverStatus = null;
     this.statusServer.hidden = true;
@@ -976,11 +1022,16 @@ export class Workbench implements PaneHost, DocHost {
     for (const other of [
       this.problems.element,
       this.terminal.element,
+      this.runs.window.element,
       this.git.commit.element,
       this.git.log.element,
     ]) {
       if (other !== element) other.hidden = true;
     }
+  }
+
+  runTest(pane: EditorPane, line: number): void {
+    this.runs.runAt(pane, line);
   }
 
   showHunk(pane: EditorPane, hunk: GitHunk, event: MouseEvent): void {

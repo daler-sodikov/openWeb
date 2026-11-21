@@ -42,7 +42,8 @@ pulldown-cmark.workspace = true
 windows-sys = { workspace = true, features = ["Win32_System_RestartManager"] }
 
 [dev-dependencies]
-ferrule-terminal = { workspace = true, features = ["testing"] }
+ferrule-terminal = { workspace = true, features = ["testing", "native"] }
+ferrule-run-debug = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 

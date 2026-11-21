@@ -2,6 +2,7 @@
 //! the recent-files list.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 
 use crate::lsp::LanguageService;
@@ -30,6 +31,10 @@ const SAVE_TEMP_PREFIX: &str = ".ferrule-save-";
 struct ProjectFile {
     format: u32,
     recent: Vec<String>,
+    /// The user allowed this project to run commands (M5). Stored here, in
+    /// Ferrule's data folder, never in the project.
+    #[serde(default)]
+    trusted: bool,
 }
 
 pub(crate) struct ProjectRuntime {
@@ -46,6 +51,10 @@ pub(crate) struct ProjectRuntime {
     pub terminals: ferrule_terminal::Terminals,
     /// The Git repository containing the project.
     pub git: Arc<crate::git::GitState>,
+    /// Runs of configurations and tests.
+    pub runs: Arc<crate::runs::Runs>,
+    /// Whether the user trusted the project to run commands.
+    trusted: AtomicBool,
     /// The background index build (awaited when the project closes).
     pub index_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// The Git repository discovery and first status, which run `git` in
@@ -92,16 +101,22 @@ impl ProjectRuntime {
         settings_file: PathBuf,
         session: Weak<Session>,
         terminal_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
+        run_backend: Option<Arc<dyn ferrule_terminal::Backend>>,
     ) -> Self {
         let hash = ferrule_vfs::path_hash(project.root());
         let project_file = data_dir.join("projects").join(format!("{hash}.json"));
-        let recent = std::fs::read(&project_file)
+        let stored = std::fs::read(&project_file)
             .ok()
             .and_then(|b| serde_json::from_slice::<ProjectFile>(&b).ok())
-            .map(|f| f.recent)
             .unwrap_or_default();
         let project = Arc::new(project);
         let terminals = crate::terminal::project_terminals(terminal_backend, sink.clone());
+        let runs = crate::runs::Runs::new(
+            run_backend,
+            sink.clone(),
+            project.root().to_path_buf(),
+            data_dir.join("runs").join(&hash),
+        );
         let git = Arc::new(crate::git::GitState::new(sink.clone()));
         let lsp = Arc::new(LanguageService::new(
             ferrule_lang_js::typescript_server(),
@@ -118,9 +133,11 @@ impl ProjectRuntime {
             cancel: CancellationToken::new(),
             cache_file: data_dir.join("index").join(format!("{hash}.json")),
             project_file,
-            recent: Mutex::new(recent),
+            recent: Mutex::new(stored.recent),
             terminals,
             git,
+            runs,
+            trusted: AtomicBool::new(stored.trusted),
             index_task: Mutex::new(None),
             git_start: Mutex::new(None),
         }
@@ -143,6 +160,16 @@ impl ProjectRuntime {
                     .map(|(id, pids)| terminal_still_running(*id, pids)),
             ),
             Err(_) => still_running.push("terminals (closing failed)".to_owned()),
+        }
+        let me = self.clone();
+        match tokio::task::spawn_blocking(move || me.runs.terminals.close_all_and_wait(CLOSE_WAIT))
+            .await
+        {
+            Ok(left) => still_running.extend(
+                left.iter()
+                    .map(|(id, pids)| format!("run {}", terminal_still_running(*id, pids))),
+            ),
+            Err(_) => still_running.push("runs (closing failed)".to_owned()),
         }
         // Waits for the server and the processes it started.
         if tokio::time::timeout(CLOSE_WAIT, self.lsp.stop())
@@ -216,7 +243,27 @@ impl ProjectRuntime {
             }
             Err(_) => return,
         };
-        let file = ProjectFile { format: 1, recent };
+        self.save_project_file(recent);
+    }
+
+    /// Whether the user trusted the project to run commands.
+    pub fn trusted(&self) -> bool {
+        self.trusted.load(Ordering::Acquire)
+    }
+
+    /// Trusts the project or revokes the trust (persisted). Blocking.
+    pub fn set_trusted(&self, trusted: bool) {
+        self.trusted.store(trusted, Ordering::Release);
+        let recent = self.recent.lock().map(|r| r.clone()).unwrap_or_default();
+        self.save_project_file(recent);
+    }
+
+    fn save_project_file(&self, recent: Vec<String>) {
+        let file = ProjectFile {
+            format: 1,
+            recent,
+            trusted: self.trusted(),
+        };
         let result = serde_json::to_vec(&file)
             .map_err(std::io::Error::other)
             .and_then(|json| {
@@ -226,7 +273,7 @@ impl ProjectRuntime {
                 ferrule_vfs::write_atomic(&self.project_file, &json)
             });
         if let Err(err) = result {
-            tracing::warn!(%err, "saving recent files failed");
+            tracing::warn!(%err, "saving the project's data failed");
         }
     }
 
