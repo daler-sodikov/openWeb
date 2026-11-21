@@ -30,6 +30,7 @@ ferrule-indexer = { path = "crates/indexer" }
 ferrule-search = { path = "crates/search" }
 ferrule-lsp-client = { path = "crates/lsp-client" }
 ferrule-dap-client = { path = "crates/dap-client" }
+ferrule-cdp-client = { path = "crates/cdp-client" }
 ferrule-git = { path = "crates/git" }
 # Without default features: only the app enables the native backend
 # (its "native" feature), so every other crate builds without it.
@@ -89,6 +90,9 @@ oxc_ast = "0.157"
 oxc_parser = "0.157"
 oxc_semantic = "0.157"
 oxc_span = "0.157"
+# M5b: Node debugger. Plain ws:// on loopback, so no TLS feature.
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 # M4 terminal backend (optional "native" feature of ferrule-terminal)
 portable-pty = "0.9"
 alacritty_terminal = "0.26"
