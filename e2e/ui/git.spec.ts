@@ -7,6 +7,7 @@ import type { Page } from "@playwright/test";
 
 import {
   activeTab,
+  backend,
   caretToStart,
   editorText,
   expect,
@@ -100,6 +101,81 @@ test("gutter markers follow edits; Rollback restores the hunk in one undo step",
   await caretToStart(page);
   await page.keyboard.press("ControlOrMeta+Alt+z");
   await expect(marker).toHaveCount(0);
+});
+
+test("staged changes get their own gutter markers; they follow stage, unstage and commit", async ({
+  page,
+  project,
+}) => {
+  initRepo(project);
+  await openApp(page, project);
+  await waitForBranch(page, "main");
+  await openFile(page, "src/App.tsx");
+  const unstaged = page.locator('[data-testid="git-marker"]');
+  const staged = page.locator('[data-testid="git-staged-marker"]');
+
+  // Edit and save the second line: a marker against the index, none staged.
+  await caretToStart(page);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
+  await page.keyboard.type(" // edited");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(unstaged).toHaveCount(1);
+  await expect(staged).toHaveCount(0);
+
+  // Staged: the marker moves to the second column, drawn differently.
+  await backend("git_stage", { paths: ["src/App.tsx"] });
+  await expect(staged).toHaveCount(1);
+  await expect(unstaged).toHaveCount(0);
+  await expect(staged).toHaveAttribute("data-kind", "modified");
+  await expect(staged).toHaveClass(/git-staged/);
+  expect(
+    await staged.evaluate((el) => getComputedStyle(el).backgroundColor),
+    "an outline, not a filled bar",
+  ).toBe("rgba(0, 0, 0, 0)");
+
+  // Clicking it shows the HEAD text, read-only: there is no Rollback.
+  await staged.click();
+  await expect(page.getByTestId("git-hunk-old")).toContainText('from "./utils/format"');
+  await expect(page.getByTestId("git-hunk-rollback")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // Rollback at the caret does nothing on a staged hunk.
+  const textWhileStaged = await editorText(page);
+  await caretToStart(page);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ControlOrMeta+Alt+z");
+  await expect(page.getByTestId("status-notice")).toContainText("No change at the caret");
+  expect(await editorText(page)).toBe(textWhileStaged);
+  await expect(staged).toHaveCount(1);
+
+  // A new unsaved line above is an index marker; the staged one moves down.
+  await caretToStart(page);
+  await page.keyboard.type("// above\n");
+  await expect(unstaged).toHaveCount(1);
+  await expect(unstaged).toHaveAttribute("data-kind", "added");
+  await expect(staged).toHaveCount(1);
+  await expect(staged).toHaveAttribute("data-line", "2");
+
+  // Rollback at the caret never touches a staged hunk: it rolls back the
+  // new line only, and the staged marker stays.
+  await caretToStart(page);
+  await page.keyboard.press("ControlOrMeta+Alt+z");
+  await expect(unstaged).toHaveCount(0);
+  await expect(staged).toHaveCount(1);
+
+  // Unstaged again: back to an index marker, none staged.
+  await backend("git_unstage", { paths: ["src/App.tsx"] });
+  await expect(staged).toHaveCount(0);
+  await expect(unstaged).toHaveCount(1);
+  await expect(unstaged).toHaveAttribute("data-kind", "modified");
+
+  // Staged and committed: no markers at all.
+  await backend("git_stage", { paths: ["src/App.tsx"] });
+  await expect(staged).toHaveCount(1);
+  await backend("git_commit", { message: "Edit", amend: false, paths: ["src/App.tsx"] });
+  await expect(staged).toHaveCount(0);
+  await expect(unstaged).toHaveCount(0);
 });
 
 test("commit window: stage, diff, commit, errors and amend", async ({ page, project }) => {

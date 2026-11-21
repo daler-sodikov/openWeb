@@ -34,6 +34,27 @@ struct Inner {
     raw: RepoStatus,
     /// Index text per repository path, for the current status generation.
     bases: HashMap<String, Option<Arc<str>>>,
+    /// The staged diff per repository path (see [`Staged`]).
+    staged: HashMap<String, Arc<Staged>>,
+}
+
+/// The changes staged in the index (HEAD to index) of one file, in index
+/// lines. They depend only on HEAD and the index, so they are kept and the
+/// document (which changes with every key) is mapped onto them per call.
+///
+/// An entry is valid only while `index` is still the cached index text of
+/// the path (compared by identity): every status refresh drops the cached
+/// index texts, so a stage, unstage, commit, checkout or a change made
+/// outside Ferrule makes the next call compute it again, even if the text is
+/// the same (HEAD may have moved).
+struct Staged {
+    /// The index text these hunks were made from.
+    index: Arc<str>,
+    /// The HEAD text (its HEAD-side name); `None` if not in HEAD.
+    head: Option<Arc<str>>,
+    hunks: Vec<ferrule_git::Hunk>,
+    /// Number of lines of `index`.
+    index_lines: usize,
 }
 
 /// Every Git status gets the next number, across projects: the view keeps
@@ -349,6 +370,7 @@ impl GitState {
             inner.raw = raw;
             inner.status = status.clone();
             inner.bases.clear();
+            inner.staged.clear();
         }
         self.emit(status);
     }
@@ -373,6 +395,35 @@ impl GitState {
             .bases
             .insert(path.to_owned(), text.clone());
         Ok(text)
+    }
+
+    /// The staged diff of a repository path for the index text `base` (kept
+    /// until the index texts are dropped by the next status refresh).
+    fn staged_base(
+        &self,
+        repo: &Repo,
+        repo_path: &str,
+        base: &Arc<str>,
+    ) -> Result<Arc<Staged>, IpcError> {
+        if let Some(found) = lock(&self.inner)?.staged.get(repo_path)
+            && Arc::ptr_eq(&found.index, base)
+        {
+            return Ok(found.clone());
+        }
+        let head: Option<Arc<str>> = repo
+            .head_text(&self.head_path(repo_path))
+            .map_err(git_error)?
+            .map(|t| Arc::from(t.replace("\r\n", "\n")));
+        let staged = Arc::new(Staged {
+            index: base.clone(),
+            hunks: ferrule_git::staged_diff(head.as_deref(), base),
+            index_lines: ferrule_git::line_count(base),
+            head,
+        });
+        lock(&self.inner)?
+            .staged
+            .insert(repo_path.to_owned(), staged.clone());
+        Ok(staged)
     }
 
     /// The HEAD-side path of a project file (its old name if renamed).
@@ -451,32 +502,60 @@ impl Session {
         Ok((state.doc.text(), state.doc.version(), doc.rel_path.clone()))
     }
 
-    /// Lines of a document that differ from the index.
+    /// Lines of a document that differ from the index, and the lines that
+    /// are staged (HEAD to index), in document order.
     pub async fn git_line_changes(&self, doc_id: DocId) -> Result<ipc::GitLineChanges, IpcError> {
         let git = self.git()?;
         let (text, version, path) = self.doc_text(doc_id)?;
         blocking(move || {
             let (repo, prefix) = git.repo()?;
-            let Some(base) = git.base(&repo, &to_repo(&prefix, &path))? else {
+            let repo_path = to_repo(&prefix, &path);
+            let Some(base) = git.base(&repo, &repo_path)? else {
                 return Ok(ipc::GitLineChanges {
                     version,
                     tracked: false,
                     hunks: Vec::new(),
                 });
             };
-            let hunks = ferrule_git::diff_lines(&base, &text)
-                .into_iter()
+            let kind = |kind: HunkKind| match kind {
+                HunkKind::Added => ipc::GitHunkKind::Added,
+                HunkKind::Modified => ipc::GitHunkKind::Modified,
+                HunkKind::Deleted => ipc::GitHunkKind::Deleted,
+            };
+            // The one diff of the document that changes with every key; the
+            // staged hunks reuse it to find their lines.
+            let unstaged = ferrule_git::diff_lines(&base, &text);
+            let mut hunks: Vec<ipc::GitHunk> = unstaged
+                .iter()
                 .map(|h| ipc::GitHunk {
-                    kind: match h.kind {
-                        HunkKind::Added => ipc::GitHunkKind::Added,
-                        HunkKind::Modified => ipc::GitHunkKind::Modified,
-                        HunkKind::Deleted => ipc::GitHunkKind::Deleted,
-                    },
+                    kind: kind(h.kind),
                     line: to_u32(h.new_start),
                     lines: to_u32(h.new_lines),
-                    old_text: ferrule_git::hunk_base_text(&base, &h),
+                    old_text: ferrule_git::hunk_base_text(&base, h),
+                    staged: false,
                 })
                 .collect();
+            let staged = git.staged_base(&repo, &repo_path, &base)?;
+            if !staged.hunks.is_empty() {
+                let head = staged.head.as_deref().unwrap_or("");
+                hunks.extend(
+                    ferrule_git::locate_staged(
+                        &staged.hunks,
+                        &unstaged,
+                        staged.index_lines,
+                        ferrule_git::line_count(&text),
+                    )
+                    .into_iter()
+                    .map(|s| ipc::GitHunk {
+                        kind: kind(s.kind),
+                        line: to_u32(s.line),
+                        lines: to_u32(s.lines),
+                        old_text: ferrule_git::hunk_base_text(head, &s.head),
+                        staged: true,
+                    }),
+                );
+            }
+            hunks.sort_by_key(|h| (h.line, h.staged));
             Ok(ipc::GitLineChanges {
                 version,
                 tracked: true,

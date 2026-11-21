@@ -1,6 +1,7 @@
-// Git in the editor gutter: change markers against the index (hunks from
-// Rust) and the optional blame column. Clicking a marker asks the host to
-// show the hunk.
+// Git in the editor gutter: change markers against the index and, in a
+// second column beside them, the staged changes (HEAD to index); both are
+// hunks from Rust. Plus the optional blame column. Clicking a marker asks
+// the host to show the hunk.
 import { type Extension, type Range, RangeSet, StateEffect, StateField } from "@codemirror/state";
 import { type EditorView, GutterMarker, gutter } from "@codemirror/view";
 
@@ -15,6 +16,7 @@ class HunkMarker extends GutterMarker {
     return (
       other instanceof HunkMarker &&
       other.hunk.kind === this.hunk.kind &&
+      other.hunk.staged === this.hunk.staged &&
       other.hunk.line === this.hunk.line &&
       other.hunk.lines === this.hunk.lines
     );
@@ -22,16 +24,18 @@ class HunkMarker extends GutterMarker {
 
   override toDOM(): Node {
     const el = document.createElement("div");
-    el.className = `git-marker git-${this.hunk.kind}`;
-    el.dataset.testid = "git-marker";
+    const staged = this.hunk.staged;
+    el.className = `git-marker git-${this.hunk.kind}${staged ? " git-staged" : ""}`;
+    el.dataset.testid = staged ? "git-staged-marker" : "git-marker";
     el.dataset.kind = this.hunk.kind;
     el.dataset.line = String(this.hunk.line);
-    el.title =
+    const what =
       this.hunk.kind === "added"
         ? "Added lines"
         : this.hunk.kind === "deleted"
           ? "Deleted lines"
           : "Modified lines";
+    el.title = staged ? `${what} (staged)` : what;
     return el;
   }
 }
@@ -40,16 +44,20 @@ export const setGitHunks = StateEffect.define<readonly GitHunk[]>();
 
 interface HunkState {
   hunks: readonly GitHunk[];
+  /** Markers of the changes against the index. */
   markers: RangeSet<HunkMarker>;
+  /** Markers of the staged changes (HEAD to index), in their own column. */
+  staged: RangeSet<HunkMarker>;
 }
 
 function buildMarkers(
   view: { doc: EditorView["state"]["doc"] },
-  hunks: readonly GitHunk[],
+  allHunks: readonly GitHunk[],
+  staged: boolean,
 ): RangeSet<HunkMarker> {
   const ranges: Range<HunkMarker>[] = [];
   const lines = view.doc.lines;
-  for (const hunk of hunks) {
+  for (const hunk of allHunks.filter((h) => h.staged === staged)) {
     const count = Math.max(hunk.lines, 1);
     // A deletion is drawn on the line after it (or the last line).
     const first = Math.min(hunk.line + 1, lines);
@@ -62,46 +70,72 @@ function buildMarkers(
 }
 
 export const gitHunkField = StateField.define<HunkState>({
-  create: () => ({ hunks: [], markers: RangeSet.of<HunkMarker>([]) }),
+  create: () => ({
+    hunks: [],
+    markers: RangeSet.of<HunkMarker>([]),
+    staged: RangeSet.of<HunkMarker>([]),
+  }),
   update(state, tr) {
     for (const effect of tr.effects) {
       if (effect.is(setGitHunks)) {
-        return { hunks: effect.value, markers: buildMarkers(tr.state, effect.value) };
+        return {
+          hunks: effect.value,
+          markers: buildMarkers(tr.state, effect.value, false),
+          staged: buildMarkers(tr.state, effect.value, true),
+        };
       }
     }
     // Until fresh hunks arrive, markers move with the text.
-    return tr.docChanged ? { ...state, markers: state.markers.map(tr.changes) } : state;
+    return tr.docChanged
+      ? { ...state, markers: state.markers.map(tr.changes), staged: state.staged.map(tr.changes) }
+      : state;
   },
 });
 
-/** The hunk covering zero-based `line`, if any. */
+/**
+ * The change against the index covering zero-based `line`, if any. Staged
+ * hunks are not returned: they cannot be rolled back.
+ */
 export function hunkAt(hunks: readonly GitHunk[], line: number): GitHunk | null {
   return (
-    hunks.find((h) =>
-      h.kind === "deleted" ? h.line === line : line >= h.line && line < h.line + h.lines,
+    hunks.find(
+      (h) =>
+        !h.staged &&
+        (h.kind === "deleted" ? h.line === line : line >= h.line && line < h.line + h.lines),
     ) ?? null
   );
+}
+
+/** A gutter column of the markers `pick` selects; a click shows the hunk. */
+function hunkColumn(
+  name: string,
+  pick: (state: HunkState) => RangeSet<HunkMarker>,
+  onClick: (hunk: GitHunk, event: MouseEvent) => void,
+): Extension {
+  return gutter({
+    class: name,
+    markers: (view) => pick(view.state.field(gitHunkField)),
+    domEventHandlers: {
+      mousedown: (view, block, event) => {
+        let found: HunkMarker | null = null;
+        pick(view.state.field(gitHunkField)).between(block.from, block.from, (_f, _t, m) => {
+          found = m;
+        });
+        const marker = found as HunkMarker | null;
+        if (!marker || !(event instanceof MouseEvent)) return false;
+        onClick(marker.hunk, event);
+        return true;
+      },
+    },
+  });
 }
 
 export function gitGutter(onClick: (hunk: GitHunk, event: MouseEvent) => void): Extension {
   return [
     gitHunkField,
-    gutter({
-      class: "cm-git-gutter",
-      markers: (view) => view.state.field(gitHunkField).markers,
-      domEventHandlers: {
-        mousedown: (view, block, event) => {
-          let found: HunkMarker | null = null;
-          view.state.field(gitHunkField).markers.between(block.from, block.from, (_f, _t, m) => {
-            found = m;
-          });
-          const marker = found as HunkMarker | null;
-          if (!marker || !(event instanceof MouseEvent)) return false;
-          onClick(marker.hunk, event);
-          return true;
-        },
-      },
-    }),
+    hunkColumn("cm-git-gutter", (state) => state.markers, onClick),
+    // Beside the first column: what is staged (HEAD to index).
+    hunkColumn("cm-git-staged-gutter", (state) => state.staged, onClick),
   ];
 }
 

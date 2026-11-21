@@ -28,15 +28,14 @@ export class HunkPopup extends Popup {
       });
       return b;
     };
-    bar.append(
-      button("Rollback", "git-hunk-rollback", actions.rollback),
-      button("Show Diff", "git-hunk-diff", actions.showDiff),
-    );
+    // A staged change is shown, not rolled back: it is in the index.
+    if (!hunk.staged) bar.append(button("Rollback", "git-hunk-rollback", actions.rollback));
+    bar.append(button("Show Diff", "git-hunk-diff", actions.showDiff));
     const old = document.createElement("pre");
     old.className = "hunk-old";
     old.dataset.testid = "git-hunk-old";
-    old.textContent =
-      hunk.kind === "added" ? "Added lines (not in the index)." : hunk.oldText || " ";
+    const base = hunk.staged ? "HEAD" : "the index";
+    old.textContent = hunk.kind === "added" ? `Added lines (not in ${base}).` : hunk.oldText || " ";
     this.element.append(bar, old);
   }
 

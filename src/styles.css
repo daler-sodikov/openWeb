@@ -1272,7 +1272,8 @@ input:-webkit-autofill {
 .git-conflicted .commit-letter {
   color: var(--fr-git-conflicted);
 }
-.cm-git-gutter {
+.cm-git-gutter,
+.cm-git-staged-gutter {
   width: 6px;
 }
 .git-marker {
@@ -1291,6 +1292,23 @@ input:-webkit-autofill {
   height: 0;
   border-top: 4px solid var(--fr-git-deleted);
   border-right: 4px solid transparent;
+}
+/* Staged changes (second column): the same colors as the changes against the
+   index, drawn as an outline, so they differ by shape and not only by place. */
+.git-marker.git-staged.git-added,
+.git-marker.git-staged.git-modified {
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid;
+}
+.git-marker.git-staged.git-added {
+  border-color: var(--fr-git-added);
+}
+.git-marker.git-staged.git-modified {
+  border-color: var(--fr-git-modified);
+}
+.git-marker.git-staged.git-deleted {
+  border-top-style: dotted;
 }
 .git-blame {
   padding: 0 8px 0 4px;

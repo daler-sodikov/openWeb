@@ -16,8 +16,9 @@ mod status;
 pub use blame::{BlameLine, parse_blame};
 pub use branches::{BRANCH_FORMAT, Branch, parse_branches};
 pub use diff::{
-    DiffRow, Hunk, HunkKind, LineKind, Ranges, SplitRow, diff_lines, hunk_base_text, rollback_hunk,
-    split_rows, unified_rows, word_ranges,
+    DiffRow, Hunk, HunkKind, LineKind, Ranges, SplitRow, StagedHunk, diff_lines, hunk_base_text,
+    line_count, locate_staged, rollback_hunk, split_rows, staged_diff, staged_hunks, unified_rows,
+    word_ranges,
 };
 pub use error::{FailureKind, GitError};
 pub use log::{Commit, LOG_FORMAT, parse_log};
