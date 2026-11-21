@@ -13,3 +13,4 @@ crates/*/tests/golden/
 crates/*/tests/imports-golden/
 .openidea/
 third_party/
+crates/*/tests/data/
