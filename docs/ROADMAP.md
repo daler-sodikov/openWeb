@@ -704,6 +704,182 @@ Alt+4.
 
 Follow-ups, not M5: browser (Chrome) debugging, DAP for other languages.
 
+**Design:** [ARCHITECTURE.md, 4.10.1 to 4.10.8](ARCHITECTURE.md#410-run-configurations-tests-and-debugging-m5)
+(written for M5b on 2026-11-20, from the m5a code; the maintainer said
+"Start M5b"). Work continues on the `m5a` branch until CI on `main` is
+green; slice PRs target `m5a`. Each slice is one task, one branch, one PR,
+and passes every check in `CLAUDE.md` with zero warnings before it is
+merged. A slice does not start before the ones it needs are merged.
+
+**Decisions taken in the plan** (review them before M5b-1 starts):
+
+- CDP over `tokio-tungstenite` (MIT, no TLS), picked over a hand-written
+  WebSocket; a minimal HTTP request for `/json/list` instead of an HTTP
+  client.
+- Source maps decoded in `run-debug` with no dependency; fallback is
+  `oxc_sourcemap` if the decoder is not small.
+- Breakpoints and watches live in Ferrule's data folder
+  (`projects/<hash>.json`), not in the project, so they are not committed.
+- Log points print through the debuggee's `console.log` (so they appear in
+  the Run tab); the Debug console shows evaluate results and
+  `console.*` from the inspector.
+- Only the process Ferrule starts is attached; child-process and worker
+  auto-attach is a follow-up.
+- `dap-client` stays the empty M0 placeholder.
+
+**Open questions, answered inside the slice that needs them** (not guessed
+here): which Vitest/Jest/Playwright options keep a test in the debugged
+process for the installed versions (M5b-10; Jim reports Vitest 5 has
+`--inspectBrk` and `--no-file-parallelism` with `forks` as the default
+pool, and Jest `--runInBand`, on Node 24.19, but the evidence is not in
+this plan yet, so this stays open until it is); where a log point's
+output shows (M5b-6); whether `setBlackboxPatterns` for `^node:` keeps
+stepping out of Node's modules (M5b-2); whether the pick-then-release
+port race shows in practice (M5b-1); the Windows path-case rules of
+`file://` URLs against real Node on a Windows runner (M5b-4, M5b-11).
+
+### M5b slices, in order
+
+Dependencies are written as "needs". Slices 1 to 4 are independent of the UI
+and of each other except where stated, so they can run in parallel; the UI
+slices 8 and 9 only need the fake backend from slice 5.
+
+1. **M5b-1 `cdp-client` transport.** _Needs:_ nothing.
+   _Files:_ `crates/cdp-client/` (new: `Cargo.toml`, `src/lib.rs`,
+   `src/transport.rs`, `src/discover.rs`, `src/testing.rs` fake server),
+   `Cargo.toml` and `Cargo.lock` (workspace member and the dependency),
+   `deny.toml` only if `cargo deny` needs it (stop and report instead),
+   `THIRD_PARTY_LICENSES.md`, `docs/ARCHITECTURE.md` (the crate list),
+   `CHANGELOG.md`.
+   _Done when:_ `discover`, `connect`, `call`, `CdpEvents`, `close` work
+   against the fake server; tests cover id correlation, protocol errors,
+   timeout, cancellation (connecting and pending), peer close, event
+   flood, non-loopback URL refused; `cargo deny check` passes on all four
+   targets and the new crates are listed; no `unwrap` outside tests.
+2. **M5b-2 CDP protocol subset and real Node smoke test.** _Needs:_ 1.
+   _Files:_ `crates/cdp-client/src/protocol/` (typed subset), tests under
+   `crates/cdp-client/tests/`, `CHANGELOG.md`.
+   _Done when:_ typed calls and events for the subset in 4.10.1 round-trip
+   against recorded JSON (taken from real Node 20+ output and saved as test
+   data); a real-Node test (skipped without `node`) starts
+   `node --inspect-brk=127.0.0.1:<port>` on a two-line script, discovers,
+   connects, `Debugger.enable`, `Runtime.runIfWaitingForDebugger`, receives
+   `Debugger.paused`, resumes and sees the connection close; the process
+   is gone afterwards.
+3. **M5b-3 Session model, breakpoint store, log points, fake backend.**
+   _Needs:_ nothing.
+   _Files:_ `crates/run-debug/src/debug.rs` (model), `breakpoints.rs`
+   (store, `shift_for_edit`, file format), `logpoint.rs`, `fake_debug.rs`
+   (behind `testing`), `src/lib.rs`, `CHANGELOG.md`.
+   _Done when:_ the model in 4.10.2 exists with unit tests for toggling,
+   sorting, round trip of the stored form, every `shift_for_edit` case
+   (insert above, delete above, delete the line, multi-line edit across
+   it), `logpoint_condition` with hostile input; the fake backend plays a
+   scripted session (start, pause with frames, step, end); `run-debug`
+   still has no process or tokio dependency.
+4. **M5b-4 Source maps.** _Needs:_ nothing.
+   _Files:_ `crates/run-debug/src/sourcemap.rs`, `urls.rs` (`file://` ↔
+   path, per-OS case rules), `fixtures/debug-app/` (a small TypeScript
+   file with the `tsc`-made `.js`, `.js.map` and a README saying how),
+   `CHANGELOG.md`.
+   _Done when:_ the decoder maps both directions on the fixture and on the
+   specification's examples (blank line moves to the next mapped line,
+   `sourceRoot`, inline data URL), malformed maps return an error and
+   never panic (a short fuzz-style test), URL conversion is tested for
+   POSIX and Windows paths on every OS, and the decoder is under about 250
+   lines or the slice stops and proposes `oxc_sourcemap`.
+5. **M5b-5 Debug session lifecycle in core, IPC and keymap actions.**
+   _Needs:_ 1, 2, 3.
+   _Files:_ `crates/core/src/debug.rs` (driver, `DebugBackend` trait, CDP
+   backend without breakpoints yet), `crates/core/src/runs.rs` (a debug
+   run starts through the M5a path), `crates/core/src/session.rs`
+   (`close_project` ends sessions), `crates/ipc/src/lib.rs` (types,
+   events), `src-tauri/src/` (commands), `src-tauri/src/bin/headless.rs`
+   (`--fake-debug`), `crates/settings/src/lib.rs` (actions
+   `Debug`, `Resume`, `StepOver`, `StepInto`, `StepOut`, `Pause`,
+   `ToggleBreakpoint`, `ToggleDebugWindow` and their keys),
+   `src/ipc/bindings.ts` (generated), `CHANGELOG.md`.
+   _Done when:_ `start_debug` (trust included), `debug_resume`,
+   `debug_step_*`, `debug_pause`, `stop_debug` work against the fake
+   backend and, in a core test, against real Node (a script paused at the
+   first line, stepped, resumed, stopped); `debug-event` carries `Started`,
+   `Paused`, `Resumed`, `Ended` with `seq`; inspector flags in a
+   configuration are refused; Stop and `close_project` leave no process
+   and no task, also while paused; the keymap test (one binding per
+   action) passes.
+6. **M5b-6 Breakpoints in core: set, verify, persist, source maps.**
+   _Needs:_ 3, 4, 5.
+   _Files:_ `crates/core/src/debug.rs` and a new `crates/core/src/breakpoints.rs`
+   (store IO in the data folder, edit shifting hook, resolution via source
+   maps, late `scriptParsed`), `crates/core/src/edits.rs` (the hook),
+   `crates/ipc/src/lib.rs`, `src-tauri/src/`, `src/ipc/bindings.ts`
+   (generated), `CHANGELOG.md`.
+   _Done when:_ `toggle_breakpoint`, `update_breakpoint`,
+   `remove_breakpoint`, `breakpoints` and `BreakpointsChanged` work with
+   and without a session; breakpoints persist across a project reopen and
+   shift with edits; conditions and log points reach the debugger; a
+   `.ts` breakpoint hits through the fixture's source map and is
+   `Unverified` until its script loads; real-Node core test: a breakpoint
+   hit with a condition and a log point printing into the run output.
+7. **M5b-7 Frames, variables, evaluate, watches in core.**
+   _Needs:_ 5.
+   _Files:_ `crates/core/src/debug.rs` (scopes, lazy `variables`,
+   `evaluate`, watches, frame mapping through source maps when 6 has
+   landed, else generated positions), `crates/ipc/src/lib.rs`,
+   `src-tauri/src/`, `src/ipc/bindings.ts` (generated), `CHANGELOG.md`.
+   _Done when:_ `debug_select_frame`, `debug_variables` (100 at a time,
+   cycles safe), `debug_evaluate` (errors from the debuggee come back as
+   text, not as IPC errors), `watches` commands work; real-Node core
+   test: variables of objects, arrays and closures expand lazily,
+   evaluate in a chosen frame, a throwing watch shows its error.
+8. **M5b-8 UI: breakpoint gutter, execution line, debug keys.**
+   _Needs:_ 5 (fake backend); works fully with 6.
+   _Files:_ `src/editor/` (breakpoint gutter, execution-line
+   decoration), `src/run/` or a new `src/debug/` (debug actions in
+   `RUN_ACTIONS`-style `DEBUG_ACTIONS`), `src/app/workbench.ts`,
+   `src/styles/` (CSS variables only), `e2e/ui/debug.spec.ts` (new),
+   `fixtures/` only if a fixture is missing, `CHANGELOG.md`.
+   _Done when:_ with `--fake-debug`, a gutter click and Ctrl+F8 toggle a
+   breakpoint (verified, unverified, disabled, conditional, log point
+   shown), the popup edits condition and log message, Debug (Shift+F9)
+   starts the session, a pause opens the file and shows the execution
+   line, F8/F7/Shift+F8/F9 and Stop work, also while the Run tab has the
+   focus; the gutter never holds line numbers of its own (verified by
+   an edit test); the Playwright spec passes on Linux.
+9. **M5b-9 UI: Debug tool window.** _Needs:_ 7, 8.
+   _Files:_ `src/debug/` (window, call stack, variables tree, watches,
+   console), `src/app/workbench.ts`, `src/styles/`, `e2e/ui/debug.spec.ts`,
+   `CHANGELOG.md`.
+   _Done when:_ with `--fake-debug`, Alt+5 (Cmd+5) toggles the window;
+   the call stack is virtualized and a click selects a frame and jumps;
+   variables expand lazily; a watch can be added and updates on the next
+   stop; the console evaluates and shows results; library frames are
+   dimmed; inline values are either done or listed here as not done.
+10. **M5b-10 Debug a single test from the gutter.** _Needs:_ 5, 8.
+    _Files:_ `crates/run-debug/src/command.rs` (debug flags per framework),
+    `crates/core/src/runs.rs`, `crates/core/src/debug.rs`, `src/` (a debug
+    icon on a test block), `e2e/ui/debug.spec.ts`, `CHANGELOG.md`.
+    _Done when:_ for Vitest and Jest the options that keep the test in
+    the debugged process are verified against the installed tool and the
+    evidence (command and result) is written into 4.10.7 (Jest: from its
+    docs where it is not installed, said so); Playwright is checked the
+    same way afterwards and is either supported or listed as not
+    supported; a test block can be debugged from the gutter and a
+    breakpoint in the test file and in the code under test hits (real
+    Vitest where available); unsupported frameworks or
+    versions give a clear message and no half-started session.
+11. **M5b-11 Close-out.** _Needs:_ 1 to 10.
+    _Files:_ `e2e/ui/debug.spec.ts` (real-Node spec under
+    `FERRULE_E2E_REAL_RUNS=1`), `perf/` (idle CPU and memory with a paused
+    session, measured), `docs/ROADMAP.md`, `docs/ARCHITECTURE.md` (what
+    M5b verified and decisions to review, like M5a's), `CHANGELOG.md`,
+    `CLAUDE.md` (status line), `README.md` if the feature list changes.
+    _Done when:_ all seven M5b items above are checked with evidence;
+    nothing is left running after Stop, window close and `close_project`
+    (checked by listing processes); CI results on macOS and Windows are
+    recorded (or listed as open, never claimed); `du -sh target` is
+    reported.
+
 ## M6: UI design (not started)
 
 Spec: [M6-DESIGN.md](M6-DESIGN.md). Start only when the maintainer says
